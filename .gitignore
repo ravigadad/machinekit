@@ -1,0 +1,14 @@
+# macOS
+.DS_Store
+
+# Editor swap/backup files
+*.swp
+*.swo
+*~
+
+# IDEs
+.vscode/
+.idea/
+
+# Claude Code local settings (not for sharing)
+.claude/settings.local.json

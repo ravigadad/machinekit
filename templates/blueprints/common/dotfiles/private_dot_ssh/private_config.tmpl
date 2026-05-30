@@ -1,0 +1,9 @@
+# ~/.ssh/config — managed by chezmoi.
+# Defaults applied to every host. Per-host blocks can follow.
+
+Host *
+    AddKeysToAgent yes
+    IdentitiesOnly yes
+{{- if eq .chezmoi.os "darwin" }}
+    UseKeychain yes
+{{- end }}

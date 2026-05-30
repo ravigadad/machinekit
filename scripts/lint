@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# Run shellcheck across machinekit's bash files.
+
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$REPO_ROOT"
+
+if ! command -v shellcheck >/dev/null 2>&1; then
+  echo "shellcheck is not installed. Install it with: brew install shellcheck" >&2
+  exit 1
+fi
+
+# Production code and shared test infra are linted strictly (default severity).
+shellcheck \
+  bin/machinekit \
+  bin/machinekit-apply \
+  bin/machinekit-generate \
+  lib/machinekit.sh \
+  lib/modules.sh \
+  lib/machinekit/*.sh \
+  lib/modules/*.sh \
+  scripts/lint \
+  scripts/test \
+  tests/test_helper.bash
+
+# bats runs each @test in its own subshell, so SC2030/SC2031 ("modification in
+# subshell might be lost") are inherent false positives in test files — the
+# scoping is the point. SC2119 likewise fires on fixtures that intentionally
+# call a logging helper with no args.
+shellcheck --exclude=SC2030,SC2031,SC2119 \
+  tests/lib/machinekit/*.bats \
+  tests/lib/modules/*.bats

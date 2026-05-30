@@ -1,0 +1,23 @@
+name: Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  bats:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      # We're going to use homebrew to install all dependencies,
+      # since that's what machinekit itself uses; reduce the number
+      # of things that can drift.
+      - name: Set up Homebrew
+        uses: Homebrew/actions/setup-homebrew@main
+      - name: Install dependency formulas
+        run: brew install bats-core dasel jq
+      - name: Run tests
+        run: scripts/test

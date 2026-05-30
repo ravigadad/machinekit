@@ -1,0 +1,7 @@
+# ~/.zshrc — managed by machinekit.
+# Standard shell environment is in ~/.config/machinekit/env.zsh (also managed).
+# Personal customizations go in ~/.zshrc.local — not managed, never overwritten.
+
+source "${HOME}/.config/machinekit/env.zsh"
+
+[ -f "${HOME}/.zshrc.local" ] && source "${HOME}/.zshrc.local"

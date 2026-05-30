@@ -1,0 +1,189 @@
+# machinekit
+
+A dotfiles and provisioning framework that gets a Mac into a consistent dev state with one command. Pairs with a per-user **blueprints** repo that supplies your actual config.
+
+machinekit takes a fresh machine from "nothing installed" to "working dev environment with sensible defaults." It's idempotent — re-running it is safe and picks up any drift or new packages you've added to your blueprints.
+
+For how it works and the reasoning behind it, see [docs/architecture.md](./docs/architecture.md).
+For what's planned and what's deferred, see [docs/roadmap.md](./docs/roadmap.md).
+
+## What it does
+
+- Installs Homebrew, then jq, dasel, chezmoi, git, age (machinekit's prerequisites) plus mise (installed by its module).
+- Manages an age private key at `~/.config/age/key.txt` for encrypted blueprint files. Never generates one silently — generation is consent-gated.
+- Builds a merged chezmoi source dir from module-shipped templates plus your blueprint's `common/dotfiles/`, then applies it to `$HOME`.
+- Runs `common/Brewfile` from your blueprints (if present), then `mise install`, then any `common/hooks/post-apply/*.sh` scripts you supply.
+
+What you get on disk after a successful run:
+
+- The tools above, available in `PATH`.
+- `~/.zshrc` — sources `~/.config/machinekit/env.zsh` and (if present) `~/.zshrc.local` (from the zsh module's template).
+- `~/.config/machinekit/env.zsh` — `brew shellenv`, `~/.local/bin` PATH, history, completion. Ends with a source loop over `~/.config/machinekit/env.zsh.d/*.zsh` so modules can drop their own zsh fragments (mise activation ships there).
+- `~/.gitconfig` — your name/email, `init.defaultBranch = main` (rendered from the git module's template).
+- `~/.ssh/config` (mode 600) — sensible defaults; on macOS, `UseKeychain yes`.
+- `~/.config/mise/config.toml` — empty by default; you add the runtimes you actually use.
+
+Nothing else. Add whatever you want via your blueprints' `common/Brewfile`, your own `common/dotfiles/`, or post-apply hooks.
+
+## CLI structure
+
+machinekit ships a single user-facing command, `machinekit`, that dispatches to subcommand-specific binaries:
+
+| Command | What it does |
+|---|---|
+| `machinekit apply [flags]`     | Apply a blueprint to this machine (the workhorse) |
+| `machinekit generate <path>`   | Scaffold a fresh blueprint repo from the template |
+
+Run any subcommand with `--help` for its full flag list.
+
+You can invoke `machinekit` directly from a clone (`bin/machinekit …`) or add `bin/` to your `PATH` so the command is available globally:
+
+```bash
+# Add to ~/.zprofile (or ~/.zshrc) — adjust the path to wherever you cloned machinekit
+echo 'export PATH="$HOME/code/machinekit/bin:$PATH"' >> ~/.zprofile
+source ~/.zprofile
+```
+
+## Quick start
+
+```bash
+# 1. Clone machinekit
+git clone https://github.com/ravigadad/machinekit.git ~/code/machinekit
+cd ~/code/machinekit
+
+# 2. Scaffold a fresh blueprints repo at a path you choose
+bin/machinekit generate ~/code/my-blueprints
+
+# 3. Customize the template at ~/code/my-blueprints, then commit it.
+#    (machinekit apply reads from committed content; uncommitted edits are ignored.)
+( cd ~/code/my-blueprints && git add -A && git commit -m 'initial' )
+
+# 4. Preview what would change — no modifications made
+bin/machinekit apply --dry-run --blueprints-source file://$HOME/code/my-blueprints
+
+# 5. Apply for real
+bin/machinekit apply --blueprints-source file://$HOME/code/my-blueprints
+```
+
+To use the same blueprints on another machine, push your blueprints repo to GitHub, then on the new machine clone machinekit and run `bin/machinekit apply --blueprints-source https://github.com/<owner>/my-blueprints`.
+
+On a fresh machine, the first apply will prompt you to:
+
+- Either point at an existing age private key (`--existing-age-key-file <path>` or env), or explicitly opt into generating a new one (`--generate-age-key`).
+- Provide your machine type, git user.name, and git user.email — via flags, env vars, or interactive prompts.
+
+If your blueprints URL needs authentication (e.g. private HTTPS), configure git's credentials before running — machinekit uses git's existing auth (SSH key, `.netrc`, credential helper) rather than managing credentials itself.
+
+Subsequent applies skip what's already done (Homebrew is installed, the age key exists).
+
+## Invocation modes
+
+`machinekit apply` runs in one of two modes.
+
+**Interactive** — the default when stdin is a TTY. Inputs are resolved CLI flag → env var → interactive prompt for whatever is missing. Force interactive with `--interactive` if stdin isn't a TTY but `/dev/tty` is readable.
+
+```bash
+bin/machinekit apply                                                  # prompts for everything
+bin/machinekit apply --blueprints-source https://github.com/me/blueprints  # prompts only for what's missing
+```
+
+The blueprint source can be a git repo (cloned) or a local directory (copied as-is — useful while iterating on a working tree before committing). One flag covers both:
+
+- `--blueprints-source <url-or-path>` (`MACHINEKIT_BLUEPRINTS_SOURCE`): the protocol is sniffed automatically. A URL (`https://`, `http://`, `ssh://`, `git@host:owner/repo`, `file://`) or a local path containing `.git/` is cloned via `git clone`; a plain local path is copied as-is, skipping git entirely.
+- `--blueprints-source-protocol <git|cp>` (`MACHINEKIT_BLUEPRINTS_SOURCE_PROTOCOL`): override the sniffed protocol — e.g. force `cp` to copy a local git repo's working tree (uncommitted edits included) instead of cloning its committed state.
+
+**Non-interactive** — auto-detected when stdin isn't a TTY (cron, CI, curl-piped, redirected stdin), or forced with `--non-interactive` / `MACHINEKIT_MODE_INTERACTIVE=0`. Inputs are resolved CLI flag → env var → hard-fail.
+
+Prerequisites to set up before a non-interactive run:
+
+- **sudo without prompting**, via passwordless sudo (entry in `/etc/sudoers.d/`) or a pre-warmed credential cache (`sudo -v` within the previous ~5 minutes). machinekit's preflight checks this and hard-fails fast if neither is available.
+- **Git authentication** for the blueprints clone (SSH key, `.netrc`, credential helper). machinekit doesn't manage credentials — git's existing auth is used as-is. Not needed when the source is a plain local path copied via `cp` (no git involvement).
+
+Inputs can come from CLI flags, env vars, or any mix:
+
+```bash
+# Easiest single recipe: pre-warm sudo, then run with all env vars
+sudo -v && \
+MACHINEKIT_MODE_INTERACTIVE=0 \
+MACHINEKIT_BLUEPRINTS_SOURCE=https://github.com/me/blueprints \
+MACHINEKIT_MACHINE_TYPE=dev \
+MACHINEKIT_GIT_USER_NAME="Jane Doe" \
+MACHINEKIT_GIT_USER_EMAIL=jane@example.com \
+MACHINEKIT_EXISTING_AGE_KEY_FILE=/path/to/age.key \
+  bin/machinekit apply
+
+# All CLI flags
+sudo -v && bin/machinekit apply --non-interactive \
+  --blueprints-source https://github.com/me/blueprints \
+  --machine-type dev \
+  --git-user-name "Jane Doe" \
+  --git-user-email jane@example.com \
+  --existing-age-key-file /path/to/age.key
+
+# Mixed — env vars + CLI flags
+sudo -v && \
+MACHINEKIT_EXISTING_AGE_KEY_FILE=/path/to/age.key \
+  bin/machinekit apply --non-interactive \
+    --blueprints-source https://github.com/me/blueprints \
+    --machine-type dev \
+    --git-user-name "Jane Doe" \
+    --git-user-email jane@example.com
+```
+
+Run `bin/machinekit apply --help` for the full flag list.
+
+## Repo layout
+
+```
+machinekit/
+├── bin/
+│   ├── machinekit                # user-facing dispatcher
+│   ├── machinekit-apply          # apply a blueprint
+│   └── machinekit-generate       # scaffold a fresh blueprint
+├── lib/                          # execution code (bin/ files are thin orchestrators)
+│   ├── machinekit.sh             # aggregator for lib/machinekit/*
+│   ├── modules.sh                # aggregator for lib/modules/*
+│   ├── machinekit/               # core: helpers, blueprints, brew bootstrap, preflight, hooks, prerequisites
+│   └── modules/                  # user-facing modules: age, brewfile, chezmoi, git, mise, zsh
+│       ├── git/templates/        # module-shipped defaults (dot_gitconfig.tmpl)
+│       ├── mise/templates/       # module-shipped defaults (dot_config/mise/…, env.zsh.d/mise.zsh)
+│       └── zsh/templates/        # framework zsh dotfiles (dot_zshrc, env.zsh w/ env.zsh.d loop)
+├── scripts/                      # dev/maintainer tools (e.g. lint)
+└── templates/blueprints/         # starter content copied into your blueprints repo
+    ├── common/
+    │   ├── machinekit.toml       # floor of the config cascade
+    │   ├── Brewfile
+    │   ├── dotfiles/             # only blueprint-owned files; module defaults
+    │   │   ├── .chezmoiignore    # ship with the modules, not here
+    │   │   └── private_dot_ssh/private_config.tmpl
+    │   └── hooks/post-apply/
+    └── machine_types/
+        └── README.md
+```
+
+Your blueprints repo lives separately (anywhere you like), scaffolded by `machinekit generate` and evolved independently.
+
+## Platform support
+
+macOS (Apple Silicon and Intel). Linux support is architecturally designed for but not yet implemented — see [docs/architecture.md#cross-platform-posture](./docs/architecture.md#cross-platform-posture).
+
+## Acknowledgements
+
+machinekit composes existing tools rather than reinventing them:
+
+- [chezmoi](https://chezmoi.io/) — source manager and template engine for dotfiles.
+- [mise](https://mise.jdx.dev/) — language and runtime version manager.
+- [Homebrew](https://brew.sh/) — macOS package manager.
+- [age](https://age-encryption.org/) — encryption for sensitive blueprint files.
+
+## Contributing
+
+Bug reports and feature ideas are welcome via [GitHub issues](https://github.com/ravigadad/machinekit/issues). For structural changes, read [docs/architecture.md](./docs/architecture.md) first.
+
+## Security
+
+Report vulnerabilities via GitHub's [private vulnerability reporting](https://github.com/ravigadad/machinekit/security/advisories/new) rather than opening a public issue.
+
+## License
+
+[MIT](./LICENSE).

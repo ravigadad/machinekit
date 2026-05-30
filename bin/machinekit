@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# machinekit — top-level dispatcher. Routes <subcommand> to bin/machinekit-<subcommand>.
+
+set -euo pipefail
+
+MACHINEKIT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+usage() {
+  cat <<'EOF'
+machinekit — keep your personal computing experience consistent across machines.
+
+Usage: machinekit <subcommand> [args...]
+
+Subcommands:
+  apply       Apply a blueprint to this machine.
+  generate    Scaffold a new blueprint repo from the template.
+
+Run `machinekit <subcommand> --help` for subcommand-specific options.
+EOF
+}
+
+subcommand="${1:-}"
+case "$subcommand" in
+  apply|generate)
+    shift
+    exec "$MACHINEKIT_DIR/bin/machinekit-$subcommand" "$@"
+    ;;
+  -h|--help|help)
+    usage; exit 0
+    ;;
+  -v|--version|version)
+    cat "$MACHINEKIT_DIR/VERSION"
+    exit 0
+    ;;
+  "")
+    usage >&2; exit 1
+    ;;
+  *)
+    printf 'machinekit: unknown subcommand: %s\n\n' "$subcommand" >&2
+    usage >&2
+    exit 1
+    ;;
+esac

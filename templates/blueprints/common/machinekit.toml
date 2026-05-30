@@ -1,0 +1,11 @@
+# Configuration shared across all machine types.
+#
+# Anything declared here applies wherever a machine type doesn't explicitly
+# override it. Per-machine-type overrides go in
+# machine_types/<type>/machinekit.toml.
+
+# Example: declare a machinekit module and its config.
+#
+# [modules.runtimes]
+# ruby = "latest"
+# node = "lts"

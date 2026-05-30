@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Run the bats test suite.
+
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$REPO_ROOT"
+
+if ! command -v bats >/dev/null 2>&1; then
+  echo "bats is not installed. Install it with: brew install bats-core" >&2
+  exit 1
+fi
+
+exec bats --recursive tests/

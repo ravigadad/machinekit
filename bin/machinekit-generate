@@ -1,0 +1,96 @@
+#!/usr/bin/env bash
+# machinekit generate — scaffold a fresh blueprints directory from the template.
+#
+# Copies the template into <path>. You customize and test locally before
+# optionally publishing to a git host — machinekit doesn't touch git history.
+
+set -euo pipefail
+
+MACHINEKIT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=../lib/machinekit/logging.sh
+source "$MACHINEKIT_DIR/lib/machinekit/logging.sh"
+# shellcheck source=../lib/machinekit/lifecycle.sh
+source "$MACHINEKIT_DIR/lib/machinekit/lifecycle.sh"
+
+usage() {
+  cat <<'EOF'
+Usage: machinekit generate <path>
+
+Scaffold a new blueprints directory from the machinekit template. Copies the
+template to <path>. <path> can be absolute or relative to your current
+directory. Fails if <path> already exists.
+
+Options:
+  -h, --help        Show this message and exit.
+  -v, --verbose     Verbose debug output. Env: MACHINEKIT_VERBOSE=1
+EOF
+}
+
+OPT_PATH=""
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -v|--verbose)  export MACHINEKIT_VERBOSE=1; shift ;;
+    -h|--help)     usage; exit 0 ;;
+    --version)     cat "$MACHINEKIT_DIR/VERSION"; exit 0 ;;
+    --)            shift; break ;;
+    -*)            lifecycle::fail "Unknown flag: $1 (try --help)" ;;
+    *)             [ -z "$OPT_PATH" ] || lifecycle::fail "Unexpected positional argument: $1"
+                   OPT_PATH="$1"; shift ;;
+  esac
+done
+
+[ -n "$OPT_PATH" ] || { usage >&2; printf '\n' >&2; lifecycle::fail "Missing required <path> argument."; }
+
+# Resolve to absolute path.
+if [[ "$OPT_PATH" = /* ]]; then
+  TARGET="$OPT_PATH"
+else
+  TARGET="$(pwd)/$OPT_PATH"
+fi
+
+[ ! -e "$TARGET" ] || lifecycle::fail "Target already exists: $TARGET"
+
+NAME="$(basename "$TARGET")"
+case "$NAME" in
+  *[[:space:]]*) lifecycle::fail "Invalid directory name '$NAME' — no whitespace." ;;
+esac
+
+# ---------------------------------------------------------------------------
+# Copy template
+# ---------------------------------------------------------------------------
+
+logging::step "Copying template to $TARGET"
+
+mkdir -p "$TARGET"
+TARGET="$(cd "$TARGET" && pwd)"
+# tar pipeline preserves dotfiles cleanly (cp -a behaviour with globs is messy).
+( cd "$MACHINEKIT_DIR/templates/blueprints" && tar -cf - . ) | ( cd "$TARGET" && tar -xf - )
+
+logging::success "Template copied to $TARGET"
+
+# ---------------------------------------------------------------------------
+# Done — instruct, don't act.
+# ---------------------------------------------------------------------------
+
+printf '\n'
+logging::info "Next steps:"
+logging::info ""
+logging::info "1. Customize the template in $TARGET"
+logging::info ""
+logging::info "2. Test on this machine (no commit needed — plain directory path works):"
+logging::info ""
+logging::info "     machinekit apply --dry-run --blueprints-source $TARGET"
+logging::info "     machinekit apply --blueprints-source $TARGET"
+logging::info ""
+logging::info "3. When ready to publish, initialize a git repo and push:"
+logging::info ""
+logging::info "     cd $TARGET"
+logging::info "     git init -b main && git add -A && git commit -m 'initial'"
+logging::info "     git remote add origin <your-blueprints-url>"
+logging::info "     git push -u origin main"
+logging::info ""
+logging::info "   Then, on each machine you want to configure:"
+logging::info ""
+logging::info "     git clone https://github.com/ravigadad/machinekit && cd machinekit"
+logging::info "     bin/machinekit apply --blueprints-source <your-blueprints-url>"

@@ -1,0 +1,23 @@
+name: Lint
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  shellcheck:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      # We're going to use homebrew to install all dependencies,
+      # since that's what machinekit itself uses; reduce the number
+      # of things that can drift.
+      - name: Set up Homebrew
+        uses: Homebrew/actions/setup-homebrew@main
+      - name: Install shellcheck
+        run: brew install shellcheck
+      - name: Run shellcheck
+        run: scripts/lint

@@ -1,0 +1,128 @@
+#!/usr/bin/env bash
+# machinekit apply — apply a blueprint to this machine.
+
+set -euo pipefail
+
+MACHINEKIT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=../lib/machinekit.sh
+source "$MACHINEKIT_DIR/lib/machinekit.sh"
+# shellcheck source=../lib/modules.sh
+source "$MACHINEKIT_DIR/lib/modules.sh"
+
+# ---------------------------------------------------------------------------
+# Usage
+# ---------------------------------------------------------------------------
+
+usage() {
+  cat <<'EOF'
+Usage: machinekit apply [flags]
+
+Apply a blueprint to this machine. Installs prerequisites, applies dotfiles
+via chezmoi, and runs any post-apply hooks defined in the blueprint.
+
+Blueprint source (required):
+      --blueprints-source <url-or-path>    URL or local path for the blueprints.
+                                           URL forms: https://, http://, ssh://,
+                                             git@host:owner/repo, file:///abs/path
+                                           Path forms: /abs/path, ./rel/path
+                                           Protocol is sniffed automatically:
+                                             URL           → git clone
+                                             path + .git/  → git clone
+                                             plain path    → cp
+                                           Env: MACHINEKIT_BLUEPRINTS_SOURCE
+      --blueprints-source-protocol <proto> Override the sniffed protocol.
+                                           Valid: git, cp
+                                           Env: MACHINEKIT_BLUEPRINTS_SOURCE_PROTOCOL
+
+Inputs:
+      --machine-type <type>                Machine type label (e.g. dev, server).
+                                           Env: MACHINEKIT_MACHINE_TYPE
+      --git-user-name <name>               git user.name written into ~/.gitconfig.
+                                           Env: MACHINEKIT_GIT_USER_NAME
+      --git-user-email <email>             git user.email written into ~/.gitconfig.
+                                           Env: MACHINEKIT_GIT_USER_EMAIL
+      --existing-age-key-file <path>        Path to an existing age key file to
+                                           install. The file is copied to the
+                                           canonical key location.
+                                           Env: MACHINEKIT_EXISTING_AGE_KEY_FILE
+      --generate-age-key                   Generate a new age key if none found.
+                                           Env: MACHINEKIT_AGE_KEY_GENERATE=1
+      --overwrite-age-key                  Allow overwriting an existing age key.
+                                           Required when --existing-age-key-file or
+                                           --generate-age-key would overwrite one.
+                                           Env: MACHINEKIT_AGE_KEY_OVERWRITE=1
+
+Mode:
+      --dry-run                            Show what would change without modifying
+                                           the system.
+                                           Env: MACHINEKIT_MODE_DRY_RUN=1
+      --non-interactive                    Hard-fail rather than prompt.
+                                           Env: MACHINEKIT_MODE_INTERACTIVE=0
+      --interactive                        Force prompts even with non-TTY stdin.
+                                           Env: MACHINEKIT_MODE_INTERACTIVE=1
+
+Misc:
+  -h, --help                               Show this message and exit.
+  -v, --verbose                            Verbose debug output.
+                                           Env: MACHINEKIT_VERBOSE=1
+
+Inputs are resolved: CLI flag → env var → prompt → fail.
+In non-interactive mode (non-TTY or --non-interactive) prompting is skipped.
+EOF
+}
+
+# ---------------------------------------------------------------------------
+# Flag parsing — no jq here; context::seed_from_flags runs after prerequisites
+# ---------------------------------------------------------------------------
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --blueprints-source)             export MACHINEKIT_BLUEPRINTS_SOURCE="${2}";                shift 2 ;;
+    --blueprints-source=*)           export MACHINEKIT_BLUEPRINTS_SOURCE="${1#*=}";             shift ;;
+    --blueprints-source-protocol)    export MACHINEKIT_BLUEPRINTS_SOURCE_PROTOCOL="${2}";       shift 2 ;;
+    --blueprints-source-protocol=*)  export MACHINEKIT_BLUEPRINTS_SOURCE_PROTOCOL="${1#*=}";    shift ;;
+    --machine-type)                  export MACHINEKIT_MACHINE_TYPE="${2}";                     shift 2 ;;
+    --machine-type=*)                export MACHINEKIT_MACHINE_TYPE="${1#*=}";                  shift ;;
+    --existing-age-key-file)         export MACHINEKIT_EXISTING_AGE_KEY_FILE="${2}";            shift 2 ;;
+    --existing-age-key-file=*)       export MACHINEKIT_EXISTING_AGE_KEY_FILE="${1#*=}";         shift ;;
+    --git-user-name)                 export MACHINEKIT_GIT_USER_NAME="${2}";                    shift 2 ;;
+    --git-user-name=*)               export MACHINEKIT_GIT_USER_NAME="${1#*=}";                 shift ;;
+    --git-user-email)                export MACHINEKIT_GIT_USER_EMAIL="${2}";                   shift 2 ;;
+    --git-user-email=*)              export MACHINEKIT_GIT_USER_EMAIL="${1#*=}";                shift ;;
+    --generate-age-key)              export MACHINEKIT_AGE_KEY_GENERATE=1;                      shift ;;
+    --overwrite-age-key)             export MACHINEKIT_AGE_KEY_OVERWRITE=1;                     shift ;;
+    --dry-run)                       export MACHINEKIT_MODE_DRY_RUN=1;                          shift ;;
+    --non-interactive)               export MACHINEKIT_MODE_INTERACTIVE=0;                      shift ;;
+    --interactive)                   export MACHINEKIT_MODE_INTERACTIVE=1;                      shift ;;
+    -v|--verbose)                    export MACHINEKIT_VERBOSE=1;                               shift ;;
+    -h|--help)                       usage; exit 0 ;;
+    --version)                       cat "$MACHINEKIT_DIR/VERSION"; exit 0 ;;
+    --)                              shift; break ;;
+    -*)                              lifecycle::fail "Unknown flag: $1 (try --help)" ;;
+    *)                               lifecycle::fail "Unexpected positional argument: $1 (try --help)" ;;
+  esac
+done
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
+main() {
+  context::init_storage
+  lifecycle::acquire_lock
+  brew::bootstrap
+  prerequisites::install
+  context::seed_from_flags # requires prerequisites (jq)
+  input::detect_mode
+  input::is_dry_run && logging::step "DRY RUN — showing what would change; nothing will be modified"
+  sudo::ensure
+  preflight::run
+  age::install
+  chezmoi::install
+  brewfile::install
+  mise::install
+  hooks::run_post_apply
+  postflight::run
+}
+
+main "$@"

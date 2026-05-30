@@ -1,0 +1,9 @@
+# mise — runtime version manager. https://mise.jdx.dev
+#
+# Stock blueprints leave this empty so machinekit doesn't pre-install runtimes
+# you may not want. Add the languages you actually use, then run `mise install`:
+#
+#   [tools]
+#   ruby   = "3.3"
+#   node   = "lts"
+#   python = "3.12"

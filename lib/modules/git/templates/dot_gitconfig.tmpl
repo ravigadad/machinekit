@@ -1,0 +1,21 @@
+[user]
+    name  = {{ .git.user_name }}
+    email = {{ .git.user_email }}
+
+[init]
+    defaultBranch = main
+
+[push]
+    autoSetupRemote = true
+
+[rerere]
+    enabled = true
+
+[diff]
+    algorithm = histogram
+
+[merge]
+    conflictstyle = zdiff3
+
+[branch]
+    sort = -committerdate
