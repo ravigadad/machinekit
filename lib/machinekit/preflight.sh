@@ -12,6 +12,7 @@ _MK_PREFLIGHT_LOADED=1
 preflight::run() {
   logging::step "Preflight: resolving inputs"
 
+  system::detect
   blueprints::fetch
   preflight::report_machine_type
   preflight::resolve_active_modules

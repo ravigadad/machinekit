@@ -25,12 +25,14 @@ setup() {
 
 # --- preflight::run ---
 
-@test "run delegates to all four phases" {
+@test "run calls all steps" {
+  mktest::stub_function system::detect
   mktest::stub_function blueprints::fetch
   mktest::stub_function preflight::report_machine_type
   mktest::stub_function preflight::resolve_active_modules
   mktest::stub_function preflight::run_module_preflights
   preflight::run
+  mktest::assert_stub_called system::detect
   mktest::assert_stub_called blueprints::fetch
   mktest::assert_stub_called preflight::report_machine_type
   mktest::assert_stub_called preflight::resolve_active_modules

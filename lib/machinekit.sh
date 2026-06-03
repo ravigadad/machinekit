@@ -14,6 +14,8 @@ source "$_mk_core_dir/input.sh"
 source "$_mk_core_dir/sudo.sh"
 # shellcheck source=machinekit/context.sh
 source "$_mk_core_dir/context.sh"
+# shellcheck source=machinekit/system.sh
+source "$_mk_core_dir/system.sh"
 # shellcheck source=machinekit/brew.sh
 source "$_mk_core_dir/brew.sh"
 # shellcheck source=machinekit/blueprints.sh
