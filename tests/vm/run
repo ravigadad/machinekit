@@ -1,0 +1,140 @@
+#!/usr/bin/env bash
+# VM end-to-end test runner for machinekit.
+#
+# Runs machinekit apply against fresh throwaway VMs — catches failures that
+# only surface on a clean machine (missing dirs, sudo config, etc.) and that
+# unit tests with stubbed collaborators cannot see.
+#
+# Not run in CI. Prerequisites are not auto-installed; they're too large and
+# machine-specific (install once, reuse across runs):
+#   tart      brew install tart
+#   images    tart pull ghcr.io/cirruslabs/ubuntu:latest          (~20 GB)
+#             tart pull ghcr.io/cirruslabs/macos-sequoia-vanilla:latest  (~50 GB)
+#   sshpass   brew install hudochenkov/sshpass/sshpass  (macOS images only)
+#
+# Usage:
+#   tests/vm/run                          all cases × all default images
+#   tests/vm/run --image <image>          specific image (repeatable)
+#   tests/vm/run --case apply-smoke       specific case
+#   tests/vm/run --keep-vm                preserve VM after test (for debugging)
+
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+VM_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# shellcheck source=lib/vm.sh
+source "$VM_DIR/lib/vm.sh"
+
+DEFAULT_IMAGES=(
+  "ghcr.io/cirruslabs/ubuntu:latest"
+  "ghcr.io/cirruslabs/macos-sequoia-vanilla:latest"
+)
+DEFAULT_CASES=(apply-smoke)
+
+IMAGES=()
+CASES=()
+KEEP_VM=false
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --image)    IMAGES+=("$2");  shift 2 ;;
+    --case)     CASES+=("$2");   shift 2 ;;
+    --keep-vm)  KEEP_VM=true;    shift ;;
+    -h|--help)
+      grep '^#' "$0" | sed 's/^#[[:space:]]*//' | sed '/^!/d'
+      exit 0
+      ;;
+    *) printf 'unknown option: %s\n' "$1" >&2; exit 1 ;;
+  esac
+done
+
+[ "${#IMAGES[@]}" -eq 0 ] && IMAGES=("${DEFAULT_IMAGES[@]}")
+[ "${#CASES[@]}" -eq 0 ]  && CASES=("${DEFAULT_CASES[@]}")
+
+# ---------------------------------------------------------------------------
+# Prerequisite checks
+# ---------------------------------------------------------------------------
+
+if ! command -v tart >/dev/null 2>&1; then
+  printf 'error: tart not found. Install with: brew install tart\n' >&2
+  exit 1
+fi
+
+_needs_sshpass=false
+for _img in "${IMAGES[@]}"; do
+  case "$_img" in *ubuntu*|*linux*|*debian*) ;; *) _needs_sshpass=true ;; esac
+done
+if [ "$_needs_sshpass" = true ] && ! command -v sshpass >/dev/null 2>&1; then
+  printf 'error: sshpass required for macOS VM tests.\n' >&2
+  printf '  brew install hudochenkov/sshpass/sshpass\n' >&2
+  exit 1
+fi
+
+# ---------------------------------------------------------------------------
+# Logging
+# ---------------------------------------------------------------------------
+
+vm_log()  { printf '\033[1;34m[vm] %s\033[0m\n' "$*"; }
+vm_step() { printf '\033[0;36m  → %s\033[0m\n' "$*"; }
+_vm_ok()  { printf '\033[0;32m[PASS] %s\033[0m\n' "$*"; }
+_vm_fail(){ printf '\033[0;31m[FAIL] %s\033[0m\n' "$*"; }
+
+# ---------------------------------------------------------------------------
+# Run
+# ---------------------------------------------------------------------------
+
+_pass=0
+_fail=0
+
+# Safety net: stop any in-progress VM and remove any log file on unexpected exit.
+trap 'vm::stop 2>/dev/null || true; rm -f "${_VM_LOG:-}" 2>/dev/null || true' EXIT INT TERM
+
+for image in "${IMAGES[@]}"; do
+  for case_name in "${CASES[@]}"; do
+    case_file="$VM_DIR/cases/$case_name"
+    if [ ! -f "$case_file" ]; then
+      _vm_fail "$case_name — case file not found: $case_file"
+      _fail=$((_fail + 1))
+      continue
+    fi
+
+    vm_log "$image / $case_name"
+
+    if ! vm::start "$image" "$REPO_ROOT"; then
+      _vm_fail "$image / $case_name — VM failed to start"
+      _fail=$((_fail + 1))
+      continue
+    fi
+
+    # Capture all VM output to a log; show it only on failure.
+    _VM_LOG="$(mktemp)"
+
+    # Run the case in a subshell so its definitions don't bleed between cases.
+    # shellcheck source=/dev/null
+    if (source "$case_file" && scenario::run); then
+      _vm_ok "$image / $case_name"
+      _pass=$((_pass + 1))
+    else
+      _vm_fail "$image / $case_name"
+      _fail=$((_fail + 1))
+      printf '\n--- output ---\n'
+      cat "$_VM_LOG"
+      printf '--- end output ---\n'
+    fi
+    rm -f "$_VM_LOG"
+    _VM_LOG=""
+
+    if [ "$KEEP_VM" = true ]; then
+      printf '\nVM preserved: %s  (OS: %s)\n' "$VM_NAME" "$VM_OS"
+      printf 'To exec into it:  tart exec %s -- bash\n' "$VM_NAME"
+      printf 'To clean up:      tart stop %s && tart delete %s\n' "$VM_NAME" "$VM_NAME"
+      VM_NAME=""  # prevent the EXIT trap from stopping it
+    else
+      vm::stop
+    fi
+  done
+done
+
+printf '\n%d passed, %d failed\n' "$_pass" "$_fail"
+[ "$_fail" -eq 0 ]

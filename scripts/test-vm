@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Run VM end-to-end tests against real Tart VMs.
+# See tests/vm/run --help for usage and prerequisites.
+exec "$(dirname "${BASH_SOURCE[0]}")/../tests/vm/run" "$@"
