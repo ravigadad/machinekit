@@ -18,7 +18,7 @@ These are non-obvious from reading the code alone:
 
 2. **Explicit consent for irreversible actions.** This is a core design rule (see [architecture.md § The explicit-consent rule](./docs/architecture.md#the-explicit-consent-rule)). Any code path that generates keys, opens browsers, mutates remote state, or otherwise touches the outside world must require a flag, env var, or interactive confirmation. Local idempotent installs do not.
 
-3. **OS-agnostic posture.** macOS is the current implementation target, but the architecture is portable. When adding code: don't hardcode brew prefix paths, gate macOS-only template content behind `{{ if eq .chezmoi.os "darwin" }}`, frame module dependencies as capabilities (e.g. "container runtime") rather than specific tools.
+3. **OS-agnostic posture.** macOS is the current implementation target, but the architecture is portable. When adding code: don't hardcode brew prefix paths, gate macOS-only template content behind `{{ if eq .os.family "darwin" }}`, frame module dependencies as capabilities (e.g. "container runtime") rather than specific tools.
 
 4. **Iterations are scope-boxed, not time-boxed.** Don't tackle iteration N+1 work as part of iteration N "while you're in there." See `docs/roadmap.md` for what each iteration is delivering.
 
@@ -29,9 +29,9 @@ These are non-obvious from reading the code alone:
 ## Code style for this repo
 
 - Shell scripts use `set -euo pipefail`. `bin/` files source `lib/machinekit.sh` (aggregates `lib/machinekit/*`) and `lib/modules.sh` (aggregates `lib/modules/*`). Every file in `lib/machinekit/` and `lib/modules/` uses a namespace matching its filename — `logging::*` in `logging.sh`, `lifecycle::*` in `lifecycle.sh`, `context::*` in `context.sh`, `brew::*` in `brew.sh`, `age::*` in `age.sh`, etc.
-- **snake_case for all identifiers** — variables, context keys, JSON paths, template fields. No camelCase, even when the destination format (chezmoi, TOML) commonly uses it.
-- **`context::` is the jq-backed runtime data store.** Use `context::set` / `context::get` with snake_case dotted keys (`git.user_name`, `age.key_path`, `modules.active`) for scalars; `context::set_array` / `context::get_array` for arrays. `jq` and `dasel` are installed by `prerequisites::install` before preflight runs (`jq` powers the context store; `dasel` converts the rendered JSON to chezmoi's TOML config), so context functions are available everywhere downstream — just not during prerequisite installation itself.
-- Modules can ship default dotfile templates in `lib/modules/<name>/templates/`. The staging-dir builder layers these first, then the blueprint's `common/dotfiles/` on top.
+- **snake_case for all identifiers** — variables, context keys, JSON paths, template fields. No camelCase, even when the destination format (TOML) commonly uses it.
+- **`context::` is the jq-backed runtime data store.** Use `context::set` / `context::get` with snake_case dotted keys (`git.user_name`, `age.key_path`, `modules.active`) for scalars; `context::set_array` / `context::get_array` for arrays. `jq` and `gomplate` are installed by `prerequisites::install` before preflight runs (`jq` powers the context store; `gomplate` renders dotfile templates at apply time), so context functions are available everywhere downstream — just not during prerequisite installation itself.
+- Modules can ship default dotfile templates in `lib/modules/<name>/templates/`. The staging-dir builder layers these first, then the blueprint's `common/home/` on top.
 - Logging goes to stderr; only intentional script output goes to stdout.
 - Comments explain *why*, not *what*. No multi-paragraph docstrings.
 

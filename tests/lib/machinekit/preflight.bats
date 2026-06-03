@@ -57,9 +57,9 @@ setup() {
 # --- preflight::resolve_active_modules ---
 
 @test "resolve_active_modules stores the expected module list" {
-  mktest::stub_function context::set_array "modules.active" age brewfile chezmoi git mise zsh
+  mktest::stub_function context::set_array "modules.active" age brewfile home git mise zsh
   preflight::resolve_active_modules
-  mktest::assert_stub_called context::set_array "modules.active" age brewfile chezmoi git mise zsh
+  mktest::assert_stub_called context::set_array "modules.active" age brewfile home git mise zsh
 }
 
 # --- preflight::run_module_preflights ---

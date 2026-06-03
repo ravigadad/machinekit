@@ -25,7 +25,7 @@ Each module lives in `lib/modules/<name>.sh`. The module must define:
 - `<name>::preflight` — resolve inputs, publish values to context via `context::set`, no side effects.
 - `<name>::install` — execute the plan; check `input::is_dry_run` before any mutation.
 
-Default dotfile templates go in `lib/modules/<name>/templates/` and are layered into the chezmoi staging dir before the blueprint's `common/dotfiles/`. See `lib/modules/git.sh` for the simplest example.
+Default dotfile templates go in `lib/modules/<name>/templates/` and are layered into the staging dir before the blueprint's `common/home/`. See `lib/modules/git.sh` for the simplest example.
 
 Read `docs/architecture.md` before making structural changes. Code conventions are in `CLAUDE.md`.
 

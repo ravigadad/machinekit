@@ -20,8 +20,7 @@ setup() {
   mktest::stub_function prerequisites::_install_tool
   prerequisites::install
   mktest::assert_stub_called prerequisites::_install_tool "jq"
-  mktest::assert_stub_called prerequisites::_install_tool "dasel"
-  mktest::assert_stub_called prerequisites::_install_tool "chezmoi"
+  mktest::assert_stub_called prerequisites::_install_tool "gomplate"
   mktest::assert_stub_called prerequisites::_install_tool "git"
   mktest::assert_stub_called prerequisites::_install_tool "age"
 }

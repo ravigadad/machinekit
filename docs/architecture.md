@@ -17,7 +17,7 @@ machinekit is two cooperating repos:
 
 ## Scope
 
-macOS today, portable by design (see [cross-platform posture](#cross-platform-posture)). machinekit is opinionated about a deliberately small stock toolset — Homebrew, chezmoi, mise, git, age — and agnostic about everything else. You extend it two ways: declare a machinekit-known module in TOML (Tier 2, planned), or wire up anything at all via post-apply hooks (Tier 3). The fact that machinekit isn't opinionated about a tool doesn't mean you can't use machinekit to install and manage it — you can, via hooks. The small built-in set is just what machinekit has opinions about, not the limit of what it can do.
+macOS today, portable by design (see [cross-platform posture](#cross-platform-posture)). machinekit is opinionated about a deliberately small stock toolset — Homebrew, gomplate, mise, git, age — and agnostic about everything else. You extend it two ways: declare a machinekit-known module in TOML (Tier 2, planned), or wire up anything at all via post-apply hooks (Tier 3). The fact that machinekit isn't opinionated about a tool doesn't mean you can't use machinekit to install and manage it — you can, via hooks. The small built-in set is just what machinekit has opinions about, not the limit of what it can do.
 
 ---
 
@@ -51,8 +51,8 @@ blueprints/
 ├── common/
 │   ├── machinekit.toml              # shared module config (floor of the cascade)
 │   ├── Brewfile                     # packages installed on every machine
-│   ├── dotfiles/                    # chezmoi source — files copied to $HOME
-│   │   ├── .chezmoiignore
+│   ├── home/                        # files copied to $HOME
+│   │   ├── .mkignore
 │   │   ├── dot_zshrc
 │   │   └── …                        # only what the blueprint owns; module
 │   │                                # templates (gitconfig, mise, etc.) ship
@@ -62,20 +62,20 @@ blueprints/
 └── machine_types/
     ├── personal/
     │   ├── machinekit.toml          # personal-specific config overrides
-    │   ├── dotfiles/                # overlay on top of common/dotfiles/
+    │   ├── home/                    # overlay on top of common/home/
     │   ├── Brewfile                 # additional packages just for personal
     │   └── hooks/post-apply/
     └── server/
         └── …
 ```
 
-The structure is **layered**: `common/` is the baseline applied to every machine, and `machine_types/<type>/` is opt-in per-type overrides. The same shape — `machinekit.toml`, `dotfiles/`, `Brewfile`, `hooks/post-apply/` — appears at both levels.
+The structure is **layered**: `common/` is the baseline applied to every machine, and `machine_types/<type>/` is opt-in per-type overrides. The same shape — `machinekit.toml`, `home/`, `Brewfile`, `hooks/post-apply/` — appears at both levels.
 
-Modules can ship their own default dotfile templates (e.g. the git module ships `dot_gitconfig.tmpl`, the mise module ships `dot_config/mise/config.toml`). At apply time, machinekit composes a single chezmoi source dir by layering: each active module's bundled templates first, then `common/dotfiles/` on top, then `machine_types/<type>/dotfiles/` on top of that. A user overrides a module's default by placing a file at the same relative path in their blueprint's dotfiles. See [chezmoi template system](#chezmoi-template-system) for details.
+Modules can ship their own default dotfile templates (e.g. the git module ships `dot_gitconfig.tmpl`, the mise module ships `dot_config/mise/config.toml`). At apply time, machinekit composes a single staging dir by layering: each active module's bundled templates first, then `common/home/` on top, then `machine_types/<type>/home/` on top of that. A user overrides a module's default by placing a file at the same relative path in their blueprint's home directory. See [home template system](#home-template-system) for details.
 
 At apply time, with `--machine-type <type>`:
 
-1. **dotfiles** — module template dirs layer first; then `common/dotfiles/`; then `machine_types/<type>/dotfiles/`. chezmoi applies the merged result.
+1. **home** — module template dirs layer first; then `common/home/`; then `machine_types/<type>/home/`. machinekit applies the merged result.
 2. **Brewfile** — `common/Brewfile` runs first; then `machine_types/<type>/Brewfile` (additive).
 3. **hooks/post-apply/** — `common/`'s hooks run first; then the type's hooks.
 4. **machinekit.toml** — `common/machinekit.toml` is loaded; values in `machine_types/<type>/machinekit.toml` override on key conflict.
@@ -88,7 +88,7 @@ The filesystem is doing the work TOML couldn't do cleanly: each file is flat and
 
 machinekit is opinionated by default and configurable when you want more. Customization falls into three tiers, from least to most invasive:
 
-**Tier 1 — Stock blueprint (zero config).** Generate a fresh blueprint, commit nothing more, and you get a working machine: Homebrew, chezmoi, mise, git, age, and minimal sensible dotfiles. Nothing optional. This is the path for someone who just wants a sane laptop.
+**Tier 1 — Stock blueprint (zero config).** Generate a fresh blueprint, commit nothing more, and you get a working machine: Homebrew, gomplate, mise, git, age, and minimal sensible dotfiles. Nothing optional. This is the path for someone who just wants a sane laptop.
 
 **Tier 2 — Config-driven (TOML).** A `common/machinekit.toml` (and per-type `machine_types/<type>/machinekit.toml`) declares which machinekit-known modules you want and supplies their variables:
 
@@ -133,7 +133,7 @@ There are three roles in machinekit's module system, but only **one concept** �
 
 The user's blueprint reads as *intent*: "I want languages, I want a database." machinekit fills in the satisfiers per platform. The user can override by listing a specific satisfier in their module list — that's how someone says "use Docker, not OrbStack, on this machine."
 
-> Status: iteration 1 hardcodes the prerequisite tool set (chezmoi, mise, git, age via brew). The module system, capability resolution, and intent-vs-satisfier distinction land in iteration 3.
+> Status: iteration 1 hardcodes the prerequisite tool set (gomplate, mise, git, age via brew). The module system, capability resolution, and intent-vs-satisfier distinction land in iteration 3.
 
 ### Execution modes
 
@@ -159,7 +159,7 @@ Actions that require consent:
 - Creating or pushing to a remote repository.
 - Any future action that touches external state.
 
-Local idempotent installs (`brew install`, `chezmoi apply`, `mise install`) do *not* require consent — they're safe to repeat and have no surprising side effects.
+Local idempotent installs (`brew install`, `mise install`) do *not* require consent — they're safe to repeat and have no surprising side effects.
 
 When consent is required and absent, machinekit exits with a clear error explaining what was attempted, where we looked for the input, and exactly how to provide it.
 
@@ -187,7 +187,7 @@ machinekit's architecture is OS-agnostic by design. The current implementation t
 ### Already cross-platform
 
 - **Homebrew** is a [first-class Linux target](https://docs.brew.sh/Homebrew-on-Linux). Same `brew` CLI, same Brewfile concept. The install prefix varies (`/opt/homebrew`, `/usr/local`, `/home/linuxbrew/.linuxbrew`), but `brew shellenv` handles PATH uniformly across all three. Picking Homebrew is a unifying choice across mac and Linux, not a macOS lock-in.
-- **chezmoi, mise, git, age** are all cross-platform binaries available via Homebrew on either OS.
+- **gomplate, mise, git, age** are all cross-platform binaries available via Homebrew on either OS.
 - **The conceptual architecture** — bootstrap, three tiers, modules, hooks, input resolution, execution modes, consent rule — is all shell-level and portable.
 
 ### Branch points
@@ -202,7 +202,7 @@ machinekit's architecture is OS-agnostic by design. The current implementation t
 
 ### Rules for staying portable
 
-- chezmoi templates gate any OS-specific content behind `{{ if eq .chezmoi.os "darwin" }}`. The cost is negligible and it avoids retrofits.
+- Templates gate any OS-specific content behind `{{ if eq .os.family "darwin" }}`. The cost is negligible and it avoids retrofits.
 - Scripts and templates use `brew shellenv` for PATH setup and `brew --prefix` for ad-hoc lookups. Never hardcode prefix paths.
 - When a module depends on something with no cross-platform option (e.g. OrbStack), the dependency is framed as the *capability* (a container runtime) and platform-specific modules satisfy it. The resolver picks the right concrete module based on OS.
 
@@ -229,7 +229,7 @@ Keeping machinekit out of the auth business preserves host-agnostic posture (no 
 
 ### Age key handling
 
-age is the encryption layer chezmoi uses for secret files. Unlike SSH keys, the age key is **per-user, not per-machine** — every machine needs the same private key because every machine needs to decrypt the same encrypted files in the (single) blueprints repo.
+age is the encryption layer for sensitive blueprint files. Unlike SSH keys, the age key is **per-user, not per-machine** — every machine needs the same private key to decrypt files committed to the blueprints repo.
 
 The flow:
 
@@ -250,14 +250,9 @@ Eventually, a 1Password CLI (or other secrets-manager) wrapper can fetch the age
 
 > Status: secrets-manager wrapper not yet implemented.
 
-chezmoi uses age to encrypt files committed to the blueprints repo. Encrypted files are tracked in git but unreadable without the age private key.
+age-encrypted files can be committed to the blueprints repo and decrypted at apply time using the age private key. Stock blueprints contain no encrypted files, but the age infrastructure is wired in from day one so adding encrypted secrets later doesn't require retrofitting.
 
-```bash
-chezmoi add --encrypt ~/.some/secret    # encrypt and track
-chezmoi edit ~/.some/secret             # edit in plaintext, re-encrypts on save
-```
-
-Stock blueprints contain no encrypted files yet, but the age infrastructure is wired in from day one, so adding encrypted secrets later doesn't require retrofitting.
+> Status: blueprint file decryption in the home module is not yet implemented. The age key is managed and available; the apply-time decryption step will be added in a future iteration.
 
 ---
 
@@ -265,7 +260,7 @@ Stock blueprints contain no encrypted files yet, but the age infrastructure is w
 
 Files that end up in `$HOME` after a bootstrap run fall into two categories:
 
-- **Tool artifacts** — the age key at `~/.config/age/key.txt`, chezmoi's config and state DB at `~/.config/chezmoi/`, mise's runtimes, and so on. machinekit sets these up but doesn't own them. They live in the tool's own XDG-style directory so any future consumer of that tool can find them where it expects.
+- **Tool artifacts** — the age key at `~/.config/age/key.txt`, mise's runtimes, and so on. machinekit sets these up but doesn't own them. They live in the tool's own XDG-style directory so any future consumer of that tool can find them where it expects.
 - **machinekit's own state** — files that exist *because* machinekit exists: the cached blueprint source at `~/.local/share/machinekit/blueprints/`, a future per-user bootstrap config (e.g. `~/.config/machinekit/bootstrap.toml`). These live in machinekit's XDG dirs (`~/.local/share/machinekit/` for data, `~/.config/machinekit/` for config).
 
 > Status: nothing in `~/.config/machinekit/` yet. The directory is created on first use by a feature that needs it, not preemptively.
@@ -285,7 +280,7 @@ Each machine type's design is **composed** at apply time from two layers:
 
 This composition happens uniformly across the four moving pieces of a blueprint:
 
-- `dotfiles/` — chezmoi applies `common/dotfiles/` first, then `machine_types/<type>/dotfiles/` on top. Same-target-path files in the type layer override the common layer.
+- `home/` — machinekit applies `common/home/` first, then `machine_types/<type>/home/` on top. Same-target-path files in the type layer override the common layer.
 - `Brewfile` — `common/Brewfile` runs first; `machine_types/<type>/Brewfile` runs after. Additive — both sets of packages get installed.
 - `hooks/post-apply/` — common hooks run first, then type hooks. Both run.
 - `machinekit.toml` — `common/machinekit.toml` is loaded; values in `machine_types/<type>/machinekit.toml` override on key conflict.
@@ -300,24 +295,31 @@ mise is installed on every machine — it's lightweight enough that the consiste
 
 ---
 
-## chezmoi template system
+## home template system
 
-chezmoi is an implementation detail of machinekit — users interact with `machinekit apply`, not chezmoi directly. machinekit uses chezmoi for one thing:
+machinekit walks a merged staging dir and applies each file to `$HOME`:
 
-**Template expansion and file copy** — `chezmoi apply` expands Go/Sprig templates in blueprint dotfiles, decrypts age-encrypted ones, and copies non-ignored files to `$HOME` with the right permissions.
+**Path decoding** — each path component is decoded from the staging naming convention:
 
-Everything *around* `chezmoi apply` is machinekit's:
+- `dot_` prefix → leading `.` (e.g. `dot_zshrc` → `.zshrc`)
+- `private_` prefix → mode 600 on the file, mode 700 on the parent directory (e.g. `private_dot_ssh/private_config` → `~/.ssh/config` at 600, `~/.ssh/` at 700)
+- `.tmpl` suffix on the filename → render via gomplate; strip the suffix from the destination name
 
-- **Source fetching** — machinekit clones (`git clone`) or copies (`cp -r`) blueprints into `~/.local/share/machinekit/blueprints` itself, depending on whether the source resolves to the `git` or `cp` protocol. This replaces `chezmoi init`, which we don't call. The cached source is treated as ephemeral and re-fetched on every apply (which trivially handles amended commits, force pushes, branch renames, or switching sources).
-- **Staging-dir composition** — chezmoi is invoked against a *merged* source dir at `~/.local/share/machinekit/chezmoi-staging`, not the raw blueprint. The staging dir is wiped and rebuilt every run, layered in this order: each active module's `lib/modules/<name>/templates/`, then the blueprint's `common/dotfiles/`, then (iteration 2+) `machine_types/<type>/dotfiles/`. Same-path files in a later layer overwrite earlier ones, so the blueprint owns final say. Sibling blueprint content (`common/Brewfile`, `common/hooks/`, `common/machinekit.toml`, `machine_types/`) never enters the staging dir, so chezmoi never sees it and `.chezmoiignore` stays scoped to within-dotfiles exclusions. chezmoi's content-hash state tracking is unaffected by the rebuild — identical content produces an empty diff.
-- **Config generation** — machinekit writes `~/.config/chezmoi/chezmoi.toml` directly before calling `chezmoi apply`. The blueprint repo contains no `.chezmoi.toml.tmpl` — that file is a chezmoi bootstrapping mechanism machinekit doesn't need, since it already owns all the inputs.
+**Template rendering** — `.tmpl` files are rendered through `gomplate` with the full machinekit context JSON as the root data source. Templates access context values as nested fields: `.git.user_name`, `.os.family`, `.machine_type`, etc.
+
+**Ignore file** — `.mkignore` in the staging dir lists destination paths (relative to `$HOME`) to skip. The `.mkignore` file itself is always skipped.
+
+Everything *around* file application is machinekit's:
+
+- **Source fetching** — machinekit clones (`git clone`) or copies (`cp -r`) blueprints into `~/.local/share/machinekit/blueprints` itself, depending on whether the source resolves to the `git` or `cp` protocol. The cached source is treated as ephemeral and re-fetched on every apply.
+- **Staging-dir composition** — machinekit operates against a *merged* staging dir at `~/.local/share/machinekit/staging`, not the raw blueprint. The staging dir is wiped and rebuilt every run, layered in this order: each active module's `lib/modules/<name>/templates/`, then the blueprint's `common/home/`, then (iteration 2+) `machine_types/<type>/home/`. Same-path files in a later layer overwrite earlier ones, so the blueprint owns final say. Sibling blueprint content (`common/Brewfile`, `common/hooks/`, `common/machinekit.toml`, `machine_types/`) never enters the staging dir. `.mkignore` is scoped to within-home exclusions.
 
 One flag picks the blueprint source; the protocol is sniffed and overridable:
 
-- `--blueprints-source <url-or-path>` resolves the source and sniffs the protocol: a URL form (`https://`, `http://`, `ssh://`, `git@host:owner/repo`, `file://`) or a local path containing `.git/` is cloned via `git clone`; any other local path is copied as-is. No `owner/repo` shorthand (which `chezmoi init` would expand to GitHub) — full URLs only, host-agnostic.
+- `--blueprints-source <url-or-path>` resolves the source and sniffs the protocol: a URL form (`https://`, `http://`, `ssh://`, `git@host:owner/repo`, `file://`) or a local path containing `.git/` is cloned via `git clone`; any other local path is copied as-is. No `owner/repo` shorthand — full URLs only, host-agnostic.
 - `--blueprints-source-protocol <git|cp>` overrides the sniffed protocol — e.g. force `cp` to copy a local git repo's working tree (uncommitted edits included) instead of cloning its committed state. This is the "iterate without committing" path during blueprint authoring.
 
-Template data flows from `context::` (machinekit's jq-backed runtime data store) into the `[data]` section of the chezmoi config file. Keys use **snake_case dotted notation** so they nest as nested tables in the rendered TOML and become nested fields in chezmoi's template namespace. Examples: `.machine_type`, `.git.user_name`, `.age.key_path`, `.modules.active` (an array of active module names). Blueprint and module templates access them normally:
+Template data flows from `context::` (machinekit's jq-backed runtime data store) into gomplate's root context as a JSON object. Keys use **snake_case dotted notation** so they nest as nested objects and become nested fields in the template namespace. Examples: `.machine_type`, `.git.user_name`, `.age.key_path`, `.modules.active` (an array of active module names). Blueprint and module templates access them normally:
 
 ```
 {{- if eq .machine_type "personal" }}
@@ -355,8 +357,8 @@ A Python or Rust developer using machinekit gets no gratuitous Ruby/Node install
 
 There are two installation stages:
 
-1. **Prerequisite stage** — `machinekit apply` installs `jq`, `dasel`, `chezmoi`, `git`, `age` directly. These are hardcoded because they have to exist *before* preflight (`jq` powers the data layer; `dasel` renders the resolved JSON context into chezmoi's TOML config) or before blueprints can be read (`chezmoi`, `git`, `age`). The runtime version manager `mise` is installed by its module, not as a prerequisite.
-2. **Blueprint stage** — after chezmoi applies, machinekit runs `brew bundle --file <blueprints>/common/Brewfile`. With `--machine-type <type>`, `<blueprints>/machine_types/<type>/Brewfile` (if present) runs after, additively layering on top.
+1. **Prerequisite stage** — `machinekit apply` installs `jq`, `gomplate`, `git`, `age` directly. These are hardcoded because `jq` must exist before preflight (it powers the context data layer) and `gomplate`, `git`, and `age` must be available before blueprints are applied. The runtime version manager `mise` is installed by its module, not as a prerequisite.
+2. **Blueprint stage** — after home files are applied, machinekit runs `brew bundle --file <blueprints>/common/Brewfile`. With `--machine-type <type>`, `<blueprints>/machine_types/<type>/Brewfile` (if present) runs after, additively layering on top.
 
 The template ships with commented Brewfiles showing the conventions; your blueprints contain your real choices.
 
@@ -388,7 +390,7 @@ machinekit/                             ← this repo (public)
 │   │   ├── context.sh                  ← context::* (jq-backed runtime data store: set/get, arrays, json)
 │   │   ├── brew.sh                     ← brew::* (bootstrap, install_formula — low-level brew ops)
 │   │   ├── blueprints.sh               ← blueprints::* (fetch, dir, protocol resolution)
-│   │   ├── prerequisites.sh            ← prerequisites::* (jq/dasel/chezmoi/git/age via brew)
+│   │   ├── prerequisites.sh            ← prerequisites::* (jq/gomplate/git/age via brew)
 │   │   ├── preflight.sh                ← preflight::* (orchestrate input resolution + module preflights)
 │   │   ├── hooks.sh                    ← hooks::* (post-apply hook runner)
 │   │   ├── hook-support.sh             ← library blueprint hooks source via $MACHINEKIT_SUPPORT
@@ -396,7 +398,7 @@ machinekit/                             ← this repo (public)
 │   └── modules/                        ← user-facing modules; each exposes ::install
 │       ├── age.sh                      ← age::preflight + age::install
 │       ├── brewfile.sh                 ← brewfile::install (apply user Brewfile)
-│       ├── chezmoi.sh                  ← chezmoi::install + build_staging + write_config
+│       ├── home.sh                     ← home::install + build_staging + _apply
 │       ├── git.sh                      ← git::preflight + git::install
 │       ├── git/templates/              ← module-shipped dotfile defaults (dot_gitconfig.tmpl)
 │       ├── mise.sh                     ← mise::install
@@ -409,9 +411,9 @@ machinekit/                             ← this repo (public)
 
 **Convention**: `bin/` files are thin orchestrators (flag parsing, mode detection, the apply pipeline as a sequence of namespaced calls). All execution code lives in `lib/`. `lib/<name>.sh` is the aggregator for `lib/<name>/*.sh`; each file's namespace matches its filename (`brew::*` in `brew.sh`, `age::*` in `age.sh`, etc.).
 
-**Module API**: every file in `lib/modules/` exposes `<name>::install` as its main entry point. Modules that need to resolve user inputs before the apply pipeline runs also expose `<name>::preflight`, called from `preflight::run_module_preflights`. Modules may also ship a sibling directory `lib/modules/<name>/templates/` holding chezmoi-source dotfile defaults; the staging-dir builder picks these up automatically. This shape is iteration-1 stable and grows with iteration 3 (module activation driven by machine type).
+**Module API**: every file in `lib/modules/` exposes `<name>::install` as its main entry point. Modules that need to resolve user inputs before the apply pipeline runs also expose `<name>::preflight`, called from `preflight::run_module_preflights`. Modules may also ship a sibling directory `lib/modules/<name>/templates/` holding default dotfiles; the home module's staging-dir builder picks these up automatically. This shape is iteration-1 stable and grows with iteration 3 (module activation driven by machine type).
 
-**Zsh hook pattern**: the `zsh` module ships `~/.config/machinekit/env.zsh`, which ends with a glob-source loop over `~/.config/machinekit/env.zsh.d/*.zsh`. Any module that needs to contribute zsh-level setup drops a single `.zsh` file in its own `templates/dot_config/machinekit/env.zsh.d/` directory — the staging-dir builder merges it in, chezmoi installs it, and env.zsh sources it on every zsh startup. When a module is inactive, no fragment ends up on disk and nothing is sourced. mise uses this pattern today (`templates/dot_config/machinekit/env.zsh.d/mise.zsh` for `eval "$(mise activate zsh)"`); future modules plug in the same way.
+**Zsh hook pattern**: the `zsh` module ships `~/.config/machinekit/env.zsh`, which ends with a glob-source loop over `~/.config/machinekit/env.zsh.d/*.zsh`. Any module that needs to contribute zsh-level setup drops a single `.zsh` file in its own `templates/dot_config/machinekit/env.zsh.d/` directory — the staging-dir builder merges it in, the home module installs it, and env.zsh sources it on every zsh startup. When a module is inactive, no fragment ends up on disk and nothing is sourced. mise uses this pattern today (`templates/dot_config/machinekit/env.zsh.d/mise.zsh` for `eval "$(mise activate zsh)"`); future modules plug in the same way.
 
 Blueprints repo (private, per user) lives as a sibling on disk and mirrors the template structure with real values:
 
@@ -420,27 +422,27 @@ my-blueprints/                                  ← your blueprints (private)
 ├── common/                                     ← applied to every machine
 │   ├── machinekit.toml                         ← shared module config (floor of the cascade)
 │   ├── Brewfile                                ← packages installed everywhere
-│   ├── dotfiles/                               ← only what your blueprint owns
-│   │   ├── .chezmoiignore                      ← within-dotfiles exclusions
+│   ├── home/                                   ← only what your blueprint owns
+│   │   ├── .mkignore                           ← within-home exclusions
 │   │   ├── private_dot_ssh/private_config.tmpl ← → ~/.ssh/config (mode 600)
 │   │   └── …                                   ← override module defaults by same-path
 │   └── hooks/post-apply/
 └── machine_types/                              ← per-type overrides (optional)
     └── personal/                               ← e.g. for `--machine-type personal`
         ├── machinekit.toml
-        ├── dotfiles/                           ← overlays common/dotfiles/
+        ├── home/                               ← overlays common/home/
         ├── Brewfile                            ← additional packages
         └── hooks/post-apply/
 ```
 
-Module-shipped templates that go to `$HOME` (e.g. `~/.gitconfig`, `~/.config/mise/config.toml`) come from the module, not the blueprint. Drop a file at the same relative path in `common/dotfiles/` (or `machine_types/<type>/dotfiles/`) to override.
+Module-shipped templates that go to `$HOME` (e.g. `~/.gitconfig`, `~/.config/mise/config.toml`) come from the module, not the blueprint. Drop a file at the same relative path in `common/home/` (or `machine_types/<type>/home/`) to override.
 
 ---
 
 ## References
 
-- [chezmoi docs](https://www.chezmoi.io) / [macOS guide](https://www.chezmoi.io/user-guide/machines/macos/)
 - [thoughtbot/laptop](https://github.com/thoughtbot/laptop) — idempotency inspiration
+- [gomplate](https://docs.gomplate.ca)
 - [mise](https://mise.jdx.dev)
 - [age encryption](https://github.com/FiloSottile/age)
 - [Homebrew on Linux](https://docs.brew.sh/Homebrew-on-Linux)

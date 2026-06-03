@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Structured context store for machinekit-resolved inputs. JSON object in a
-# temp file, manipulated via jq. Rendered into chezmoi's config at apply time
-# so blueprint dotfiles can reference values as nested template fields.
+# temp file, manipulated via jq. Passed to gomplate at apply time so blueprint
+# dotfiles can reference values as nested template fields.
 #
 # Keys use snake_case dotted notation: "git.user_name" lands at
 # .git.user_name in the JSON tree.

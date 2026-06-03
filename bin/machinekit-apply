@@ -18,7 +18,7 @@ usage() {
 Usage: machinekit apply [flags]
 
 Apply a blueprint to this machine. Installs prerequisites, applies dotfiles
-via chezmoi, and runs any post-apply hooks defined in the blueprint.
+to $HOME, and runs any post-apply hooks defined in the blueprint.
 
 Blueprint source (required):
       --blueprints-source <url-or-path>    URL or local path for the blueprints.
@@ -118,11 +118,11 @@ main() {
   sudo::ensure
   preflight::run
   age::install
-  chezmoi::install
+  home::install
   brewfile::install
   mise::install
   hooks::run_post_apply
   postflight::run
 }
 
-main "$@"
+[ "${BASH_SOURCE[0]}" != "$0" ] || main "$@"

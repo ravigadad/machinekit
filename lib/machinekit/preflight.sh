@@ -29,7 +29,7 @@ preflight::report_machine_type() {
 }
 
 preflight::resolve_active_modules() {
-  local modules=(age brewfile chezmoi git mise zsh)
+  local modules=(age brewfile home git mise zsh)
   context::set_array "modules.active" "${modules[@]}"
   logging::info "Active modules: $(IFS=', '; printf '%s' "${modules[*]}")"
 }

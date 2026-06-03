@@ -1,9 +1,9 @@
-# ~/.ssh/config — managed by chezmoi.
+# ~/.ssh/config — managed by machinekit.
 # Defaults applied to every host. Per-host blocks can follow.
 
 Host *
     AddKeysToAgent yes
     IdentitiesOnly yes
-{{- if eq .chezmoi.os "darwin" }}
+{{- if eq .os.family "darwin" }}
     UseKeychain yes
 {{- end }}

@@ -15,28 +15,28 @@ Architecture is described in [architecture.md](./architecture.md); this document
 **Deliverables:**
 
 - `machinekit apply` — main entry point. Two execution modes (interactive / non-interactive). Idempotent. Consent-gated for irreversible actions.
-- `lib/machinekit/` + `lib/modules/` — execution code, split between core machinekit infrastructure (helpers, brew bootstrap, blueprints fetch, preflight orchestration, hooks, prerequisites) and user-facing modules (age, brewfile, chezmoi, git, mise, zsh). Aggregated by `lib/machinekit.sh` and `lib/modules.sh`. `bin/` files are thin orchestrators.
-- `context::` — a jq-backed runtime data store, accessed via `context::set` / `context::get` (scalars) and `context::set_array` / `context::get_array` (arrays) using snake_case dotted keys. Rendered into chezmoi's `[data]` section at apply time so blueprint dotfiles can reference values as nested template fields (`.git.user_name`, `.modules.active`, etc.).
-- Module template bundling — modules can ship default dotfile templates in `lib/modules/<name>/templates/`. The git, mise, and zsh modules ship their own defaults (gitconfig, mise config, dot_zshrc + env.zsh). Users override per-path in their blueprint's `common/dotfiles/`.
+- `lib/machinekit/` + `lib/modules/` — execution code, split between core machinekit infrastructure (helpers, brew bootstrap, blueprints fetch, preflight orchestration, hooks, prerequisites) and user-facing modules (age, brewfile, home, git, mise, zsh). Aggregated by `lib/machinekit.sh` and `lib/modules.sh`. `bin/` files are thin orchestrators.
+- `context::` — a jq-backed runtime data store, accessed via `context::set` / `context::get` (scalars) and `context::set_array` / `context::get_array` (arrays) using snake_case dotted keys. Passed to gomplate as the root context at apply time so blueprint dotfiles can reference values as nested template fields (`.git.user_name`, `.modules.active`, etc.).
+- Module template bundling — modules can ship default dotfile templates in `lib/modules/<name>/templates/`. The git, mise, and zsh modules ship their own defaults (gitconfig, mise config, dot_zshrc + env.zsh). Users override per-path in their blueprint's `common/home/`.
 - Zsh hook pattern — the `zsh` module's env.zsh ends with a glob-source loop over `~/.config/machinekit/env.zsh.d/*.zsh`. Modules that need zsh setup ship a fragment in their `templates/dot_config/machinekit/env.zsh.d/`. mise uses this today; future modules plug in the same way.
-- Chezmoi staging dir — built fresh each run at `~/.local/share/machinekit/chezmoi-staging` by layering module templates → blueprint `common/dotfiles/` → (iteration 2+) `machine_types/<type>/dotfiles/`. chezmoi is invoked against the staging dir, not the raw blueprint.
+- Staging dir — built fresh each run at `~/.local/share/machinekit/staging` by layering module templates → blueprint `common/home/` → (iteration 2+) `machine_types/<type>/home/`. The template engine is invoked against the staging dir, not the raw blueprint.
 - `machinekit generate` — scaffolds a fresh blueprint repo from the template at the path you give it.
 - `templates/blueprints/` — starter content in the layered layout:
   - `common/machinekit.toml` — placeholder for shared module config (floor of the cascade; read by iteration 2/3; commented examples ship in iteration 1).
-  - `common/dotfiles/` — chezmoi source content the blueprint owns directly (module-shipped templates live with the modules, not here):
+  - `common/home/` — content the blueprint owns directly (module-shipped templates live with the modules, not here):
     - `private_dot_ssh/private_config.tmpl` — sensible defaults; `UseKeychain yes` macOS-only.
-    - `.chezmoiignore` — small; only excludes things *within* the dotfiles tree (e.g. `.zshrc.local`).
+    - `.mkignore` — small; only excludes things *within* the home tree (e.g. `.zshrc.local`).
   - `common/Brewfile` — empty, commented.
   - `common/hooks/post-apply/` — empty placeholder.
   - `machine_types/README.md` — placeholder explaining the per-type override layout for iteration 2.
-- chezmoi config is written directly to `~/.config/chezmoi/chezmoi.toml` from machinekit's resolved inputs; no `.chezmoi.toml.tmpl` in the blueprint. chezmoi is used only for template expansion + file copy, not as a config bootstrapper or source manager.
+- Home file application walks the staging dir, decodes chezmoi path conventions (dot_, private_, .tmpl), renders templates via gomplate with the full context JSON, and copies files to `$HOME` with appropriate permissions. machinekit owns the full pipeline — no external source manager.
 - Blueprint source is cached at `~/.local/share/machinekit/blueprints/` (machinekit-owned, treated as an ephemeral cache — wiped and re-fetched on every real-run apply).
 - Cross-platform posture documented; macOS implementation only.
 
 **Stock install** (what bootstrap puts on the machine with no extra config):
 
 - Homebrew
-- jq (powers `context::` store via JSON), dasel (renders that JSON into chezmoi's TOML config), chezmoi, git, age (via brew, as prerequisites)
+- jq (powers `context::` store via JSON), gomplate (renders dotfile templates), git, age (via brew, as prerequisites)
 - mise (via brew, as part of the mise module)
 - The dotfile templates above (blueprint-shipped) and the module-shipped defaults (gitconfig, mise config)
 
@@ -64,7 +64,7 @@ The directory structure (`machine_types/<type>/`) ships in iteration 1; this ite
 **Deliverables:**
 
 - Layered apply across the four moving pieces:
-  - `dotfiles/` — apply `common/dotfiles/` then `machine_types/<type>/dotfiles/` on top via chezmoi.
+  - `home/` — apply `common/home/` then `machine_types/<type>/home/` on top.
   - `Brewfile` — run `common/Brewfile`, then `machine_types/<type>/Brewfile` (additive).
   - `hooks/post-apply/` — run common hooks, then type-specific hooks.
   - `machinekit.toml` — load `common/machinekit.toml`, merge `machine_types/<type>/machinekit.toml` on top.
@@ -99,7 +99,7 @@ The module system implements the three-role framing described in [docs/architect
 Modules support three operating modes for their config, selected by what the blueprint provides:
 
 - **Basic mode**: the user declares semantic intent via the intent module's config (e.g. `[modules.runtimes]` with `ruby = "latest"`). The module translates this into the satisfier's native config, installs the satisfier, and runs the install step. machinekit assembles the implementation.
-- **Advanced mode**: the user provides the raw satisfier config in their dotfiles (e.g. `common/dotfiles/dot_config/mise/config.toml`). The module detects this, defers to it, and just runs install. The user owns the full config.
+- **Advanced mode**: the user provides the raw satisfier config in their home dir (e.g. `common/home/dot_config/mise/config.toml`). The module detects this, defers to it, and just runs install. The user owns the full config.
 - **Bypass**: the user handles everything via `common/Brewfile` and post-apply hooks. No module involvement.
 
 The semantic declaration layer is where machinekit earns its abstraction cost: a user who declares `runtimes = { ruby = "latest" }` gets the right behavior whether the underlying tool is mise, asdf, or something else. Swapping the satisfier is a machinekit concern, not a blueprint concern.
@@ -133,7 +133,7 @@ This means the module interface must stabilize the *intent vocabulary* (what int
 After the module system and bash modernization land, the framework's machinery is complete, and further work is driven by need rather than a planned phase list. Likely areas:
 
 - Additional modules as needs arise (prompt themes, password-manager CLIs as a secrets-fetch layer, and so on).
-- Linux support: add a Linux test target, gate macOS-specific lines behind `chezmoi.os` checks, validate the Homebrew-on-Linux path.
+- Linux support: add a Linux test target, gate macOS-specific lines behind `os.family` checks, validate the Homebrew-on-Linux path.
 - A curl-pipe-bash installer shim (`install.sh`) for fresh-machine one-liner setup.
 
 The roadmap stops being prescriptive here. The architecture supports incremental addition; what gets added is a function of what the framework actually needs in use.

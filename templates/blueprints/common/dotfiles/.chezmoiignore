@@ -1,3 +1,0 @@
-# Files in this directory that chezmoi should NOT apply to $HOME.
-
-.zshrc.local

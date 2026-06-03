@@ -9,9 +9,9 @@ For what's planned and what's deferred, see [docs/roadmap.md](./docs/roadmap.md)
 
 ## What it does
 
-- Installs Homebrew, then jq, dasel, chezmoi, git, age (machinekit's prerequisites) plus mise (installed by its module).
+- Installs Homebrew, then jq, gomplate, git, age (machinekit's prerequisites) plus mise (installed by its module).
 - Manages an age private key at `~/.config/age/key.txt` for encrypted blueprint files. Never generates one silently — generation is consent-gated.
-- Builds a merged chezmoi source dir from module-shipped templates plus your blueprint's `common/dotfiles/`, then applies it to `$HOME`.
+- Builds a merged staging dir from module-shipped templates plus your blueprint's `common/home/`, then applies it to `$HOME`.
 - Runs `common/Brewfile` from your blueprints (if present), then `mise install`, then any `common/hooks/post-apply/*.sh` scripts you supply.
 
 What you get on disk after a successful run:
@@ -23,7 +23,7 @@ What you get on disk after a successful run:
 - `~/.ssh/config` (mode 600) — sensible defaults; on macOS, `UseKeychain yes`.
 - `~/.config/mise/config.toml` — empty by default; you add the runtimes you actually use.
 
-Nothing else. Add whatever you want via your blueprints' `common/Brewfile`, your own `common/dotfiles/`, or post-apply hooks.
+Nothing else. Add whatever you want via your blueprints' `common/Brewfile`, your own `common/home/`, or post-apply hooks.
 
 ## CLI structure
 
@@ -144,7 +144,7 @@ machinekit/
 │   ├── machinekit.sh             # aggregator for lib/machinekit/*
 │   ├── modules.sh                # aggregator for lib/modules/*
 │   ├── machinekit/               # core: helpers, blueprints, brew bootstrap, preflight, hooks, prerequisites
-│   └── modules/                  # user-facing modules: age, brewfile, chezmoi, git, mise, zsh
+│   └── modules/                  # user-facing modules: age, brewfile, home, git, mise, zsh
 │       ├── git/templates/        # module-shipped defaults (dot_gitconfig.tmpl)
 │       ├── mise/templates/       # module-shipped defaults (dot_config/mise/…, env.zsh.d/mise.zsh)
 │       └── zsh/templates/        # framework zsh dotfiles (dot_zshrc, env.zsh w/ env.zsh.d loop)
@@ -153,8 +153,8 @@ machinekit/
     ├── common/
     │   ├── machinekit.toml       # floor of the config cascade
     │   ├── Brewfile
-    │   ├── dotfiles/             # only blueprint-owned files; module defaults
-    │   │   ├── .chezmoiignore    # ship with the modules, not here
+    │   ├── home/                 # only blueprint-owned files; module defaults
+    │   │   ├── .mkignore         # ship with the modules, not here
     │   │   └── private_dot_ssh/private_config.tmpl
     │   └── hooks/post-apply/
     └── machine_types/
@@ -171,7 +171,7 @@ macOS (Apple Silicon and Intel). Linux support is architecturally designed for b
 
 machinekit composes existing tools rather than reinventing them:
 
-- [chezmoi](https://chezmoi.io/) — source manager and template engine for dotfiles.
+- [gomplate](https://docs.gomplate.ca/) — Go/Sprig template engine for dotfiles.
 - [mise](https://mise.jdx.dev/) — language and runtime version manager.
 - [Homebrew](https://brew.sh/) — macOS package manager.
 - [age](https://age-encryption.org/) — encryption for sensitive blueprint files.
