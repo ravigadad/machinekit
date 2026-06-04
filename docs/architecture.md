@@ -400,12 +400,13 @@ machinekit/                             ← this repo (public)
 │       ├── brewfile.sh                 ← brewfile::install (apply user Brewfile)
 │       ├── home.sh                     ← home::install + build_staging + _apply
 │       ├── git.sh                      ← git::preflight + git::install
-│       ├── git/templates/              ← module-shipped dotfile defaults (dot_gitconfig.tmpl)
+│       ├── git/templates/              ← module-shipped dotfile defaults (dot_gitconfig.tmpl, dot_config/git/ignore.tmpl)
 │       ├── mise.sh                     ← mise::install
 │       ├── mise/templates/             ← module-shipped dotfile defaults (dot_config/mise/…, env.zsh.d/mise.zsh)
 │       ├── zsh.sh                      ← zsh::install (no-op; module ships templates only)
 │       └── zsh/templates/              ← framework zsh dotfiles (dot_zshrc, env.zsh w/ env.zsh.d loop)
 ├── scripts/                            ← dev/maintainer tools
+├── tests/                              ← bats test suite mirroring lib/ and bin/
 └── templates/blueprints/               ← starter content copied by `machinekit generate`
 ```
 

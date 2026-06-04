@@ -20,6 +20,7 @@ What you get on disk after a successful run:
 - `~/.zshrc` — sources `~/.config/machinekit/env.zsh` and (if present) `~/.zshrc.local` (from the zsh module's template).
 - `~/.config/machinekit/env.zsh` — `brew shellenv`, `~/.local/bin` PATH, history, completion. Ends with a source loop over `~/.config/machinekit/env.zsh.d/*.zsh` so modules can drop their own zsh fragments (mise activation ships there).
 - `~/.gitconfig` — your name/email, `init.defaultBranch = main` (rendered from the git module's template).
+- `~/.config/git/ignore` — global gitignore seeded with common OS and editor artifacts (`.DS_Store`, `Thumbs.db`, `*.orig`, `.idea/`, etc.).
 - `~/.ssh/config` (mode 600) — sensible defaults; on macOS, `UseKeychain yes`.
 - `~/.config/mise/config.toml` — empty by default; you add the runtimes you actually use.
 
@@ -145,10 +146,11 @@ machinekit/
 │   ├── modules.sh                # aggregator for lib/modules/*
 │   ├── machinekit/               # core: helpers, blueprints, brew bootstrap, preflight, hooks, prerequisites
 │   └── modules/                  # user-facing modules: age, brewfile, home, git, mise, zsh
-│       ├── git/templates/        # module-shipped defaults (dot_gitconfig.tmpl)
+│       ├── git/templates/        # module-shipped defaults (dot_gitconfig.tmpl, dot_config/git/ignore.tmpl)
 │       ├── mise/templates/       # module-shipped defaults (dot_config/mise/…, env.zsh.d/mise.zsh)
 │       └── zsh/templates/        # framework zsh dotfiles (dot_zshrc, env.zsh w/ env.zsh.d loop)
 ├── scripts/                      # dev/maintainer tools (e.g. lint)
+├── tests/                        # bats test suite mirroring lib/ and bin/
 └── templates/blueprints/         # starter content copied into your blueprints repo
     ├── common/
     │   ├── machinekit.toml       # floor of the config cascade
