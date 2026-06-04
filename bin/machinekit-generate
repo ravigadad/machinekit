@@ -40,57 +40,68 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-[ -n "$OPT_PATH" ] || { usage >&2; printf '\n' >&2; lifecycle::fail "Missing required <path> argument."; }
+generate::resolve_path() {
+  local opt_path="$1"
+  [ -n "$opt_path" ] || { usage >&2; printf '\n' >&2; lifecycle::fail "Missing required <path> argument."; }
 
-# Resolve to absolute path.
-if [[ "$OPT_PATH" = /* ]]; then
-  TARGET="$OPT_PATH"
-else
-  TARGET="$(pwd)/$OPT_PATH"
-fi
+  local target
+  if [[ "$opt_path" = /* ]]; then
+    target="$opt_path"
+  else
+    target="$(pwd)/$opt_path"
+  fi
 
-[ ! -e "$TARGET" ] || lifecycle::fail "Target already exists: $TARGET"
+  [ ! -e "$target" ] || lifecycle::fail "Target already exists: $target"
 
-NAME="$(basename "$TARGET")"
-case "$NAME" in
-  *[[:space:]]*) lifecycle::fail "Invalid directory name '$NAME' — no whitespace." ;;
-esac
+  local name
+  name="$(basename "$target")"
+  case "$name" in
+    *[[:space:]]*) lifecycle::fail "Invalid directory name '$name' — no whitespace." ;;
+  esac
 
-# ---------------------------------------------------------------------------
-# Copy template
-# ---------------------------------------------------------------------------
+  printf '%s\n' "$target"
+}
 
-logging::step "Copying template to $TARGET"
+generate::copy_template() {
+  local target="$1"
+  logging::step "Copying template to $target"
+  mkdir -p "$target"
+  target="$(cd "$target" && pwd)"
+  # tar pipeline preserves dotfiles cleanly (cp -a behaviour with globs is messy).
+  ( cd "$MACHINEKIT_DIR/templates/blueprints" && tar -cf - . ) | ( cd "$target" && tar -xf - )
+  logging::success "Template copied to $target"
+}
 
-mkdir -p "$TARGET"
-TARGET="$(cd "$TARGET" && pwd)"
-# tar pipeline preserves dotfiles cleanly (cp -a behaviour with globs is messy).
-( cd "$MACHINEKIT_DIR/templates/blueprints" && tar -cf - . ) | ( cd "$TARGET" && tar -xf - )
+generate::print_next_steps() {
+  local target="$1"
+  printf '\n'
+  logging::info "Next steps:"
+  logging::info ""
+  logging::info "1. Customize the template in $target"
+  logging::info ""
+  logging::info "2. Test on this machine (no commit needed — plain directory path works):"
+  logging::info ""
+  logging::info "     machinekit apply --dry-run --blueprints-source $target"
+  logging::info "     machinekit apply --blueprints-source $target"
+  logging::info ""
+  logging::info "3. When ready to publish, initialize a git repo and push:"
+  logging::info ""
+  logging::info "     cd $target"
+  logging::info "     git init -b main && git add -A && git commit -m 'initial'"
+  logging::info "     git remote add origin <your-blueprints-url>"
+  logging::info "     git push -u origin main"
+  logging::info ""
+  logging::info "   Then, on each machine you want to configure:"
+  logging::info ""
+  logging::info "     git clone https://github.com/ravigadad/machinekit && cd machinekit"
+  logging::info "     bin/machinekit apply --blueprints-source <your-blueprints-url>"
+}
 
-logging::success "Template copied to $TARGET"
+main() {
+  local target
+  target=$(generate::resolve_path "$OPT_PATH")
+  generate::copy_template "$target"
+  generate::print_next_steps "$target"
+}
 
-# ---------------------------------------------------------------------------
-# Done — instruct, don't act.
-# ---------------------------------------------------------------------------
-
-printf '\n'
-logging::info "Next steps:"
-logging::info ""
-logging::info "1. Customize the template in $TARGET"
-logging::info ""
-logging::info "2. Test on this machine (no commit needed — plain directory path works):"
-logging::info ""
-logging::info "     machinekit apply --dry-run --blueprints-source $TARGET"
-logging::info "     machinekit apply --blueprints-source $TARGET"
-logging::info ""
-logging::info "3. When ready to publish, initialize a git repo and push:"
-logging::info ""
-logging::info "     cd $TARGET"
-logging::info "     git init -b main && git add -A && git commit -m 'initial'"
-logging::info "     git remote add origin <your-blueprints-url>"
-logging::info "     git push -u origin main"
-logging::info ""
-logging::info "   Then, on each machine you want to configure:"
-logging::info ""
-logging::info "     git clone https://github.com/ravigadad/machinekit && cd machinekit"
-logging::info "     bin/machinekit apply --blueprints-source <your-blueprints-url>"
+[ "${BASH_SOURCE[0]}" != "$0" ] || main
