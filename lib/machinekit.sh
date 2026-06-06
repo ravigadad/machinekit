@@ -30,6 +30,8 @@ source "$_mk_core_dir/modules.sh"
 source "$_mk_core_dir/home.sh"
 # shellcheck source=machinekit/prerequisites.sh
 source "$_mk_core_dir/prerequisites.sh"
+# shellcheck source=machinekit/ssh.sh
+source "$_mk_core_dir/ssh.sh"
 # shellcheck source=machinekit/preflight.sh
 source "$_mk_core_dir/preflight.sh"
 # shellcheck source=machinekit/hooks.sh

@@ -75,6 +75,20 @@ To use the same blueprints on another machine, push your blueprints repo to GitH
 
 This clones machinekit to `~/.local/share/machinekit/framework` and hands off to `machinekit apply` with any flags you pass. On subsequent runs it updates the clone first. Override the location with `MACHINEKIT_FRAMEWORK_DIR=/your/path`.
 
+If your blueprints repo is private (SSH URL), machinekit can set up your SSH key before the clone:
+
+```bash
+# Install an existing key (USB drive, AirDrop, NAS mount, etc.)
+/bin/bash -c "$(curl -fsSL .../install.sh)" -- \
+  --existing-ssh-key-file /Volumes/USB/id_ed25519 \
+  --blueprints-source git@github.com:<owner>/my-blueprints
+
+# Generate a fresh key — machinekit prints it and pauses so you can add it to GitHub/GitLab/etc.
+/bin/bash -c "$(curl -fsSL .../install.sh)" -- \
+  --generate-ssh-key \
+  --blueprints-source git@github.com:<owner>/my-blueprints
+```
+
 On a fresh machine, the first apply will prompt you to:
 
 - Either point at an existing age private key (`--existing-age-key-file <path>` or env), or explicitly opt into generating a new one (`--generate-age-key`).

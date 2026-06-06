@@ -35,6 +35,13 @@ Blueprint source (required):
 Inputs:
       --machine-type <type>                Machine type label (e.g. dev, server).
                                            Env: MACHINEKIT_MACHINE_TYPE
+      --existing-ssh-key-file <path>       Path to an existing SSH private key to
+                                           install before the blueprints clone.
+                                           Env: MACHINEKIT_EXISTING_SSH_KEY_FILE
+      --generate-ssh-key                   Generate a new SSH key if none found.
+                                           Env: MACHINEKIT_SSH_KEY_GENERATE=1
+      --overwrite-ssh-key                  Allow overwriting an existing SSH key.
+                                           Env: MACHINEKIT_SSH_KEY_OVERWRITE=1
       --existing-age-key-file <path>        Path to an existing age key file to
                                            install. The file is copied to the
                                            canonical key location.
@@ -77,6 +84,10 @@ while [ $# -gt 0 ]; do
     --blueprints-source-protocol=*)  export MACHINEKIT_BLUEPRINTS_SOURCE_PROTOCOL="${1#*=}";    shift ;;
     --machine-type)                  export MACHINEKIT_MACHINE_TYPE="${2}";                     shift 2 ;;
     --machine-type=*)                export MACHINEKIT_MACHINE_TYPE="${1#*=}";                  shift ;;
+    --existing-ssh-key-file)         export MACHINEKIT_EXISTING_SSH_KEY_FILE="${2}";            shift 2 ;;
+    --existing-ssh-key-file=*)       export MACHINEKIT_EXISTING_SSH_KEY_FILE="${1#*=}";         shift ;;
+    --generate-ssh-key)              export MACHINEKIT_SSH_KEY_GENERATE=1;                      shift ;;
+    --overwrite-ssh-key)             export MACHINEKIT_SSH_KEY_OVERWRITE=1;                     shift ;;
     --existing-age-key-file)         export MACHINEKIT_EXISTING_AGE_KEY_FILE="${2}";            shift 2 ;;
     --existing-age-key-file=*)       export MACHINEKIT_EXISTING_AGE_KEY_FILE="${1#*=}";         shift ;;
     --generate-age-key)              export MACHINEKIT_AGE_KEY_GENERATE=1;                      shift ;;
@@ -106,6 +117,7 @@ main() {
   input::detect_mode
   input::is_dry_run && logging::step "DRY RUN — showing what would change; nothing will be modified"
   sudo::ensure
+  ssh::setup_key
   preflight::run
   home::sync
   modules::run_installs
