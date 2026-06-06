@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# home module — composes a merged staging dir and applies it to $HOME.
+# Home sync — composes a merged staging dir and applies it to $HOME.
 #
 # The staging dir is built by layering each active module's templates,
 # then the blueprint's common/home/ on top. Files are decoded from
@@ -68,7 +68,7 @@ home::cleanup_staging() {
   _MK_HOME_STAGING_DIR=""
 }
 
-home::install() {
+home::sync() {
   home::build_staging
   if input::is_dry_run; then
     home::_diff

@@ -1,11 +1,11 @@
 #!/usr/bin/env bats
-# Tests for lib/modules/home.sh
+# Tests for lib/machinekit/home.sh
 
 load "${BATS_TEST_DIRNAME}/../../test_helper"
 
 setup() {
-  # shellcheck source=../../../lib/modules/home.sh
-  source "$MACHINEKIT_DIR/lib/modules/home.sh"
+  # shellcheck source=../../../lib/machinekit/home.sh
+  source "$MACHINEKIT_DIR/lib/machinekit/home.sh"
   unset _MK_HOME_LOADED
   _MK_HOME_STAGING_DIR=""
   _MK_HOME_CTX_FILE=""
@@ -28,10 +28,10 @@ setup() {
 # --- load guard ---
 
 @test "sourcing twice does not redefine functions" {
-  home::install() { echo "original"; }
+  home::sync() { echo "original"; }
   _MK_HOME_LOADED=1
-  source "$MACHINEKIT_DIR/lib/modules/home.sh"
-  [ "$(home::install)" = "original" ]
+  source "$MACHINEKIT_DIR/lib/machinekit/home.sh"
+  [ "$(home::sync)" = "original" ]
 }
 
 # --- home::staging_dir ---
@@ -373,21 +373,21 @@ setup() {
   MATCH="--no-index" mktest::assert_stub_called git
 }
 
-# --- home::install ---
+# --- home::sync ---
 
-@test "install in dry-run delegates to _diff" {
+@test "sync in dry-run delegates to _diff" {
   mktest::stub_function input::is_dry_run
   mktest::stub_function home::build_staging
   mktest::stub_function home::_diff
-  home::install
+  home::sync
   mktest::assert_stub_called home::_diff
 }
 
-@test "install in real mode calls build_staging then _apply" {
+@test "sync in real mode calls build_staging then _apply" {
   STUB_RETURN=1 mktest::stub_function input::is_dry_run
   mktest::stub_function home::build_staging
   mktest::stub_function home::_apply
-  home::install
+  home::sync
   mktest::assert_stub_called home::build_staging
   mktest::assert_stub_called home::_apply
 }
