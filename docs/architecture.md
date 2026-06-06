@@ -17,7 +17,7 @@ machinekit is two cooperating repos:
 
 ## Scope
 
-macOS today, portable by design (see [cross-platform posture](#cross-platform-posture)). machinekit is opinionated about a deliberately small stock toolset — Homebrew, gomplate, mise, git, age — and agnostic about everything else. You extend it two ways: declare a machinekit-known module in TOML (Tier 2, planned), or wire up anything at all via post-apply hooks (Tier 3). The fact that machinekit isn't opinionated about a tool doesn't mean you can't use machinekit to install and manage it — you can, via hooks. The small built-in set is just what machinekit has opinions about, not the limit of what it can do.
+macOS today, portable by design (see [cross-platform posture](#cross-platform-posture)). machinekit is opinionated about a deliberately small stock toolset — Homebrew, gomplate, mise, git, age — and agnostic about everything else. You extend it two ways: declare a machinekit-known module in TOML (Tier 2), or wire up anything at all via post-apply hooks (Tier 3). The fact that machinekit isn't opinionated about a tool doesn't mean you can't use machinekit to install and manage it — you can, via hooks. The small built-in set is just what machinekit has opinions about, not the limit of what it can do.
 
 ---
 
@@ -31,8 +31,8 @@ The same vocabulary applies across the code, docs, and user-facing language. Wor
 - **a blueprint** (singular) — one machine type's full design: the assembled result of `common/` content + that machine type's `machine_types/<type>/` overrides. "Apply the personal blueprint."
 - **common layer** — the shared baseline that every blueprint inherits. Lives at `common/` in the blueprints repo. Not a blueprint by itself.
 - **machine type** — a label/key that names a blueprint, passed via `--machine-type <name>` or `MACHINEKIT_MACHINE_TYPE`. The directory `machine_types/<name>/` holds that type's overrides on top of `common/`.
-- **module** — a unit of orchestration logic (install + configure + integrate). User-facing modules name intents (`runtimes`, `databases`); implementation modules (`mise`, `postgres`) are usually pulled in automatically via capability resolution.
-- **capability** — an abstract slot that modules declare they need or provide. Lets multiple modules satisfy the same need (e.g. `container_runtime` is satisfied by `orbstack` on macOS, `docker-engine` on Linux). Resolved by machinekit with per-platform defaults; the user overrides by listing a specific satisfier explicitly.
+- **module** — a unit of orchestration logic (install + configure + integrate). Modules are named in `machinekit.toml`; they declare dependencies via `::requires` and machinekit resolves the install order automatically. The full intent-module / capability-satisfier layer (where abstract names like `runtimes` resolve to concrete tools like `mise`) is a future iteration.
+- **capability** — an abstract slot that modules declare they need or provide. Lets multiple modules satisfy the same need (e.g. `container_runtime` is satisfied by `orbstack` on macOS, `docker-engine` on Linux). Resolved by machinekit with per-platform defaults; the user overrides by listing a specific satisfier explicitly. Not yet implemented — planned for a future iteration.
 
 ### Two repos
 
@@ -133,7 +133,7 @@ There are three roles in machinekit's module system, but only **one concept** �
 
 The user's blueprint reads as *intent*: "I want languages, I want a database." machinekit fills in the satisfiers per platform. The user can override by listing a specific satisfier in their module list — that's how someone says "use Docker, not OrbStack, on this machine."
 
-> Status: iteration 1 hardcodes the prerequisite tool set (gomplate, mise, git, age via brew). The module system, capability resolution, and intent-vs-satisfier distinction land in iteration 3.
+> Status: the module system is implemented — `::install`, `::preflight`, and `::requires` conventions are live; `resolver.sh` handles topological sort; modules are activated via `modules = [...]` in `machinekit.toml`. The capability / intent-vs-satisfier layer (abstract module names resolving to concrete satisfiers) is not yet implemented.
 
 ### Execution modes
 
@@ -357,7 +357,7 @@ A Python or Rust developer using machinekit gets no gratuitous Ruby/Node install
 
 There are two installation stages:
 
-1. **Prerequisite stage** — `machinekit apply` installs `jq`, `gomplate`, `git`, `age` directly. These are hardcoded because `jq` must exist before preflight (it powers the context data layer) and `gomplate`, `git`, and `age` must be available before blueprints are applied. The runtime version manager `mise` is installed by its module, not as a prerequisite.
+1. **Prerequisite stage** — `machinekit apply` installs `jq`, `toml2json`, `gomplate`, `git`, `age` directly. These are hardcoded because `jq` must exist before preflight (it powers the context data layer), `toml2json` is needed to parse `machinekit.toml`, and `gomplate`, `git`, and `age` must be available before blueprints are applied. The runtime version manager `mise` is installed by its module, not as a prerequisite.
 2. **Blueprint stage** — after home files are applied, machinekit runs `brew bundle --file <blueprints>/common/Brewfile`. With `--machine-type <type>`, `<blueprints>/machine_types/<type>/Brewfile` (if present) runs after, additively layering on top.
 
 The template ships with commented Brewfiles showing the conventions; your blueprints contain your real choices.
@@ -380,39 +380,42 @@ machinekit/                             ← this repo (public)
 │   ├── machinekit-apply                ← apply a blueprint
 │   └── machinekit-generate             ← scaffold a fresh blueprint
 ├── lib/                                ← all execution code lives here
-│   ├── machinekit.sh                   ← aggregator: sources lib/machinekit/*
-│   ├── modules.sh                      ← aggregator + modules::dir helper
+│   ├── machinekit.sh                   ← single aggregator: sources lib/machinekit/* eagerly
 │   ├── machinekit/                     ← core machinekit code
-│   │   ├── logging.sh                  ← logging::* (info, warn, error, success, step, debug, fail)
+│   │   ├── logging.sh                  ← logging::* (info, warn, error, success, step, debug, dry_run, fail)
 │   │   ├── lifecycle.sh                ← lifecycle::* (cleanup chain, lock, fail)
-│   │   ├── sudo.sh                     ← sudo::* (sudo credential probe + 60s keep-alive)
+│   │   ├── sudo.sh                     ← sudo::* (credential probe + 60s keep-alive)
 │   │   ├── input.sh                    ← input::* (mode detection, confirm, dry-run, command_exists)
-│   │   ├── context.sh                  ← context::* (jq-backed runtime data store: set/get, arrays, json)
+│   │   ├── context.sh                  ← context::* (jq-backed runtime data store: set/get, arrays, json, seed_from_flags)
+│   │   ├── system.sh                   ← system::detect — populates os.family + os.arch into context
 │   │   ├── brew.sh                     ← brew::* (bootstrap, install_formula — low-level brew ops)
 │   │   ├── blueprints.sh               ← blueprints::* (fetch, dir, protocol resolution)
-│   │   ├── prerequisites.sh            ← prerequisites::* (jq/gomplate/git/age via brew)
-│   │   ├── preflight.sh                ← preflight::* (orchestrate input resolution + module preflights)
-│   │   ├── hooks.sh                    ← hooks::* (post-apply hook runner)
+│   │   ├── config.sh                   ← config::* (parse + merge machinekit.toml via toml2json; stored in context)
+│   │   ├── resolver.sh                 ← resolver::resolve — DFS topological sort over ::requires declarations
+│   │   ├── modules.sh                  ← modules::* (source_all, run_preflights, run_installs)
+│   │   ├── home.sh                     ← home::* (build_staging, sync, _apply, _diff — core home management)
+│   │   ├── prerequisites.sh            ← prerequisites::* (jq/toml2json/gomplate/git/age via brew)
+│   │   ├── preflight.sh                ← preflight::* (system detect, blueprints fetch, config load, module resolution)
+│   │   ├── hooks.sh                    ← hooks::* (post-apply hook runner; common + machine_type layers)
 │   │   ├── hook-support.sh             ← library blueprint hooks source via $MACHINEKIT_SUPPORT
 │   │   └── postflight.sh               ← postflight::* (apply summary output)
 │   └── modules/                        ← user-facing modules; each exposes ::install
 │       ├── age.sh                      ← age::preflight + age::install
-│       ├── brewfile.sh                 ← brewfile::install (apply user Brewfile)
-│       ├── home.sh                     ← home::install + build_staging + _apply
-│       ├── git.sh                      ← git::preflight + git::install
+│       ├── brewfile.sh                 ← brewfile::install (common + machine_type Brewfile layers)
+│       ├── git.sh                      ← git::preflight + git::install (no-op; ships templates)
 │       ├── git/templates/              ← module-shipped dotfile defaults (dot_gitconfig.tmpl, dot_config/git/ignore.tmpl)
-│       ├── mise.sh                     ← mise::install
+│       ├── mise.sh                     ← mise::requires + mise::install
 │       ├── mise/templates/             ← module-shipped dotfile defaults (dot_config/mise/…, env.zsh.d/mise.zsh)
 │       ├── zsh.sh                      ← zsh::install (no-op; module ships templates only)
 │       └── zsh/templates/              ← framework zsh dotfiles (dot_zshrc, env.zsh w/ env.zsh.d loop)
-├── scripts/                            ← dev/maintainer tools
+├── scripts/                            ← dev/maintainer tools (lint, test-vm)
 ├── tests/                              ← bats test suite mirroring lib/ and bin/
 └── templates/blueprints/               ← starter content copied by `machinekit generate`
 ```
 
 **Convention**: `bin/` files are thin orchestrators (flag parsing, mode detection, the apply pipeline as a sequence of namespaced calls). All execution code lives in `lib/`. `lib/<name>.sh` is the aggregator for `lib/<name>/*.sh`; each file's namespace matches its filename (`brew::*` in `brew.sh`, `age::*` in `age.sh`, etc.).
 
-**Module API**: every file in `lib/modules/` exposes `<name>::install` as its main entry point. Modules that need to resolve user inputs before the apply pipeline runs also expose `<name>::preflight`, called from `preflight::run_module_preflights`. Modules may also ship a sibling directory `lib/modules/<name>/templates/` holding default dotfiles; the home module's staging-dir builder picks these up automatically. This shape is iteration-1 stable and grows with iteration 3 (module activation driven by machine type).
+**Module API**: every file in `lib/modules/` exposes `<name>::install` as its main entry point. Modules that need to resolve user inputs before the apply pipeline runs also expose `<name>::preflight`. Modules with inter-module dependencies declare them via `<name>::requires` (returning one dependency name per line); `resolver.sh` sorts the active set into install order. Modules may also ship a sibling directory `lib/modules/<name>/templates/` holding default dotfiles; `home::build_staging` picks these up automatically. Active modules are driven by `modules = [...]` in `machinekit.toml`, resolved at preflight time.
 
 **Zsh hook pattern**: the `zsh` module ships `~/.config/machinekit/env.zsh`, which ends with a glob-source loop over `~/.config/machinekit/env.zsh.d/*.zsh`. Any module that needs to contribute zsh-level setup drops a single `.zsh` file in its own `templates/dot_config/machinekit/env.zsh.d/` directory — the staging-dir builder merges it in, the home module installs it, and env.zsh sources it on every zsh startup. When a module is inactive, no fragment ends up on disk and nothing is sourced. mise uses this pattern today (`templates/dot_config/machinekit/env.zsh.d/mise.zsh` for `eval "$(mise activate zsh)"`); future modules plug in the same way.
 
