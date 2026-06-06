@@ -15,7 +15,7 @@ Architecture is described in [architecture.md](./architecture.md); this document
 **Deliverables:**
 
 - `machinekit apply` — main entry point. Two execution modes (interactive / non-interactive). Idempotent. Consent-gated for irreversible actions.
-- `lib/machinekit/` + `lib/modules/` — execution code, split between core machinekit infrastructure (helpers, brew bootstrap, blueprints fetch, preflight orchestration, hooks, prerequisites) and user-facing modules (age, brewfile, home, git, mise, zsh). Aggregated by `lib/machinekit.sh` and `lib/modules.sh`. `bin/` files are thin orchestrators.
+- `lib/machinekit/` + `lib/modules/` — execution code, split between core machinekit infrastructure (helpers, brew bootstrap, blueprints fetch, preflight orchestration, hooks, prerequisites) and user-facing modules (age, brewfile, git, mise, zsh). Aggregated by `lib/machinekit.sh` (eager); modules are lazy-sourced via `modules::source_all`. `bin/` files are thin orchestrators.
 - `context::` — a jq-backed runtime data store, accessed via `context::set` / `context::get` (scalars) and `context::set_array` / `context::get_array` (arrays) using snake_case dotted keys. Passed to gomplate as the root context at apply time so blueprint dotfiles can reference values as nested template fields (`.git.user_name`, `.modules.active`, etc.).
 - Module template bundling — modules can ship default dotfile templates in `lib/modules/<name>/templates/`. The git, mise, and zsh modules ship their own defaults (gitconfig, mise config, dot_zshrc + env.zsh). Users override per-path in their blueprint's `common/home/`.
 - Zsh hook pattern — the `zsh` module's env.zsh ends with a glob-source loop over `~/.config/machinekit/env.zsh.d/*.zsh`. Modules that need zsh setup ship a fragment in their `templates/dot_config/machinekit/env.zsh.d/`. mise uses this today; future modules plug in the same way.
@@ -77,34 +77,32 @@ The directory structure (`machine_types/<type>/`) ships in iteration 1; this ite
 
 ## Iteration 3 — Module system
 
-**Status: planned.**
+**Status: concrete infrastructure implemented; intent-module layer not yet implemented.**
 
 **Value**: optional tools become declarative. You opt in via `machinekit.toml` and dependencies resolve automatically. This is the architectural mechanism behind [Tier 2 customization](./architecture.md#three-tier-customization).
 
 **Deliverables:**
 
-- `lib/modules/<name>.sh` convention with declared inputs, defaults, and dependencies.
-- TOML config reader for `machinekit.toml` in blueprints.
-- Dependency closure resolver: opt into one module, get its transitive deps automatically.
-- One small trial module to validate the shape. `mise` is the natural first candidate: it's already hardcoded in iteration 1 and needs to be properly modularized.
+- `lib/modules/<name>.sh` convention with `::preflight`, `::install`, and `::requires` declarations. **Implemented.**
+- TOML config reader for `machinekit.toml`: `config::load` merges common and machine-type layers; `config::get "module.<name>.<key>"` gives modules access to their config. **Implemented.**
+- Dependency closure resolver: `resolver::resolve` does a DFS topological sort over `::requires` declarations so opting into one module pulls in its deps automatically. **Implemented.**
+- Validation: all five concrete modules (`age`, `brewfile`, `git`, `mise`, `zsh`) exercised end-to-end with the resolver and config layer. **Done.**
 
-**Module design: intent modules, capabilities, satisfiers**
+**Remaining: intent modules, capabilities, satisfiers**
 
-The module system implements the three-role framing described in [docs/architecture.md § Modules, capabilities, and satisfiers](./architecture.md#modules-capabilities-and-satisfiers):
+The concrete module system lets users list `mise`, `git`, etc. directly in `machinekit.toml`. The planned abstraction layer above it — described in [docs/architecture.md § Modules, capabilities, and satisfiers](./architecture.md#modules-capabilities-and-satisfiers) — is not yet implemented:
 
 - **Intent modules** are what users list in `machinekit.toml` (`runtimes`, `databases`, etc.). They take semantic config and declare capability needs.
 - **Implementation modules** are concrete satisfiers (`mise`, `postgres`, `orbstack`). Usually pulled in automatically; users list them explicitly only when overriding the default satisfier.
-- **Capabilities** wire intent to implementation. `runtime_manager` is satisfied by `mise` (default); `container_runtime` is satisfied by `orbstack` on macOS / `docker-engine` on Linux. The user overrides by listing a specific satisfier.
+- **Capabilities** wire intent to implementation. `runtime_manager` is satisfied by `mise` (default); `container_runtime` is satisfied by `orbstack` on macOS / `docker-engine` on Linux.
 
-Modules support three operating modes for their config, selected by what the blueprint provides:
+Modules support three operating modes for their config:
 
-- **Basic mode**: the user declares semantic intent via the intent module's config (e.g. `[modules.runtimes]` with `ruby = "latest"`). The module translates this into the satisfier's native config, installs the satisfier, and runs the install step. machinekit assembles the implementation.
-- **Advanced mode**: the user provides the raw satisfier config in their home dir (e.g. `common/home/dot_config/mise/config.toml`). The module detects this, defers to it, and just runs install. The user owns the full config.
-- **Bypass**: the user handles everything via `common/Brewfile` and post-apply hooks. No module involvement.
+- **Basic mode**: the user declares semantic intent via the intent module's config. The module translates this into the satisfier's native config, installs the satisfier, and runs the install step.
+- **Advanced mode**: the user provides the raw satisfier config in their home dir. The module detects this, defers to it, and just runs install.
+- **Bypass**: the user handles everything via `common/Brewfile` and post-apply hooks.
 
-The semantic declaration layer is where machinekit earns its abstraction cost: a user who declares `runtimes = { ruby = "latest" }` gets the right behavior whether the underlying tool is mise, asdf, or something else. Swapping the satisfier is a machinekit concern, not a blueprint concern.
-
-This means the module interface must stabilize the *intent vocabulary* (what intent modules exist, what config they accept) before committing to tool-specific implementation. Don't design the module API around mise internals.
+The intent vocabulary (what intent modules exist, what config they accept) must stabilize before committing to tool-specific implementation. Don't design the module API around mise internals.
 
 **Why a separate iteration**: the module system is the highest-leverage architectural change in the project. Shipping it with one real module (mise) first means the abstractions are exercised against something non-trivial before more modules build on it.
 
