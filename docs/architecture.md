@@ -289,7 +289,7 @@ Without `--machine-type`, only the common layer applies. There is no implicit "d
 
 Machine types are how blueprints *express variation* across a fleet. They're not a tagging system or a capability flag set — those concerns live in `[modules.*]` config (iteration 2/3) and in the modules' own capability declarations.
 
-> Status: the directory structure ships in iteration 1. All four layers — `home/`, `Brewfile`, `hooks/post-apply/`, and `machinekit.toml` — are implemented (iteration 2). End-to-end validation with a non-default machine type is not yet done.
+> Status: the directory structure ships in iteration 1. All four layers — `home/`, `Brewfile`, `hooks/post-apply/`, and `machinekit.toml` — are implemented (iteration 2). End-to-end validation with a non-default machine type is done.
 
 mise is installed on every machine — it's lightweight enough that the consistency is worth it. No runtimes are pre-installed; users configure them per their needs.
 
