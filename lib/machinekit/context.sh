@@ -56,12 +56,13 @@ context::get() {
   local store_default=0
   local coerce=""
   local prompt_text=""
+  local should_prompt=0
   while [ $# -gt 0 ]; do
     case "$1" in
       --required)       required=1 ;;
       --default)        has_default=1; default="$2"; shift ;;
       --coerce)         coerce="$2"; shift ;;
-      --prompt)         prompt_text="$2"; shift ;;
+      --prompt)         should_prompt=1; prompt_text="$2"; shift ;;
       --store-default)  store_default=1 ;;
       *) lifecycle::fail "context::get: unknown option: $1" ;;
     esac
@@ -71,7 +72,6 @@ context::get() {
   [ "$required" = 1 ] && [ "$has_default" = 1 ] && \
     lifecycle::fail "context::get: --required and --default are mutually exclusive"
 
-  local should_prompt=0
   [ -n "$prompt_text" ] && should_prompt=1
   [ "$required" = 1 ] && should_prompt=1
 

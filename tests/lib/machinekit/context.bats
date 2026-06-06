@@ -131,6 +131,13 @@ setup() {
   [ "$result" = "user-answer" ]
 }
 
+@test "get --prompt with a blank string still prompts" {
+  STUB_RETURN=1 mktest::stub_function context::_from_store
+  STUB_RETURN=1 mktest::stub_function context::_from_env
+  STUB_OUTPUT="user-answer" mktest::stub_function context::_prompt "test.key"
+  result=$(context::get "test.key" --prompt "")
+  [ "$result" = "user-answer" ]
+}
 @test "get --prompt alone returns 1 when user enters nothing" {
   STUB_RETURN=1 mktest::stub_function context::_from_store
   STUB_RETURN=1 mktest::stub_function context::_from_env

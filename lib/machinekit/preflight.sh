@@ -15,7 +15,7 @@ preflight::run() {
   system::detect
   blueprints::fetch
   config::load
-  preflight::report_machine_type
+  preflight::resolve_machine_type
   preflight::resolve_active_modules
 
   modules::run_preflights
@@ -23,9 +23,9 @@ preflight::run() {
   logging::success "Preflight complete."
 }
 
-preflight::report_machine_type() {
+preflight::resolve_machine_type() {
   local t
-  t=$(context::get "machine_type") || true
+  t=$(context::get "machine_type" --prompt "Which machine type do you want to apply?" --default "") || true
   logging::info "Machine type: ${t:-not specified}"
 }
 

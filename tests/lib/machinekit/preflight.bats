@@ -29,30 +29,30 @@ setup() {
   mktest::stub_function system::detect
   mktest::stub_function blueprints::fetch
   mktest::stub_function config::load
-  mktest::stub_function preflight::report_machine_type
+  mktest::stub_function preflight::resolve_machine_type
   mktest::stub_function preflight::resolve_active_modules
   mktest::stub_function modules::run_preflights
   preflight::run
   mktest::assert_stub_called system::detect
   mktest::assert_stub_called blueprints::fetch
   mktest::assert_stub_called config::load
-  mktest::assert_stub_called preflight::report_machine_type
+  mktest::assert_stub_called preflight::resolve_machine_type
   mktest::assert_stub_called preflight::resolve_active_modules
   mktest::assert_stub_called modules::run_preflights
 }
 
-# --- preflight::report_machine_type ---
+# --- preflight::resolve_machine_type ---
 
-@test "report_machine_type logs the machine type from context" {
-  STUB_OUTPUT="laptop" mktest::stub_function context::get "machine_type"
-  preflight::report_machine_type
+@test "resolve_machine_type gets the machine type from context (or prompts), and logs it" {
+  STUB_OUTPUT="laptop" mktest::stub_function context::get "machine_type" --prompt "Which machine type do you want to apply?" --default ""
+  preflight::resolve_machine_type
   MATCH="laptop" mktest::assert_stub_called logging::info
 }
 
-@test "report_machine_type reports non-specified if not in context" {
+@test "resolve_machine_type reports non-specified if not in context" {
   # The || true guard lets preflight proceed even when machine_type is absent.
-  STUB_RETURN=1 mktest::stub_function context::get "machine_type"
-  run preflight::report_machine_type
+  STUB_RETURN=1 mktest::stub_function context::get "machine_type" --prompt "Which machine type do you want to apply?" --default ""
+  run preflight::resolve_machine_type
   MATCH="not specified" mktest::assert_stub_called logging::info
 }
 
@@ -74,4 +74,3 @@ setup() {
   preflight::resolve_active_modules
   mktest::assert_stub_called context::set_array "modules.active" home zsh mise
 }
-
