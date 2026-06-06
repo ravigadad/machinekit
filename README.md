@@ -71,7 +71,8 @@ To use the same blueprints on another machine, push your blueprints repo to GitH
 On a fresh machine, the first apply will prompt you to:
 
 - Either point at an existing age private key (`--existing-age-key-file <path>` or env), or explicitly opt into generating a new one (`--generate-age-key`).
-- Provide your machine type, git user.name, and git user.email — via flags, env vars, or interactive prompts.
+- Provide your machine type — via flag, env var, or interactive prompt.
+- Module-specific inputs (e.g. `git user.name` and `git user.email`) are read from your blueprint's `machinekit.toml` under `[module.git]`, or prompted if absent.
 
 If your blueprints URL needs authentication (e.g. private HTTPS), configure git's credentials before running — machinekit uses git's existing auth (SSH key, `.netrc`, credential helper) rather than managing credentials itself.
 
@@ -108,8 +109,6 @@ sudo -v && \
 MACHINEKIT_MODE_INTERACTIVE=0 \
 MACHINEKIT_BLUEPRINTS_SOURCE=https://github.com/me/blueprints \
 MACHINEKIT_MACHINE_TYPE=dev \
-MACHINEKIT_GIT_USER_NAME="Jane Doe" \
-MACHINEKIT_GIT_USER_EMAIL=jane@example.com \
 MACHINEKIT_EXISTING_AGE_KEY_FILE=/path/to/age.key \
   bin/machinekit apply
 
@@ -117,8 +116,6 @@ MACHINEKIT_EXISTING_AGE_KEY_FILE=/path/to/age.key \
 sudo -v && bin/machinekit apply --non-interactive \
   --blueprints-source https://github.com/me/blueprints \
   --machine-type dev \
-  --git-user-name "Jane Doe" \
-  --git-user-email jane@example.com \
   --existing-age-key-file /path/to/age.key
 
 # Mixed — env vars + CLI flags
@@ -126,9 +123,7 @@ sudo -v && \
 MACHINEKIT_EXISTING_AGE_KEY_FILE=/path/to/age.key \
   bin/machinekit apply --non-interactive \
     --blueprints-source https://github.com/me/blueprints \
-    --machine-type dev \
-    --git-user-name "Jane Doe" \
-    --git-user-email jane@example.com
+    --machine-type dev
 ```
 
 Run `bin/machinekit apply --help` for the full flag list.

@@ -8,8 +8,8 @@ git::preflight() {
   # Resolve eagerly so a missing value fails here with a clear message
   # rather than at apply time with a template error.
   local name email
-  name=$(context::get "git.user_name"   --required) || return 1
-  email=$(context::get "git.user_email" --required) || return 1
+  name=$(config::get "module.git.user_name"   --required --prompt "Git user.name")  || return 1
+  email=$(config::get "module.git.user_email" --required --prompt "Git user.email") || return 1
   logging::info "Git user.name:  $name"
   logging::info "Git user.email: $email"
 }

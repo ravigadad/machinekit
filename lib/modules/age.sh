@@ -14,7 +14,7 @@ _AGE_GENERATE_PROMPT="No age key found at %s. Generate a new one? (y/n)"
 
 age::preflight() {
   local key_path existing_key_file generate
-  key_path=$(context::get "age.key_path" --default "$AGE_KEY_PATH" --store-default)
+  key_path=$(config::get "module.age.key_path" --default "$AGE_KEY_PATH" --store-default)
   existing_key_file=$(context::get "existing_age_key_file" || true)
 
   if [ -n "$existing_key_file" ]; then
@@ -53,7 +53,7 @@ age::install() {
   logging::step "age encryption key"
 
   local key_path existing_key_file generate
-  key_path=$(context::get "age.key_path")
+  key_path=$(config::get "module.age.key_path")
   existing_key_file=$(context::get "existing_age_key_file" || true)
   generate=$(context::get "age.key_generate" --coerce boolean --default false)
 

@@ -144,8 +144,6 @@ context::seed_from_flags() {
     "MACHINEKIT_BLUEPRINTS_SOURCE_PROTOCOL:blueprints.source_protocol"
     "MACHINEKIT_MACHINE_TYPE:machine_type"
     "MACHINEKIT_EXISTING_AGE_KEY_FILE:existing_age_key_file"
-    "MACHINEKIT_GIT_USER_NAME:git.user_name"
-    "MACHINEKIT_GIT_USER_EMAIL:git.user_email"
     "MACHINEKIT_AGE_KEY_GENERATE:age.key_generate"
     "MACHINEKIT_AGE_KEY_OVERWRITE:age.key_overwrite"
     "MACHINEKIT_MODE_DRY_RUN:mode.dry_run"

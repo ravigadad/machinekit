@@ -261,12 +261,10 @@ setup() {
 
 @test "seed_from_flags seeds set MACHINEKIT_* env vars into the context store" {
   export MACHINEKIT_BLUEPRINTS_SOURCE="https://example.com/bp.git"
-  export MACHINEKIT_GIT_USER_NAME="Alice"
   export MACHINEKIT_MODE_DRY_RUN=1
   unset MACHINEKIT_MACHINE_TYPE
   context::seed_from_flags
   [ "$(context::get "blueprints.source")" = "https://example.com/bp.git" ]
-  [ "$(context::get "git.user_name")" = "Alice" ]
   [ "$(context::get "mode.dry_run")" = "1" ]
   run ! context::_from_store "machine_type"
 }
@@ -274,7 +272,6 @@ setup() {
 @test "seed_from_flags is a no-op when no MACHINEKIT_* env vars are set" {
   unset MACHINEKIT_BLUEPRINTS_SOURCE MACHINEKIT_BLUEPRINTS_SOURCE_PROTOCOL \
         MACHINEKIT_MACHINE_TYPE MACHINEKIT_EXISTING_AGE_KEY_FILE \
-        MACHINEKIT_GIT_USER_NAME MACHINEKIT_GIT_USER_EMAIL \
         MACHINEKIT_AGE_KEY_GENERATE MACHINEKIT_AGE_KEY_OVERWRITE \
         MACHINEKIT_MODE_DRY_RUN MACHINEKIT_MODE_INTERACTIVE
   context::seed_from_flags

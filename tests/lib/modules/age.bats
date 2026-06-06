@@ -16,7 +16,7 @@ setup() {
 @test "preflight with existing key file logs the copy plan" {
   local keyfile="$BATS_TEST_TMPDIR/provided-key.txt"
   printf 'fake key\n' > "$keyfile"
-  STUB_OUTPUT="$AGE_KEY_PATH" mktest::stub_function context::get "age.key_path" "--default" "$AGE_KEY_PATH" "--store-default"
+  STUB_OUTPUT="$AGE_KEY_PATH" mktest::stub_function config::get "module.age.key_path" "--default" "$AGE_KEY_PATH" "--store-default"
   STUB_OUTPUT="$keyfile" mktest::stub_function context::get "existing_age_key_file"
   mktest::stub_function logging::info
   age::preflight
@@ -28,7 +28,7 @@ setup() {
   printf 'fake key\n' > "$keyfile"
   mkdir -p "$(dirname "$AGE_KEY_PATH")"
   printf 'existing\n' > "$AGE_KEY_PATH"
-  STUB_OUTPUT="$AGE_KEY_PATH" mktest::stub_function context::get "age.key_path" "--default" "$AGE_KEY_PATH" "--store-default"
+  STUB_OUTPUT="$AGE_KEY_PATH" mktest::stub_function config::get "module.age.key_path" "--default" "$AGE_KEY_PATH" "--store-default"
   STUB_OUTPUT="$keyfile" mktest::stub_function context::get "existing_age_key_file"
   mktest::stub_function age::_confirm_overwrite
   mktest::stub_function logging::info
@@ -38,7 +38,7 @@ setup() {
 }
 
 @test "preflight fails when the provided key file does not exist" {
-  STUB_OUTPUT="$AGE_KEY_PATH" mktest::stub_function context::get "age.key_path" "--default" "$AGE_KEY_PATH" "--store-default"
+  STUB_OUTPUT="$AGE_KEY_PATH" mktest::stub_function config::get "module.age.key_path" "--default" "$AGE_KEY_PATH" "--store-default"
   STUB_OUTPUT="$BATS_TEST_TMPDIR/no-such-key.txt" mktest::stub_function context::get "existing_age_key_file"
   STUB_EXIT=1 mktest::stub_function lifecycle::fail
   run ! age::preflight
@@ -48,7 +48,7 @@ setup() {
 @test "preflight logs existing plan when key is present and generate not requested" {
   mkdir -p "$(dirname "$AGE_KEY_PATH")"
   printf 'existing key\n' > "$AGE_KEY_PATH"
-  STUB_OUTPUT="$AGE_KEY_PATH" mktest::stub_function context::get "age.key_path" "--default" "$AGE_KEY_PATH" "--store-default"
+  STUB_OUTPUT="$AGE_KEY_PATH" mktest::stub_function config::get "module.age.key_path" "--default" "$AGE_KEY_PATH" "--store-default"
   STUB_RETURN=1 mktest::stub_function context::get "existing_age_key_file"
   STUB_OUTPUT="false" mktest::stub_function context::get "age.key_generate" "--coerce" "boolean" "--default" "false" "--store-default"
   mktest::stub_function logging::info
@@ -59,7 +59,7 @@ setup() {
 @test "preflight calls _confirm_overwrite and logs generate plan when generate requested over existing key" {
   mkdir -p "$(dirname "$AGE_KEY_PATH")"
   printf 'existing key\n' > "$AGE_KEY_PATH"
-  STUB_OUTPUT="$AGE_KEY_PATH" mktest::stub_function context::get "age.key_path" "--default" "$AGE_KEY_PATH" "--store-default"
+  STUB_OUTPUT="$AGE_KEY_PATH" mktest::stub_function config::get "module.age.key_path" "--default" "$AGE_KEY_PATH" "--store-default"
   STUB_RETURN=1 mktest::stub_function context::get "existing_age_key_file"
   STUB_OUTPUT="true" mktest::stub_function context::get "age.key_generate" "--coerce" "boolean" "--default" "false" "--store-default"
   mktest::stub_function age::_confirm_overwrite
@@ -73,7 +73,7 @@ setup() {
   local generate_prompt
   # shellcheck disable=SC2059
   printf -v generate_prompt "$_AGE_GENERATE_PROMPT" "$AGE_KEY_PATH"
-  STUB_OUTPUT="$AGE_KEY_PATH" mktest::stub_function context::get "age.key_path" "--default" "$AGE_KEY_PATH" "--store-default"
+  STUB_OUTPUT="$AGE_KEY_PATH" mktest::stub_function config::get "module.age.key_path" "--default" "$AGE_KEY_PATH" "--store-default"
   STUB_RETURN=1 mktest::stub_function context::get "existing_age_key_file"
   STUB_OUTPUT="true" mktest::stub_function context::get "age.key_generate" "--required" "--coerce" "boolean" "--prompt" "$generate_prompt"
   mktest::stub_function logging::info
@@ -85,7 +85,7 @@ setup() {
   local generate_prompt
   # shellcheck disable=SC2059
   printf -v generate_prompt "$_AGE_GENERATE_PROMPT" "$AGE_KEY_PATH"
-  STUB_OUTPUT="$AGE_KEY_PATH" mktest::stub_function context::get "age.key_path" "--default" "$AGE_KEY_PATH" "--store-default"
+  STUB_OUTPUT="$AGE_KEY_PATH" mktest::stub_function config::get "module.age.key_path" "--default" "$AGE_KEY_PATH" "--store-default"
   STUB_RETURN=1 mktest::stub_function context::get "existing_age_key_file"
   STUB_OUTPUT="false" mktest::stub_function context::get "age.key_generate" "--required" "--coerce" "boolean" "--prompt" "$generate_prompt"
   STUB_EXIT=1 mktest::stub_function lifecycle::fail
@@ -111,7 +111,7 @@ setup() {
 
 @test "install in dry-run delegates to _report_dry_run and returns 0" {
   local src="$BATS_TEST_TMPDIR/src.txt"
-  STUB_OUTPUT="$AGE_KEY_PATH" mktest::stub_function context::get "age.key_path"
+  STUB_OUTPUT="$AGE_KEY_PATH" mktest::stub_function config::get "module.age.key_path"
   STUB_OUTPUT="$src" mktest::stub_function context::get "existing_age_key_file"
   STUB_OUTPUT="false" mktest::stub_function context::get "age.key_generate" "--coerce" "boolean" "--default" "false"
   mktest::stub_function logging::step
@@ -124,7 +124,7 @@ setup() {
 
 @test "install with existing_key_file creates the key dir with 700 permissions and delegates to _install_copy" {
   local src="$BATS_TEST_TMPDIR/src.txt"
-  STUB_OUTPUT="$AGE_KEY_PATH" mktest::stub_function context::get "age.key_path"
+  STUB_OUTPUT="$AGE_KEY_PATH" mktest::stub_function config::get "module.age.key_path"
   STUB_OUTPUT="$src" mktest::stub_function context::get "existing_age_key_file"
   STUB_OUTPUT="false" mktest::stub_function context::get "age.key_generate" "--coerce" "boolean" "--default" "false"
   mktest::stub_function logging::step
@@ -139,7 +139,7 @@ setup() {
 }
 
 @test "install with generate=true delegates to _install_generate" {
-  STUB_OUTPUT="$AGE_KEY_PATH" mktest::stub_function context::get "age.key_path"
+  STUB_OUTPUT="$AGE_KEY_PATH" mktest::stub_function config::get "module.age.key_path"
   STUB_RETURN=1 mktest::stub_function context::get "existing_age_key_file"
   STUB_OUTPUT="true" mktest::stub_function context::get "age.key_generate" "--coerce" "boolean" "--default" "false"
   mktest::stub_function logging::step
@@ -150,7 +150,7 @@ setup() {
 }
 
 @test "install with no key file and generate=false delegates to _install_use_existing" {
-  STUB_OUTPUT="$AGE_KEY_PATH" mktest::stub_function context::get "age.key_path"
+  STUB_OUTPUT="$AGE_KEY_PATH" mktest::stub_function config::get "module.age.key_path"
   STUB_RETURN=1 mktest::stub_function context::get "existing_age_key_file"
   STUB_OUTPUT="false" mktest::stub_function context::get "age.key_generate" "--coerce" "boolean" "--default" "false"
   mktest::stub_function logging::step
