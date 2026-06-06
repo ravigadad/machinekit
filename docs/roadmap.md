@@ -30,8 +30,9 @@ Architecture is described in [architecture.md](./architecture.md); this document
   - `common/hooks/post-apply/` — empty placeholder.
   - `machine_types/README.md` — placeholder explaining the per-type override layout for iteration 2.
 - Home file application walks the staging dir, decodes chezmoi path conventions (dot_, private_, .tmpl), renders templates via gomplate with the full context JSON, and copies files to `$HOME` with appropriate permissions. machinekit owns the full pipeline — no external source manager.
+- SSH module (`ssh.sh`) — installs an existing key or generates a fresh one before (proactive) or after (reactive, interactive mode only) the blueprints clone fails with an SSH auth error. Reactive path retries the clone automatically after key setup. Clone errors are classified from git stderr (auth / network / not-found / unknown) and produce targeted messages.
 - Blueprint source is cached at `~/.local/share/machinekit/blueprints/` (machinekit-owned, treated as an ephemeral cache — wiped and re-fetched on every real-run apply).
-- Cross-platform posture documented; macOS implementation only.
+- Cross-platform posture documented; macOS primary, Linux CI/e2e in place.
 
 **Stock install** (what bootstrap puts on the machine with no extra config):
 
@@ -147,7 +148,7 @@ Things considered and deliberately set aside:
 |---|---|
 | `brew bundle dump` for Brewfile generation | Captures transitive deps and makes Brewfiles unmaintainable. Brewfiles are crafted by hand. |
 | Three-repo split (framework + public template + private user repo) | Two-repo split with internal template is cleaner: template stays in lockstep with the framework, and the init script does more than a "Use this template" button would. |
-| Credentials handling for the blueprints clone | Authentication is git's job, not machinekit's. Users configure credentials via standard git mechanisms (SSH key, `.netrc`, credential helper) before running. Keeps machinekit host-agnostic and avoids reimplementing what git already does well. |
+| HTTPS credential management for the blueprints clone | HTTPS tokens, `.netrc`, and credential helpers are git's job, not machinekit's. SSH key setup IS handled by the SSH module (see iteration 1). Keeping HTTPS out of scope preserves host-agnostic posture and avoids reimplementing what git already does well. |
 | Silent age key generation when none found | A new key cannot decrypt files encrypted by a previous one; silent generation would lock users out of their own blueprints. Generation requires explicit consent. |
 | Editor configs as a stock concern | `.editorconfig` and IDE settings are repo-level, not machine-level. Out of scope. |
 | Prescriptive machine taxonomy | `machine_type` is an arbitrary string the user defines. The starter ships with `dev` and `server`; extend as needed. |

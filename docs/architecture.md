@@ -17,7 +17,7 @@ machinekit is two cooperating repos:
 
 ## Scope
 
-macOS today, portable by design (see [cross-platform posture](#cross-platform-posture)). machinekit is opinionated about a deliberately small stock toolset — Homebrew, gomplate, mise, git, age — and agnostic about everything else. You extend it two ways: declare a machinekit-known module in TOML (Tier 2), or wire up anything at all via post-apply hooks (Tier 3). The fact that machinekit isn't opinionated about a tool doesn't mean you can't use machinekit to install and manage it — you can, via hooks. The small built-in set is just what machinekit has opinions about, not the limit of what it can do.
+macOS and Linux, by design (see [cross-platform posture](#cross-platform-posture)). machinekit is opinionated about a deliberately small stock toolset — Homebrew, gomplate, mise, git, age — and agnostic about everything else. You extend it two ways: declare a machinekit-known module in TOML (Tier 2), or wire up anything at all via post-apply hooks (Tier 3). The fact that machinekit isn't opinionated about a tool doesn't mean you can't use machinekit to install and manage it — you can, via hooks. The small built-in set is just what machinekit has opinions about, not the limit of what it can do.
 
 ---
 
@@ -182,7 +182,7 @@ Env var convention: `MACHINEKIT_` prefix, full descriptive name, no abbreviation
 
 ## Cross-platform posture
 
-machinekit's architecture is OS-agnostic by design. The current implementation targets macOS because that's where development is happening, but choices that would lock the framework to macOS are explicitly avoided, and per-OS branch points are flagged from day one. Generalizing to Linux is incremental work, not a redesign.
+machinekit is designed to support macOS and Linux, and will continue to be. Primary development happens on macOS (Apple Silicon and Intel), and the CI suite includes end-to-end tests on Ubuntu VMs. Choices that would lock the framework to a single OS are explicitly avoided; per-OS branch points are flagged from day one. Broadening Linux support is incremental work, not a redesign.
 
 ### Already cross-platform
 
@@ -214,18 +214,25 @@ machinekit's architecture is OS-agnostic by design. The current implementation t
 
 Inspired by [thoughtbot/laptop](https://github.com/thoughtbot/laptop). Safe to run multiple times: every step checks state before acting, and re-running on a configured machine upgrades drift without breaking what's working.
 
-### Git authentication is the user's responsibility
+### Blueprints clone authentication
 
-machinekit does not install or wrap any host-specific auth tooling, and does not generate, store, or refresh git credentials. The contract is simpler: **whatever method git already uses to authenticate to your blueprints URL, machinekit relies on that.**
+machinekit splits authentication into two distinct concerns:
 
-That covers the full universe of git auth — SSH keys, `.netrc`, credential helpers (`osxkeychain`, `libsecret`, custom), per-URL `http.extraHeader` tokens, any host's CLI that wires into git's credential helper. machinekit makes no assumptions about which one you use.
+**SSH key setup** is machinekit's responsibility when cloning over SSH. Two paths:
 
-The practical consequence:
+- *Proactive* — if `--existing-ssh-key-file` or `--generate-ssh-key` is passed, machinekit installs or generates the key before the first clone attempt.
+- *Reactive* (interactive mode only) — if the clone fails with an SSH authentication error and no key flags were given, machinekit offers to install an existing key from a path you provide or generate a fresh one, then retries the clone automatically. After generation, machinekit prints the public key and pauses so you can add it to your git provider.
 
-- **Interactive runs**: if the clone fails on auth, git's own error tells you what's missing. Configure your credentials, re-run.
-- **Headless runs**: credentials must be provisioned before machinekit runs. Typical patterns: cloud-init writes an SSH key or `.netrc`, a pre-baked image embeds them, a wrapper script fetches a token from a secrets manager and exports it.
+**HTTPS and other credentials** remain git's responsibility. machinekit does not install or wrap host-specific auth tooling, and does not manage credential helpers, `.netrc`, or access tokens. The contract: whatever method git already uses to authenticate to your URL, machinekit relies on that. That covers the full universe — credential helpers (`osxkeychain`, `libsecret`), `.netrc`, per-URL `http.extraHeader` tokens, any host's CLI that wires into git's credential helper.
 
-Keeping machinekit out of the auth business preserves host-agnostic posture (no preference for GitHub over GitLab, SourceHut, Codeberg, self-hosted Forgejo, etc.) and avoids reimplementing what git already does well.
+**Clone error classification** — when the clone fails, machinekit inspects git's stderr and gives targeted output:
+
+- SSH authentication failure → offer key setup (interactive) or suggest flags (non-interactive)
+- HTTPS authentication failure → suggest configuring git credentials
+- Network unreachable → connectivity check hint
+- Repository not found → direct message (HTTPS caveat: private repos and missing repos are indistinguishable)
+
+Keeping HTTPS credential handling out of machinekit's scope preserves host-agnostic posture (no preference for GitHub over GitLab, SourceHut, Codeberg, self-hosted Forgejo, etc.) and avoids reimplementing what git already does well. For headless SSH setups, pre-provide `--existing-ssh-key-file` or `--generate-ssh-key`. For HTTPS headless, credentials must be provisioned before machinekit runs (cloud-init, pre-baked image, secrets-manager wrapper script).
 
 ### Age key handling
 
@@ -244,7 +251,7 @@ Steps 3 and 4 exist because a new key cannot decrypt files encrypted by a previo
 
 ## Secrets and key management
 
-There is one root secret: the age private key. SSH keys are generated per-machine after bootstrap and registered with whichever git host the user uses (via that host's normal SSH-key-add flow — not bootstrap's concern). Git authentication during bootstrap is also outside machinekit's scope; the user provides credentials via standard git mechanisms (SSH key, `.netrc`, credential helper) before running.
+There is one root secret: the age private key. SSH keys are managed by machinekit's SSH module during bootstrap — installed from an existing file (`--existing-ssh-key-file`) or generated fresh (`--generate-ssh-key`) — and registered with whichever git host the user uses (via that host's normal SSH-key-add flow, which machinekit walks through interactively after generation). HTTPS credentials for the blueprints clone remain outside machinekit's scope; the user provides them via standard git mechanisms (`.netrc`, credential helper) before running.
 
 Eventually, a 1Password CLI (or other secrets-manager) wrapper can fetch the age key from a vault and pass the path to bootstrap. This is purely a UX layer; bootstrap itself never depends on a specific secrets manager.
 
@@ -389,7 +396,8 @@ machinekit/                             ← this repo (public)
 │   │   ├── context.sh                  ← context::* (jq-backed runtime data store: set/get, arrays, json, seed_from_flags)
 │   │   ├── system.sh                   ← system::detect — populates os.family + os.arch into context
 │   │   ├── brew.sh                     ← brew::* (bootstrap, install_formula — low-level brew ops)
-│   │   ├── blueprints.sh               ← blueprints::* (fetch, dir, protocol resolution)
+│   │   ├── blueprints.sh               ← blueprints::* (fetch, dir, protocol resolution, clone error classification)
+│   │   ├── ssh.sh                      ← ssh::* (key install, generate, interactive discover)
 │   │   ├── config.sh                   ← config::* (parse + merge machinekit.toml via toml2json; stored in context)
 │   │   ├── resolver.sh                 ← resolver::resolve — DFS topological sort over ::requires declarations
 │   │   ├── modules.sh                  ← modules::* (source_all, run_preflights, run_installs)

@@ -18,7 +18,7 @@ These are non-obvious from reading the code alone:
 
 2. **Explicit consent for irreversible actions.** This is a core design rule (see [architecture.md § The explicit-consent rule](./docs/architecture.md#the-explicit-consent-rule)). Any code path that generates keys, opens browsers, mutates remote state, or otherwise touches the outside world must require a flag, env var, or interactive confirmation. Local idempotent installs do not.
 
-3. **OS-agnostic posture.** macOS is the current implementation target, but the architecture is portable. When adding code: don't hardcode brew prefix paths, gate macOS-only template content behind `{{ if eq .os.family "darwin" }}`, frame module dependencies as capabilities (e.g. "container runtime") rather than specific tools.
+3. **OS-agnostic posture.** macOS and Linux are both supported; the framework is designed to stay portable. When adding code: don't hardcode brew prefix paths, gate macOS-only template content behind `{{ if eq .os.family "darwin" }}`, frame module dependencies as capabilities (e.g. "container runtime") rather than specific tools.
 
 4. **Iterations are scope-boxed, not time-boxed.** Don't tackle iteration N+1 work as part of iteration N "while you're in there." See `docs/roadmap.md` for what each iteration is delivering.
 

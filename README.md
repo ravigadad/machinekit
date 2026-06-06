@@ -75,7 +75,7 @@ To use the same blueprints on another machine, push your blueprints repo to GitH
 
 This clones machinekit to `~/.local/share/machinekit/framework` and hands off to `machinekit apply` with any flags you pass. On subsequent runs it updates the clone first. Override the location with `MACHINEKIT_FRAMEWORK_DIR=/your/path`.
 
-If your blueprints repo is private (SSH URL), machinekit can set up your SSH key before the clone:
+If your blueprints repo is private (SSH URL), machinekit handles SSH key setup. Pass flags upfront (required for non-interactive / automation):
 
 ```bash
 # Install an existing key (USB drive, AirDrop, NAS mount, etc.)
@@ -88,6 +88,8 @@ If your blueprints repo is private (SSH URL), machinekit can set up your SSH key
   --generate-ssh-key \
   --blueprints-source git@github.com:<owner>/my-blueprints
 ```
+
+Or skip the SSH flags entirely: in interactive mode, if the clone fails due to authentication, machinekit offers to install an existing key or generate a new one, then retries the clone automatically.
 
 On a fresh machine, the first apply will prompt you to:
 
@@ -183,7 +185,7 @@ Your blueprints repo lives separately (anywhere you like), scaffolded by `machin
 
 ## Platform support
 
-macOS (Apple Silicon and Intel). Linux support is architecturally designed for but not yet implemented — see [docs/architecture.md#cross-platform-posture](./docs/architecture.md#cross-platform-posture).
+macOS (Apple Silicon and Intel) and Linux (Ubuntu and compatible). machinekit is designed to support both and will continue to be — the CI suite includes end-to-end tests on Ubuntu VMs. See [docs/architecture.md#cross-platform-posture](./docs/architecture.md#cross-platform-posture) for the approach.
 
 ## Acknowledgements
 
