@@ -6,8 +6,6 @@ set -euo pipefail
 MACHINEKIT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=../lib/machinekit.sh
 source "$MACHINEKIT_DIR/lib/machinekit.sh"
-# shellcheck source=../lib/modules.sh
-source "$MACHINEKIT_DIR/lib/modules.sh"
 
 # ---------------------------------------------------------------------------
 # Usage
@@ -117,10 +115,8 @@ main() {
   input::is_dry_run && logging::step "DRY RUN — showing what would change; nothing will be modified"
   sudo::ensure
   preflight::run
-  age::install
-  home::install
-  brewfile::install
-  mise::install
+  home::sync
+  modules::run_installs
   hooks::run_post_apply
   postflight::run
 }

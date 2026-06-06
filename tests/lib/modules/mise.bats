@@ -13,6 +13,13 @@ setup() {
   mktest::stub_function logging::warn
 }
 
+# --- mise::requires ---
+
+@test "requires declares zsh as a dependency" {
+  result=$(mise::requires)
+  printf '%s\n' "$result" | grep -q '^zsh$'
+}
+
 # --- mise::install ---
 
 @test "install ensures mise is present via brew" {

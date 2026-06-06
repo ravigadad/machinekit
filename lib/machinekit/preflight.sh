@@ -14,10 +14,11 @@ preflight::run() {
 
   system::detect
   blueprints::fetch
+  config::load
   preflight::report_machine_type
   preflight::resolve_active_modules
 
-  preflight::run_module_preflights
+  modules::run_preflights
 
   logging::success "Preflight complete."
 }
@@ -29,12 +30,19 @@ preflight::report_machine_type() {
 }
 
 preflight::resolve_active_modules() {
-  local modules=(age brewfile home git mise zsh)
-  context::set_array "modules.active" "${modules[@]}"
-  logging::info "Active modules: $(IFS=', '; printf '%s' "${modules[*]}")"
-}
+  local requested=() mod
+  while IFS= read -r mod; do
+    [ -n "$mod" ] || continue
+    requested+=("$mod")
+  done < <(config::get_array "modules")
 
-preflight::run_module_preflights() {
-  age::preflight
-  git::preflight
+  [ "${#requested[@]}" -eq 0 ] && return 0
+
+  local ordered=()
+  while IFS= read -r mod; do
+    ordered+=("$mod")
+  done < <(resolver::resolve "${requested[@]}")
+
+  context::set_array "modules.active" "${ordered[@]}"
+  logging::info "Active modules: $(IFS=', '; printf '%s' "${ordered[*]}")"
 }

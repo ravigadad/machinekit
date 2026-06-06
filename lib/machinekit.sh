@@ -20,6 +20,14 @@ source "$_mk_core_dir/system.sh"
 source "$_mk_core_dir/brew.sh"
 # shellcheck source=machinekit/blueprints.sh
 source "$_mk_core_dir/blueprints.sh"
+# shellcheck source=machinekit/config.sh
+source "$_mk_core_dir/config.sh"
+# shellcheck source=machinekit/resolver.sh
+source "$_mk_core_dir/resolver.sh"
+# shellcheck source=machinekit/modules.sh
+source "$_mk_core_dir/modules.sh"
+# shellcheck source=machinekit/home.sh
+source "$_mk_core_dir/home.sh"
 # shellcheck source=machinekit/prerequisites.sh
 source "$_mk_core_dir/prerequisites.sh"
 # shellcheck source=machinekit/preflight.sh

@@ -18,10 +18,8 @@ setup() {
   mktest::stub_function input::detect_mode
   mktest::stub_function sudo::ensure
   mktest::stub_function preflight::run
-  mktest::stub_function age::install
-  mktest::stub_function home::install
-  mktest::stub_function brewfile::install
-  mktest::stub_function mise::install
+  mktest::stub_function home::sync
+  mktest::stub_function modules::run_installs
   mktest::stub_function hooks::run_post_apply
   mktest::stub_function postflight::run
   mktest::stub_function logging::step
@@ -47,10 +45,8 @@ setup() {
   mktest::assert_stub_called input::detect_mode
   mktest::assert_stub_called sudo::ensure
   mktest::assert_stub_called preflight::run
-  mktest::assert_stub_called age::install
-  mktest::assert_stub_called home::install
-  mktest::assert_stub_called brewfile::install
-  mktest::assert_stub_called mise::install
+  mktest::assert_stub_called home::sync
+  mktest::assert_stub_called modules::run_installs
   mktest::assert_stub_called hooks::run_post_apply
   mktest::assert_stub_called postflight::run
 }

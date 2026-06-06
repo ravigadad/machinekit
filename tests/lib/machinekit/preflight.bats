@@ -28,15 +28,17 @@ setup() {
 @test "run calls all steps" {
   mktest::stub_function system::detect
   mktest::stub_function blueprints::fetch
+  mktest::stub_function config::load
   mktest::stub_function preflight::report_machine_type
   mktest::stub_function preflight::resolve_active_modules
-  mktest::stub_function preflight::run_module_preflights
+  mktest::stub_function modules::run_preflights
   preflight::run
   mktest::assert_stub_called system::detect
   mktest::assert_stub_called blueprints::fetch
+  mktest::assert_stub_called config::load
   mktest::assert_stub_called preflight::report_machine_type
   mktest::assert_stub_called preflight::resolve_active_modules
-  mktest::assert_stub_called preflight::run_module_preflights
+  mktest::assert_stub_called modules::run_preflights
 }
 
 # --- preflight::report_machine_type ---
@@ -56,18 +58,20 @@ setup() {
 
 # --- preflight::resolve_active_modules ---
 
-@test "resolve_active_modules stores the expected module list" {
-  mktest::stub_function context::set_array "modules.active" age brewfile home git mise zsh
+@test "resolve_active_modules handles empty modules list gracefully" {
+  STUB_OUTPUT="" mktest::stub_function config::get_array "modules"
+  mktest::stub_function resolver::resolve
+  mktest::stub_function context::set_array
+  run preflight::resolve_active_modules
+  [ "$status" -eq 0 ]
+  mktest::assert_stub_not_called resolver::resolve
+}
+
+@test "resolve_active_modules reads modules from config and stores resolved order" {
+  STUB_OUTPUT=$'home\nzsh\nmise' mktest::stub_function config::get_array "modules"
+  STUB_OUTPUT=$'home\nzsh\nmise' mktest::stub_function resolver::resolve home zsh mise
+  mktest::stub_function context::set_array "modules.active" home zsh mise
   preflight::resolve_active_modules
-  mktest::assert_stub_called context::set_array "modules.active" age brewfile home git mise zsh
+  mktest::assert_stub_called context::set_array "modules.active" home zsh mise
 }
 
-# --- preflight::run_module_preflights ---
-
-@test "run_module_preflights calls age and git preflight" {
-  mktest::stub_function age::preflight
-  mktest::stub_function git::preflight
-  preflight::run_module_preflights
-  mktest::assert_stub_called age::preflight
-  mktest::assert_stub_called git::preflight
-}
