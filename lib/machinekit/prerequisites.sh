@@ -7,7 +7,7 @@
 # pipeline can't run at all, so a dry-run on a fresh machine would show nothing
 # useful. Homebrew + these tools are the floor, not the feature.
 
-_MK_PREREQUISITES=(jq gomplate git age)
+_MK_PREREQUISITES=(jq toml2json gomplate git age)
 
 prerequisites::install() {
   logging::step "prerequisites (${_MK_PREREQUISITES[*]})"

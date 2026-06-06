@@ -18,6 +18,6 @@ jobs:
       - name: Set up Homebrew
         uses: Homebrew/actions/setup-homebrew@main
       - name: Install dependency formulas
-        run: brew install bats-core dasel jq
+        run: brew install bats-core jq toml2json
       - name: Run tests
         run: scripts/test
