@@ -31,14 +31,14 @@ setup() {
 # them to a second unit is the integrated anti-pattern.
 
 @test "set writes a scalar value" {
-  context::set "git.user_name" "Alice"
-  [ "$(jq -r '.git.user_name' "$MACHINEKIT_CONTEXT_FILE")" = "Alice" ]
+  context::set "fake.name" "Alice"
+  [ "$(jq -r '.fake.name' "$MACHINEKIT_CONTEXT_FILE")" = "Alice" ]
 }
 
 @test "set overwrites an existing value" {
-  context::set "git.user_name" "Alice"
-  context::set "git.user_name" "Bob"
-  [ "$(jq -r '.git.user_name' "$MACHINEKIT_CONTEXT_FILE")" = "Bob" ]
+  context::set "fake.name" "Alice"
+  context::set "fake.name" "Bob"
+  [ "$(jq -r '.fake.name' "$MACHINEKIT_CONTEXT_FILE")" = "Bob" ]
 }
 
 @test "set creates nested JSON from a dotted key" {
@@ -47,15 +47,15 @@ setup() {
 }
 
 @test "set writes two top-level keys without clobbering" {
-  context::set "git.user_name" "Alice"
-  context::set "git.user_email" "alice@example.com"
-  [ "$(jq -r '.git.user_name' "$MACHINEKIT_CONTEXT_FILE")" = "Alice" ]
-  [ "$(jq -r '.git.user_email' "$MACHINEKIT_CONTEXT_FILE")" = "alice@example.com" ]
+  context::set "fake.name" "Alice"
+  context::set "fake.email" "alice@example.com"
+  [ "$(jq -r '.fake.name' "$MACHINEKIT_CONTEXT_FILE")" = "Alice" ]
+  [ "$(jq -r '.fake.email' "$MACHINEKIT_CONTEXT_FILE")" = "alice@example.com" ]
 }
 
 @test "set preserves spaces in a value" {
-  context::set "git.user_name" "Alice Aaronson"
-  [ "$(jq -r '.git.user_name' "$MACHINEKIT_CONTEXT_FILE")" = "Alice Aaronson" ]
+  context::set "fake.name" "Alice Aaronson"
+  [ "$(jq -r '.fake.name' "$MACHINEKIT_CONTEXT_FILE")" = "Alice Aaronson" ]
 }
 
 @test "set does not corrupt the store when nesting under an existing scalar" {
@@ -358,7 +358,7 @@ setup() {
 # --- context::_var_key ---
 
 @test "_var_key uppercases, converts dots to underscores, and preserves underscores" {
-  [ "$(context::_var_key "git.user_name")" = "GIT_USER_NAME" ]
+  [ "$(context::_var_key "fake.name")" = "FAKE_NAME" ]
 }
 
 @test "_var_key handles a single-component key" {
@@ -396,7 +396,7 @@ setup() {
 # --- context::_prompt_label ---
 
 @test "_prompt_label converts a dotted key to a capitalized phrase" {
-  [ "$(context::_prompt_label "git.user_name")" = "Git user name" ]
+  [ "$(context::_prompt_label "fake.name")" = "Fake name" ]
 }
 
 @test "_prompt_label capitalizes a single-component key" {
@@ -407,26 +407,26 @@ setup() {
 
 @test "_prompt reads the response, echoes it, shows the label, and stores it" {
   mktest::stub_function input::is_interactive
-  STUB_OUTPUT="Git user name" mktest::stub_function context::_prompt_label "git.user_name"
+  STUB_OUTPUT="Fake name" mktest::stub_function context::_prompt_label "fake.name"
   mktest::stub_function context::_prompt_hint
-  mktest::stub_function context::set "git.user_name" "Alice"
+  mktest::stub_function context::set "fake.name" "Alice"
   printf 'Alice\n' > "$BATS_TEST_TMPDIR/tty"
   export MACHINEKIT_TTY="$BATS_TEST_TMPDIR/tty"
-  run --separate-stderr context::_prompt "git.user_name"
+  run --separate-stderr context::_prompt "fake.name"
   [ "$status" -eq 0 ]
   [ "$output" = "Alice" ]
-  [[ "$stderr" == *"Git user name"* ]]
-  mktest::assert_stub_called context::set "git.user_name" "Alice"
+  [[ "$stderr" == *"Fake name"* ]]
+  mktest::assert_stub_called context::set "fake.name" "Alice"
 }
 
 @test "_prompt uses a custom label when provided and does not call _prompt_label" {
   mktest::stub_function input::is_interactive
   mktest::stub_function context::_prompt_label
   mktest::stub_function context::_prompt_hint
-  mktest::stub_function context::set "git.user_name" "Alice"
+  mktest::stub_function context::set "fake.name" "Alice"
   printf 'Alice\n' > "$BATS_TEST_TMPDIR/tty"
   export MACHINEKIT_TTY="$BATS_TEST_TMPDIR/tty"
-  run --separate-stderr context::_prompt "git.user_name" --label "Custom prompt"
+  run --separate-stderr context::_prompt "fake.name" --label "Custom prompt"
   [ "$output" = "Alice" ]
   [[ "$stderr" == *"Custom prompt"* ]]
   mktest::assert_stub_not_called context::_prompt_label
@@ -434,23 +434,23 @@ setup() {
 
 @test "_prompt returns 1 on an empty response" {
   mktest::stub_function input::is_interactive
-  STUB_OUTPUT="Git user name" mktest::stub_function context::_prompt_label "git.user_name"
+  STUB_OUTPUT="Fake name" mktest::stub_function context::_prompt_label "fake.name"
   mktest::stub_function context::_prompt_hint
   printf '' > "$BATS_TEST_TMPDIR/tty"
   export MACHINEKIT_TTY="$BATS_TEST_TMPDIR/tty"
-  run ! context::_prompt "git.user_name"
+  run ! context::_prompt "fake.name"
 }
 
 @test "_prompt returns the default and stores it when user enters nothing and default is provided" {
   mktest::stub_function input::is_interactive
-  mktest::stub_function context::_prompt_label "git.user_name"
+  mktest::stub_function context::_prompt_label "fake.name"
   mktest::stub_function context::_prompt_hint
-  mktest::stub_function context::set "git.user_name" "fallback"
+  mktest::stub_function context::set "fake.name" "fallback"
   printf '' > "$BATS_TEST_TMPDIR/tty"
   export MACHINEKIT_TTY="$BATS_TEST_TMPDIR/tty"
-  result=$(context::_prompt "git.user_name" --label "Enter name" --default "fallback")
+  result=$(context::_prompt "fake.name" --label "Enter name" --default "fallback")
   [ "$result" = "fallback" ]
-  mktest::assert_stub_called context::set "git.user_name" "fallback"
+  mktest::assert_stub_called context::set "fake.name" "fallback"
 }
 
 @test "_prompt includes the hint from _prompt_hint in the label" {
@@ -492,11 +492,11 @@ setup() {
 
 # --- context::_fail_required ---
 
-@test "_fail_required exits non-zero and reports the key with flag and env hints" {
+@test "_fail_required exits non-zero and reports the key, env var, and --help hint" {
   mktest::stub_function logging::error
-  run context::_fail_required "git.user_name"
+  run context::_fail_required "whatever.juice_box"
   [ "$status" -ne 0 ]
-  MATCH="git\.user_name" mktest::assert_stub_called logging::error
-  MATCH="--git-user-name" mktest::assert_stub_called logging::error
-  MATCH="MACHINEKIT_GIT_USER_NAME" mktest::assert_stub_called logging::error
+  MATCH="whatever\.juice_box" mktest::assert_stub_called logging::error
+  MATCH="MACHINEKIT_WHATEVER_JUICE_BOX" mktest::assert_stub_called logging::error
+  MATCH="\-\-help" mktest::assert_stub_called logging::error
 }

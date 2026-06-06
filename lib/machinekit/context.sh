@@ -3,8 +3,8 @@
 # temp file, manipulated via jq. Passed to gomplate at apply time so blueprint
 # dotfiles can reference values as nested template fields.
 #
-# Keys use snake_case dotted notation: "git.user_name" lands at
-# .git.user_name in the JSON tree.
+# Keys use snake_case dotted notation: "test.key" lands at
+# .test.key in the JSON tree.
 #
 # Requires jq on PATH (installed as a prerequisite before preflight runs).
 set -euo pipefail
@@ -199,7 +199,7 @@ context::_coerce_boolean() {
 
 # context::_var_key KEY
 # Derive the environment-variable suffix from a dotted key:
-# "git.user_name" -> "GIT_USER_NAME".
+# "namespace.key" -> "NAMESPACE_KEY".
 context::_var_key() {
   printf '%s' "$1" | tr '.' '_' | tr '[:lower:]' '[:upper:]'
 }
@@ -230,7 +230,7 @@ context::_from_env() {
 }
 
 # context::_prompt_label KEY
-# Human-readable prompt label for a key: "git.user_name" -> "Git user name".
+# Human-readable prompt label for a key: "namespace.key_name" -> "Namespace key name".
 context::_prompt_label() {
   printf '%s' "$1" | tr '._' ' ' | awk '{print toupper(substr($0,1,1)) substr($0,2)}'
 }
@@ -286,11 +286,10 @@ context::_prompt_hint() {
 # context::_fail_required KEY
 # Report an unresolved required key with flag/env hints, then exit.
 context::_fail_required() {
-  local flag_name env_var
-  flag_name=$(printf '%s' "$1" | tr '._' '-')
+  local env_var
   env_var="MACHINEKIT_$(context::_var_key "$1")"
   logging::error "Required value not provided: $1"
-  logging::error "  --${flag_name} <value>"
   logging::error "  ${env_var}=<value>"
+  logging::error "  (some values can also be set via --opt-flags; see --help for details)"
   exit 1
 }
