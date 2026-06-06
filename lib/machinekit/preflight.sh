@@ -14,8 +14,8 @@ preflight::run() {
 
   system::detect
   blueprints::fetch
-  config::load
   preflight::resolve_machine_type
+  config::load
   preflight::resolve_active_modules
 
   modules::run_preflights
