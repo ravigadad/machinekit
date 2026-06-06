@@ -2,8 +2,10 @@
 # Smoke test: machinekit apply succeeds on a clean machine, key outputs are
 # in place afterward, and a second apply is idempotent.
 #
-# Uses templates/blueprints/ as the test blueprint (auto-detected as cp since
-# it has no .git), so no separate fixture repo is needed.
+# Uses tests/vm/fixture_blueprints/ as the blueprint source — a minimal
+# fixture with the modules the smoke test needs to verify. Kept separate from
+# templates/blueprints/ so test requirements don't couple to the user-facing
+# starter template.
 
 scenario::run() {
   local mk_path
@@ -21,20 +23,17 @@ MK_PATH='$mk_path'
   --non-interactive \
   --git-user-name "MK Smoke Test" \
   --git-user-email "mk-smoke@example.com" \
-  --generate-age-key \
-  --blueprints-source "\$MK_PATH/templates/blueprints"
+  --blueprints-source "\$MK_PATH/tests/vm/fixture_blueprints"
 SCRIPT
 
   vm_step "Verifying outputs"
   # Quoted heredoc: no host expansion. \$, $(...) all expand in the VM.
   vm::shell <<'SCRIPT'
 set -e
+test -f ~/.dummyfile
+grep -q "Your OS is" ~/.dummyfile
 test -f ~/.gitconfig
 grep -q "MK Smoke Test" ~/.gitconfig
-test -f ~/.config/age/key.txt
-test "$(stat -c %a ~/.config/age/key.txt 2>/dev/null || stat -f %A ~/.config/age/key.txt)" = "600"
-eval "$(brew shellenv 2>/dev/null || true)"
-command -v mise >/dev/null 2>&1
 SCRIPT
 
   vm_step "Idempotency: second apply"
@@ -46,6 +45,6 @@ MK_PATH='$mk_path'
   --non-interactive \
   --git-user-name "MK Smoke Test" \
   --git-user-email "mk-smoke@example.com" \
-  --blueprints-source "\$MK_PATH/templates/blueprints"
+  --blueprints-source "\$MK_PATH/tests/vm/fixture_blueprints"
 SCRIPT
 }

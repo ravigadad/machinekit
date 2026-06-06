@@ -55,7 +55,7 @@ _vm_out() {
 # read-only via virtiofs, and wait until the VM accepts commands.
 vm::start() {
   local image="$1" repo_dir="$2"
-  VM_NAME="mk-test-$(date +%s)"
+  VM_NAME="mk-test-$$-$RANDOM"
   VM_OS="$(vm::_detect_os "$image")"
 
   vm_log "Cloning $image → $VM_NAME"

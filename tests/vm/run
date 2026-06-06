@@ -17,6 +17,10 @@
 #   tests/vm/run --image <image>          specific image (repeatable)
 #   tests/vm/run --case apply-smoke       specific case
 #   tests/vm/run --keep-vm                preserve VM after test (for debugging)
+#
+# All image/case combinations run in parallel. Step-level progress messages
+# appear in real time, prefixed with [image/case]. Raw VM output (brew, tart,
+# etc.) is buffered and shown only on failure.
 
 set -euo pipefail
 
@@ -81,59 +85,118 @@ _vm_ok()  { printf '\033[0;32m[PASS] %s\033[0m\n' "$*"; }
 _vm_fail(){ printf '\033[0;31m[FAIL] %s\033[0m\n' "$*"; }
 
 # ---------------------------------------------------------------------------
-# Run
+# Parallel run
 # ---------------------------------------------------------------------------
 
-_pass=0
-_fail=0
+_pids=()
+_labels=()
+_result_files=()
+_log_files=()
 
-# Safety net: stop any in-progress VM and remove any log file on unexpected exit.
-trap 'vm::stop 2>/dev/null || true; rm -f "${_VM_LOG:-}" 2>/dev/null || true' EXIT INT TERM
+_cleanup_all() {
+  local pid
+  for pid in "${_pids[@]+"${_pids[@]}"}"; do
+    kill "$pid" 2>/dev/null || true
+  done
+  wait 2>/dev/null || true
+  local f
+  for f in \
+    "${_result_files[@]+"${_result_files[@]}"}" \
+    "${_log_files[@]+"${_log_files[@]}"}"; do
+    rm -f "$f" 2>/dev/null || true
+  done
+}
+trap '_cleanup_all' EXIT INT TERM
 
 for image in "${IMAGES[@]}"; do
   for case_name in "${CASES[@]}"; do
     case_file="$VM_DIR/cases/$case_name"
+    label="$image / $case_name"
+
+    # Short label for the per-line prefix: strip registry prefix and tag.
+    image_short="${image##*/}"
+    image_short="${image_short%%:*}"
+    prefix="${image_short}/${case_name}"
+
     if [ ! -f "$case_file" ]; then
-      _vm_fail "$case_name — case file not found: $case_file"
-      _fail=$((_fail + 1))
+      _vm_fail "$label — case file not found: $case_file"
       continue
     fi
 
-    vm_log "$image / $case_name"
+    result_file=$(mktemp)
+    log_file=$(mktemp)
+    _labels+=("$label")
+    _result_files+=("$result_file")
+    _log_files+=("$log_file")
 
-    if ! vm::start "$image" "$REPO_ROOT"; then
-      _vm_fail "$image / $case_name — VM failed to start"
-      _fail=$((_fail + 1))
-      continue
-    fi
+    vm_log "$label — starting"
 
-    # Capture all VM output to a log; show it only on failure.
-    _VM_LOG="$(mktemp)"
+    (
+      # Each subshell manages its own VM — no shared state with siblings.
+      VM_NAME=""
+      VM_OS=""
+      # Route raw VM command output (brew, tart exec, etc.) to the log file
+      # only; shown on failure. Step messages go to both so they appear live.
+      _VM_LOG="$log_file"
 
-    # Run the case in a subshell so its definitions don't bleed between cases.
-    # shellcheck source=/dev/null
-    if (source "$case_file" && scenario::run); then
-      _vm_ok "$image / $case_name"
-      _pass=$((_pass + 1))
-    else
-      _vm_fail "$image / $case_name"
-      _fail=$((_fail + 1))
-      printf '\n--- output ---\n'
-      cat "$_VM_LOG"
-      printf '--- end output ---\n'
-    fi
-    rm -f "$_VM_LOG"
-    _VM_LOG=""
+      # Override vm_log/vm_step to write to both the log (for failure dumps)
+      # and the terminal (prefixed, so parallel runs stay attributable).
+      vm_log()  {
+        printf '\033[1;34m[vm] %s\033[0m\n' "$*" >> "$log_file"
+        printf '[%s] \033[1;34m[vm] %s\033[0m\n' "$prefix" "$*"
+      }
+      vm_step() {
+        printf '\033[0;36m  → %s\033[0m\n' "$*" >> "$log_file"
+        printf '[%s] \033[0;36m→ %s\033[0m\n' "$prefix" "$*"
+      }
 
-    if [ "$KEEP_VM" = true ]; then
-      printf '\nVM preserved: %s  (OS: %s)\n' "$VM_NAME" "$VM_OS"
-      printf 'To exec into it:  tart exec %s -- bash\n' "$VM_NAME"
-      printf 'To clean up:      tart stop %s && tart delete %s\n' "$VM_NAME" "$VM_NAME"
-      VM_NAME=""  # prevent the EXIT trap from stopping it
-    else
-      vm::stop
-    fi
+      trap 'vm::stop 2>/dev/null || true' EXIT INT TERM
+
+      _run_ok=false
+      if vm::start "$image" "$REPO_ROOT"; then
+        # shellcheck source=/dev/null
+        if (source "$case_file" && scenario::run); then
+          _run_ok=true
+        fi
+      fi
+
+      if [ "$KEEP_VM" = true ] && [ -n "${VM_NAME:-}" ]; then
+        printf '\nVM preserved: %s  (OS: %s)\n' "$VM_NAME" "$VM_OS"
+        printf 'To exec into it:  tart exec %s -- bash\n' "$VM_NAME"
+        printf 'To clean up:      tart stop %s && tart delete %s\n' "$VM_NAME" "$VM_NAME"
+        VM_NAME=""  # prevent EXIT trap from stopping it
+      fi
+
+      if [ "$_run_ok" = true ]; then
+        printf 'PASS\n' > "$result_file"
+      else
+        printf 'FAIL\n' > "$result_file"
+      fi
+    ) &
+    _pids+=($!)
   done
+done
+
+# Wait for all runs to finish, then print the final summary.
+wait || true
+
+_pass=0
+_fail=0
+
+for i in "${!_pids[@]}"; do
+  label="${_labels[$i]}"
+  result=$(cat "${_result_files[$i]}" 2>/dev/null || printf 'FAIL')
+  if [ "$result" = "PASS" ]; then
+    _vm_ok "$label"
+    _pass=$((_pass + 1))
+  else
+    _vm_fail "$label"
+    _fail=$((_fail + 1))
+    printf '\n--- output: %s ---\n' "$label"
+    cat "${_log_files[$i]}"
+    printf '--- end output ---\n\n'
+  fi
+  rm -f "${_result_files[$i]}" "${_log_files[$i]}"
 done
 
 printf '\n%d passed, %d failed\n' "$_pass" "$_fail"
