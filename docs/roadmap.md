@@ -37,8 +37,9 @@ Architecture is described in [architecture.md](./architecture.md); this document
 **Stock install** (what bootstrap puts on the machine with no extra config):
 
 - Homebrew
-- jq (powers `context::` store via JSON), gomplate (renders dotfile templates), git, age (via brew, as prerequisites)
+- jq (powers `context::` store via JSON), toml2json, gomplate (renders dotfile templates), git (via brew, as prerequisites)
 - mise (via brew, as part of the mise module)
+- age (via the age module, when declared — manages the user's age private key)
 - The dotfile templates above (blueprint-shipped) and the module-shipped defaults (gitconfig, mise config)
 
 **Explicitly NOT in stock** (kept out by design):

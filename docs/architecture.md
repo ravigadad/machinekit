@@ -17,7 +17,7 @@ machinekit is two cooperating repos:
 
 ## Scope
 
-macOS and Linux, by design (see [cross-platform posture](#cross-platform-posture)). machinekit is opinionated about a deliberately small stock toolset — Homebrew, gomplate, mise, git, age — and agnostic about everything else. You extend it two ways: declare a machinekit-known module in TOML (Tier 2), or wire up anything at all via post-apply hooks (Tier 3). The fact that machinekit isn't opinionated about a tool doesn't mean you can't use machinekit to install and manage it — you can, via hooks. The small built-in set is just what machinekit has opinions about, not the limit of what it can do.
+macOS and Linux, by design (see [cross-platform posture](#cross-platform-posture)). machinekit is opinionated about a deliberately small stock toolset — Homebrew, jq, toml2json, gomplate, git — and agnostic about everything else. You extend it two ways: declare a machinekit-known module in TOML (Tier 2), or wire up anything at all via post-apply hooks (Tier 3). The fact that machinekit isn't opinionated about a tool doesn't mean you can't use machinekit to install and manage it — you can, via hooks. The small built-in set is just what machinekit has opinions about, not the limit of what it can do.
 
 ---
 
@@ -88,7 +88,7 @@ The filesystem is doing the work TOML couldn't do cleanly: each file is flat and
 
 machinekit is opinionated by default and configurable when you want more. Customization falls into three tiers, from least to most invasive:
 
-**Tier 1 — Stock blueprint (zero config).** Generate a fresh blueprint, commit nothing more, and you get a working machine: Homebrew, gomplate, mise, git, age, and minimal sensible dotfiles. Nothing optional. This is the path for someone who just wants a sane laptop.
+**Tier 1 — Stock blueprint (zero config).** Generate a fresh blueprint, commit nothing more, and you get a working machine: Homebrew, git, and minimal sensible dotfiles. Nothing optional. This is the path for someone who just wants a sane laptop.
 
 **Tier 2 — Config-driven (TOML).** A `common/machinekit.toml` (and per-type `machine_types/<type>/machinekit.toml`) declares which machinekit-known modules you want and supplies their variables:
 
@@ -187,7 +187,7 @@ machinekit is designed to support macOS and Linux, and will continue to be. Prim
 ### Already cross-platform
 
 - **Homebrew** is a [first-class Linux target](https://docs.brew.sh/Homebrew-on-Linux). Same `brew` CLI, same Brewfile concept. The install prefix varies (`/opt/homebrew`, `/usr/local`, `/home/linuxbrew/.linuxbrew`), but `brew shellenv` handles PATH uniformly across all three. Picking Homebrew is a unifying choice across mac and Linux, not a macOS lock-in.
-- **gomplate, mise, git, age** are all cross-platform binaries available via Homebrew on either OS.
+- **Framework prerequisites** — jq, toml2json, gomplate, git — and machinekit's built-in modules (mise, age) are all cross-platform binaries available via Homebrew on either OS.
 - **The conceptual architecture** — bootstrap, three tiers, modules, hooks, input resolution, execution modes, consent rule — is all shell-level and portable.
 
 ### Branch points
@@ -257,9 +257,9 @@ Eventually, a 1Password CLI (or other secrets-manager) wrapper can fetch the age
 
 > Status: secrets-manager wrapper not yet implemented.
 
-age-encrypted files can be committed to the blueprints repo and decrypted at apply time using the age private key. Stock blueprints contain no encrypted files, but the age infrastructure is wired in from day one so adding encrypted secrets later doesn't require retrofitting.
+age-encrypted files can be committed to the blueprints repo. Decryption is opt-in: a future `blueprint_file_decryption` module will walk `$HOME` after files are copied and decrypt any it recognizes by naming convention. Without that module active, encrypted files copy over as-is — unreadable but not an error.
 
-> Status: blueprint file decryption in the home module is not yet implemented. The age key is managed and available; the apply-time decryption step will be added in a future iteration.
+> Status: `blueprint_file_decryption` module not yet implemented. The age module manages the key; decryption is a planned opt-in step, not core infrastructure.
 
 ---
 
@@ -297,8 +297,6 @@ Without `--machine-type`, only the common layer applies. There is no implicit "d
 Machine types are how blueprints *express variation* across a fleet. They're not a tagging system or a capability flag set — those concerns live in `[modules.*]` config (iteration 2/3) and in the modules' own capability declarations.
 
 > Status: the directory structure ships in iteration 1. All four layers — `home/`, `Brewfile`, `hooks/post-apply/`, and `machinekit.toml` — are implemented (iteration 2). End-to-end validation with a non-default machine type is done.
-
-mise is installed on every machine — it's lightweight enough that the consistency is worth it. No runtimes are pre-installed; users configure them per their needs.
 
 ---
 
@@ -344,7 +342,7 @@ Template data flows from `context::` (machinekit's jq-backed runtime data store)
 
 Runtime version manager (replaces rbenv, nvm, gvm, etc.). Config-as-code via `.tool-versions` or `~/.config/mise/config.toml`.
 
-Stock blueprints install mise but pin no runtimes. Users add what they need:
+When declared as an active module, mise is installed without any runtimes pinned. Users add what they need:
 
 ```toml
 # ~/.config/mise/config.toml
@@ -364,7 +362,7 @@ A Python or Rust developer using machinekit gets no gratuitous Ruby/Node install
 
 There are two installation stages:
 
-1. **Prerequisite stage** — `machinekit apply` installs `jq`, `toml2json`, `gomplate`, `git`, `age` directly. These are hardcoded because `jq` must exist before preflight (it powers the context data layer), `toml2json` is needed to parse `machinekit.toml`, and `gomplate`, `git`, and `age` must be available before blueprints are applied. The runtime version manager `mise` is installed by its module, not as a prerequisite.
+1. **Prerequisite stage** — `machinekit apply` installs `jq`, `toml2json`, `gomplate`, and `git` directly. These are hardcoded because `jq` must exist before preflight (it powers the context data layer), `toml2json` is needed to parse `machinekit.toml`, and `gomplate` and `git` must be available before blueprints are applied. `mise`, `age`, and other tools are installed by their respective modules, not as prerequisites.
 2. **Blueprint stage** — after home files are applied, machinekit runs `brew bundle --file <blueprints>/common/Brewfile`. With `--machine-type <type>`, `<blueprints>/machine_types/<type>/Brewfile` (if present) runs after, additively layering on top.
 
 The template ships with commented Brewfiles showing the conventions; your blueprints contain your real choices.
@@ -402,7 +400,7 @@ machinekit/                             ← this repo (public)
 │   │   ├── resolver.sh                 ← resolver::resolve — DFS topological sort over ::requires declarations
 │   │   ├── modules.sh                  ← modules::* (source_all, run_preflights, run_installs)
 │   │   ├── home.sh                     ← home::* (build_staging, sync, _apply, _diff — core home management)
-│   │   ├── prerequisites.sh            ← prerequisites::* (jq/toml2json/gomplate/git/age via brew)
+│   │   ├── prerequisites.sh            ← prerequisites::* (jq/toml2json/gomplate/git via brew)
 │   │   ├── preflight.sh                ← preflight::* (system detect, blueprints fetch, config load, module resolution)
 │   │   ├── hooks.sh                    ← hooks::* (post-apply hook runner; common + machine_type layers)
 │   │   ├── hook-support.sh             ← library blueprint hooks source via $MACHINEKIT_SUPPORT

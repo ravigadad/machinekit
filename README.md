@@ -1,6 +1,6 @@
 # machinekit
 
-A dotfiles and provisioning framework that gets a Mac into a consistent dev state with one command. Pairs with a per-user **blueprints** repo that supplies your actual config.
+A dotfiles and provisioning framework that gets a Mac or Linux machine into a consistent dev state with one command. Pairs with a per-user **blueprints** repo that supplies your actual config.
 
 machinekit takes a fresh machine from "nothing installed" to "working dev environment with sensible defaults." It's idempotent — re-running it is safe and picks up any drift or new packages you've added to your blueprints.
 
@@ -9,8 +9,7 @@ For what's planned and what's deferred, see [docs/roadmap.md](./docs/roadmap.md)
 
 ## What it does
 
-- Installs Homebrew, then jq, gomplate, git, age (machinekit's prerequisites) plus mise (installed by its module).
-- Manages an age private key at `~/.config/age/key.txt` for encrypted blueprint files. Never generates one silently — generation is consent-gated.
+- Installs Homebrew, then jq, toml2json, gomplate, and git — machinekit's prerequisites.
 - Builds a merged staging dir from module-shipped templates plus your blueprint's `common/home/` (and `machine_types/<type>/home/` when a machine type is set), then applies it to `$HOME`.
 - Runs `common/Brewfile` from your blueprints (if present), then `machine_types/<type>/Brewfile` additively (if present), then `mise install`, then any `common/hooks/post-apply/` and `machine_types/<type>/hooks/post-apply/` scripts you supply.
 
@@ -185,16 +184,16 @@ Your blueprints repo lives separately (anywhere you like), scaffolded by `machin
 
 ## Platform support
 
-macOS (Apple Silicon and Intel) and Linux (Ubuntu and compatible). machinekit is designed to support both and will continue to be — the CI suite includes end-to-end tests on Ubuntu VMs. See [docs/architecture.md#cross-platform-posture](./docs/architecture.md#cross-platform-posture) for the approach.
+macOS (Apple Silicon and Intel) and Linux (Ubuntu and compatible). machinekit is designed to support both and will continue to be — the CI suite includes end-to-end tests on Ubuntu VMs. Primary development happens on macOS, so Linux incompatibilities may be caught less quickly, but cross-platform compatibility is a project goal. See [docs/architecture.md#cross-platform-posture](./docs/architecture.md#cross-platform-posture) for the approach.
 
 ## Acknowledgements
 
 machinekit composes existing tools rather than reinventing them:
 
+- [Homebrew](https://brew.sh/) — package manager for macOS and Linux; machinekit's install mechanism.
 - [gomplate](https://docs.gomplate.ca/) — Go/Sprig template engine for dotfiles.
-- [mise](https://mise.jdx.dev/) — language and runtime version manager.
-- [Homebrew](https://brew.sh/) — macOS package manager.
-- [age](https://age-encryption.org/) — encryption for sensitive blueprint files.
+- [mise](https://mise.jdx.dev/) — runtime version manager; available as a built-in module.
+- [age](https://age-encryption.org/) — encryption tool; available as a built-in module for managing blueprint secrets.
 
 ## Contributing
 

@@ -8,7 +8,7 @@ setup() {
   source "$MACHINEKIT_DIR/lib/modules/age.sh"
   AGE_KEY_PATH="$BATS_TEST_TMPDIR/age/key.txt"
   unset OPT_EXISTING_AGE_KEY_FILE
-  unset MACHINEKIT_EXISTING_AGE_KEY_FILE
+  unset MACHINEKIT_EXISTING_AGE_KEY_FILE # hi
 }
 
 # --- age::preflight ---
@@ -115,6 +115,7 @@ setup() {
   STUB_OUTPUT="$src" mktest::stub_function context::get "existing_age_key_file"
   STUB_OUTPUT="false" mktest::stub_function context::get "age.key_generate" "--coerce" "boolean" "--default" "false"
   mktest::stub_function logging::step
+  mktest::stub_function brew::install_formula "age"
   mktest::stub_function input::is_dry_run
   mktest::stub_function age::_report_dry_run
   run age::install
@@ -128,6 +129,7 @@ setup() {
   STUB_OUTPUT="$src" mktest::stub_function context::get "existing_age_key_file"
   STUB_OUTPUT="false" mktest::stub_function context::get "age.key_generate" "--coerce" "boolean" "--default" "false"
   mktest::stub_function logging::step
+  mktest::stub_function brew::install_formula "age"
   STUB_RETURN=1 mktest::stub_function input::is_dry_run
   mktest::stub_function age::_install_copy
   age::install
@@ -143,6 +145,7 @@ setup() {
   STUB_RETURN=1 mktest::stub_function context::get "existing_age_key_file"
   STUB_OUTPUT="true" mktest::stub_function context::get "age.key_generate" "--coerce" "boolean" "--default" "false"
   mktest::stub_function logging::step
+  mktest::stub_function brew::install_formula "age"
   STUB_RETURN=1 mktest::stub_function input::is_dry_run
   mktest::stub_function age::_install_generate
   age::install
@@ -154,6 +157,7 @@ setup() {
   STUB_RETURN=1 mktest::stub_function context::get "existing_age_key_file"
   STUB_OUTPUT="false" mktest::stub_function context::get "age.key_generate" "--coerce" "boolean" "--default" "false"
   mktest::stub_function logging::step
+  mktest::stub_function brew::install_formula "age"
   STUB_RETURN=1 mktest::stub_function input::is_dry_run
   mktest::stub_function age::_install_use_existing
   age::install

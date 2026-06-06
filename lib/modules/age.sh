@@ -51,6 +51,7 @@ age::_confirm_overwrite() {
 
 age::install() {
   logging::step "age encryption key"
+  brew::install_formula age
 
   local key_path existing_key_file generate
   key_path=$(config::get "module.age.key_path")
