@@ -135,6 +135,7 @@ After the module system and bash modernization land, the framework's machinery i
 - Additional modules as needs arise (prompt themes, password-manager CLIs as a secrets-fetch layer, and so on).
 - Linux support: add a Linux test target, gate macOS-specific lines behind `os.family` checks, validate the Homebrew-on-Linux path.
 - A curl-pipe-bash installer shim (`install.sh`) for fresh-machine one-liner setup.
+- **Home file conflict resolution.** When `home::sync` would overwrite an existing file, give the user control over what happens. In interactive mode: per-file prompt with overwrite / skip / abort / diff-then-decide options, plus "apply to all remaining" shortcuts. In non-interactive mode: a `--conflict-behavior=<overwrite|skip|abort>` flag (env: `MACHINEKIT_CONFLICT_BEHAVIOR`) that sets the apply-all default, with `overwrite` as the default (current behavior). Merge/append is explicitly out of scope for this item — file-format-aware merging belongs in post-apply hooks.
 
 The roadmap stops being prescriptive here. The architecture supports incremental addition; what gets added is a function of what the framework actually needs in use.
 
