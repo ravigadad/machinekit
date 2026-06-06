@@ -47,6 +47,7 @@ setup() {
 @test "build_staging prepares the staging dir then layers module templates and blueprint home" {
   mktest::stub_function home::_prepare_staging_dir
   STUB_OUTPUT=$'git\nmise' mktest::stub_function context::get_array "modules.active"
+  STUB_RETURN=1 mktest::stub_function context::get "machine_type"
   mktest::stub_function home::_layer_dir
   home::build_staging
   mktest::assert_stub_called home::_prepare_staging_dir
@@ -58,6 +59,28 @@ setup() {
 @test "build_staging layers only the blueprint home when no modules are active" {
   mktest::stub_function home::_prepare_staging_dir
   STUB_RETURN=1 mktest::stub_function context::get_array "modules.active"
+  STUB_RETURN=1 mktest::stub_function context::get "machine_type"
+  mktest::stub_function home::_layer_dir
+  home::build_staging
+  TIMES=1 mktest::assert_stub_called home::_layer_dir
+  mktest::assert_stub_called home::_layer_dir "$BATS_TEST_TMPDIR/blueprints/common/home" "blueprint common/home"
+}
+
+@test "build_staging layers machine_type home after blueprint common/home when machine_type is set" {
+  mktest::stub_function home::_prepare_staging_dir
+  STUB_RETURN=1 mktest::stub_function context::get_array "modules.active"
+  STUB_OUTPUT="laptop" mktest::stub_function context::get "machine_type"
+  mktest::stub_function home::_layer_dir
+  home::build_staging
+  TIMES=2 mktest::assert_stub_called home::_layer_dir
+  mktest::assert_stub_called home::_layer_dir "$BATS_TEST_TMPDIR/blueprints/common/home" "blueprint common/home"
+  mktest::assert_stub_called home::_layer_dir "$BATS_TEST_TMPDIR/blueprints/machine_types/laptop/home" "blueprint machine_types/laptop/home"
+}
+
+@test "build_staging skips machine_type home layer when machine_type is not set" {
+  mktest::stub_function home::_prepare_staging_dir
+  STUB_RETURN=1 mktest::stub_function context::get_array "modules.active"
+  STUB_RETURN=1 mktest::stub_function context::get "machine_type"
   mktest::stub_function home::_layer_dir
   home::build_staging
   TIMES=1 mktest::assert_stub_called home::_layer_dir

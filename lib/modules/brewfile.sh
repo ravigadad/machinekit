@@ -2,11 +2,23 @@
 # Brewfile module — applies the user's Brewfile from the blueprint.
 
 brewfile::install() {
-  logging::step "common/Brewfile"
-  local brewfile
-  brewfile="$(blueprints::dir)/common/Brewfile"
+  local blueprints_dir
+  blueprints_dir="$(blueprints::dir)"
+
+  brewfile::_apply_one "$blueprints_dir/common/Brewfile" "common/Brewfile"
+
+  local machine_type
+  machine_type="$(context::get "machine_type" 2>/dev/null || true)"
+  if [ -n "$machine_type" ]; then
+    brewfile::_apply_one "$blueprints_dir/machine_types/$machine_type/Brewfile" "machine_types/$machine_type/Brewfile"
+  fi
+}
+
+brewfile::_apply_one() {
+  local brewfile="$1" label="$2"
+  logging::step "$label"
   if [ ! -f "$brewfile" ]; then
-    logging::info "No common/Brewfile found in blueprints; skipping."
+    logging::info "No $label found in blueprints; skipping."
     return 0
   fi
   if input::is_dry_run; then
@@ -15,7 +27,7 @@ brewfile::install() {
   else
     logging::info "Applying $brewfile"
     brew bundle --file "$brewfile"
-    logging::success "common/Brewfile applied."
+    logging::success "$label applied."
   fi
 }
 

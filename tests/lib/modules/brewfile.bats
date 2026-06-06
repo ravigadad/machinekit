@@ -16,36 +16,62 @@ setup() {
 
 # --- brewfile::install ---
 
-@test "install returns 0 and skips brew bundle when no Brewfile exists" {
-  mktest::stub_function blueprints::dir "$BATS_TEST_TMPDIR/blueprints"
-  mktest::stub_function input::is_dry_run
+@test "install routes common Brewfile through _apply_one" {
+  local blueprints_dir="$BATS_TEST_TMPDIR/blueprints"
+  STUB_OUTPUT="$blueprints_dir" mktest::stub_function blueprints::dir
+  STUB_RETURN=1 mktest::stub_function context::get "machine_type"
+  mktest::stub_function brewfile::_apply_one
+  brewfile::install
+  mktest::assert_stub_called brewfile::_apply_one "$blueprints_dir/common/Brewfile" "common/Brewfile"
+}
+
+@test "install routes machine_type Brewfile through _apply_one when machine_type is set" {
+  local blueprints_dir="$BATS_TEST_TMPDIR/blueprints"
+  STUB_OUTPUT="$blueprints_dir" mktest::stub_function blueprints::dir
+  STUB_OUTPUT="laptop" mktest::stub_function context::get "machine_type"
+  mktest::stub_function brewfile::_apply_one
+  brewfile::install
+  TIMES=2 mktest::assert_stub_called brewfile::_apply_one
+  mktest::assert_stub_called brewfile::_apply_one "$blueprints_dir/common/Brewfile" "common/Brewfile"
+  mktest::assert_stub_called brewfile::_apply_one "$blueprints_dir/machine_types/laptop/Brewfile" "machine_types/laptop/Brewfile"
+}
+
+@test "install skips machine_type Brewfile when machine_type is not set" {
+  local blueprints_dir="$BATS_TEST_TMPDIR/blueprints"
+  STUB_OUTPUT="$blueprints_dir" mktest::stub_function blueprints::dir
+  STUB_RETURN=1 mktest::stub_function context::get "machine_type"
+  mktest::stub_function brewfile::_apply_one
+  brewfile::install
+  TIMES=1 mktest::assert_stub_called brewfile::_apply_one
+
+}
+
+# --- brewfile::_apply_one ---
+
+@test "_apply_one returns 0 and skips brew bundle when Brewfile does not exist" {
+  STUB_RETURN=1 mktest::stub_function input::is_dry_run
   mktest::stub_function brew "bundle"
-  run brewfile::install
+  run brewfile::_apply_one "$BATS_TEST_TMPDIR/nonexistent/Brewfile" "common/Brewfile"
   [ "$status" -eq 0 ]
   mktest::assert_stub_not_called brew "bundle"
 }
 
-@test "install in dry-run calls diff with the blueprints Brewfile path" {
-  local blueprints_dir="$BATS_TEST_TMPDIR/blueprints"
-  mkdir -p "$blueprints_dir/common"
-  printf 'brew "git"\n' > "$blueprints_dir/common/Brewfile"
-  STUB_OUTPUT="$blueprints_dir" mktest::stub_function blueprints::dir
+@test "_apply_one in dry-run calls _diff with the given Brewfile path" {
+  local brewfile="$BATS_TEST_TMPDIR/Brewfile"
+  printf 'brew "git"\n' > "$brewfile"
   mktest::stub_function input::is_dry_run
-  mktest::stub_function brewfile::_diff "$blueprints_dir/common/Brewfile"
-  brewfile::install
-  mktest::assert_stub_called brewfile::_diff "$blueprints_dir/common/Brewfile"
+  mktest::stub_function brewfile::_diff "$brewfile"
+  brewfile::_apply_one "$brewfile" "common/Brewfile"
+  mktest::assert_stub_called brewfile::_diff "$brewfile"
 }
 
-@test "install calls brew bundle with the blueprints Brewfile path when not dry-run" {
-  local blueprints_dir="$BATS_TEST_TMPDIR/blueprints"
-  mkdir -p "$blueprints_dir/common"
-  local brewfile_path="$blueprints_dir/common/Brewfile"
-  printf 'brew "git"\n' > "$brewfile_path"
-  STUB_OUTPUT="$blueprints_dir" mktest::stub_function blueprints::dir
+@test "_apply_one calls brew bundle with the Brewfile path when not dry-run" {
+  local brewfile="$BATS_TEST_TMPDIR/Brewfile"
+  printf 'brew "git"\n' > "$brewfile"
   STUB_RETURN=1 mktest::stub_function input::is_dry_run
-  mktest::stub_function brew "bundle" "--file" "$brewfile_path"
-  brewfile::install
-  mktest::assert_stub_called brew "bundle" "--file" "$brewfile_path"
+  mktest::stub_function brew "bundle" "--file" "$brewfile"
+  brewfile::_apply_one "$brewfile" "common/Brewfile"
+  mktest::assert_stub_called brew "bundle" "--file" "$brewfile"
 }
 
 # --- brewfile::_diff ---

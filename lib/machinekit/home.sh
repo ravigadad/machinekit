@@ -41,6 +41,12 @@ home::build_staging() {
 
   home::_layer_dir "$(blueprints::dir)/common/home" "blueprint common/home"
 
+  local machine_type
+  machine_type="$(context::get "machine_type" 2>/dev/null || true)"
+  if [ -n "$machine_type" ]; then
+    home::_layer_dir "$(blueprints::dir)/machine_types/$machine_type/home" "blueprint machine_types/$machine_type/home"
+  fi
+
   logging::success "Staging dir built at $_MK_HOME_STAGING_DIR"
 }
 

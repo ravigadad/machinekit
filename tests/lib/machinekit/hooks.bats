@@ -15,20 +15,82 @@ setup() {
 }
 
 _hooks_dir() { printf '%s\n' "$BATS_TEST_TMPDIR/blueprints/common/hooks/post-apply"; }
+_mt_hooks_dir() { printf '%s\n' "$BATS_TEST_TMPDIR/blueprints/machine_types/laptop/hooks/post-apply"; }
 
 # --- hooks::run_post_apply ---
 
-@test "run_post_apply skips when hooks dir does not exist" {
+@test "run_post_apply skips when no hook dirs exist" {
+  STUB_RETURN=1 mktest::stub_function context::get "machine_type"
   mktest::stub_function hooks::_execute_hooks
   run hooks::run_post_apply
   [ "$status" -eq 0 ]
   mktest::assert_stub_not_called hooks::_execute_hooks
 }
 
-@test "run_post_apply delegates to _execute_hooks when hooks dir exists" {
+@test "run_post_apply delegates to _execute_hooks when common hooks dir exists" {
   mkdir -p "$(_hooks_dir)"
+  STUB_RETURN=1 mktest::stub_function context::get "machine_type"
+  STUB_RETURN=1 mktest::stub_function input::is_dry_run
   mktest::stub_function hooks::_execute_hooks
   hooks::run_post_apply
+  mktest::assert_stub_called hooks::_execute_hooks "$(_hooks_dir)"
+}
+
+@test "run_post_apply logs success after common hooks run and not dry-run" {
+  mkdir -p "$(_hooks_dir)"
+  STUB_RETURN=1 mktest::stub_function context::get "machine_type"
+  STUB_RETURN=1 mktest::stub_function input::is_dry_run
+  mktest::stub_function hooks::_execute_hooks
+  hooks::run_post_apply
+  mktest::assert_stub_called logging::success
+}
+
+@test "run_post_apply does not log success in dry-run" {
+  mkdir -p "$(_hooks_dir)"
+  STUB_RETURN=1 mktest::stub_function context::get "machine_type"
+  mktest::stub_function input::is_dry_run
+  mktest::stub_function hooks::_execute_hooks
+  hooks::run_post_apply
+  mktest::assert_stub_not_called logging::success
+}
+
+@test "run_post_apply executes machine_type hooks when machine_type is set and dir exists" {
+  mkdir -p "$(_mt_hooks_dir)"
+  STUB_OUTPUT="laptop" mktest::stub_function context::get "machine_type"
+  STUB_RETURN=1 mktest::stub_function input::is_dry_run
+  mktest::stub_function hooks::_execute_hooks
+  hooks::run_post_apply
+  mktest::assert_stub_called hooks::_execute_hooks "$(_mt_hooks_dir)"
+}
+
+@test "run_post_apply executes both common and machine_type hooks when both dirs exist" {
+  mkdir -p "$(_hooks_dir)" "$(_mt_hooks_dir)"
+  STUB_OUTPUT="laptop" mktest::stub_function context::get "machine_type"
+  STUB_RETURN=1 mktest::stub_function input::is_dry_run
+  mktest::stub_function hooks::_execute_hooks
+  hooks::run_post_apply
+  TIMES=2 mktest::assert_stub_called hooks::_execute_hooks
+  mktest::assert_stub_called hooks::_execute_hooks "$(_hooks_dir)"
+  mktest::assert_stub_called hooks::_execute_hooks "$(_mt_hooks_dir)"
+}
+
+@test "run_post_apply skips machine_type hooks when machine_type is not set" {
+  mkdir -p "$(_hooks_dir)"
+  STUB_RETURN=1 mktest::stub_function context::get "machine_type"
+  STUB_RETURN=1 mktest::stub_function input::is_dry_run
+  mktest::stub_function hooks::_execute_hooks
+  hooks::run_post_apply
+  TIMES=1 mktest::assert_stub_called hooks::_execute_hooks
+  mktest::assert_stub_called hooks::_execute_hooks "$(_hooks_dir)"
+}
+
+@test "run_post_apply skips machine_type hooks when machine_type dir does not exist" {
+  mkdir -p "$(_hooks_dir)"
+  STUB_OUTPUT="laptop" mktest::stub_function context::get "machine_type"
+  STUB_RETURN=1 mktest::stub_function input::is_dry_run
+  mktest::stub_function hooks::_execute_hooks
+  hooks::run_post_apply
+  TIMES=1 mktest::assert_stub_called hooks::_execute_hooks
   mktest::assert_stub_called hooks::_execute_hooks "$(_hooks_dir)"
 }
 
@@ -69,7 +131,7 @@ _hooks_dir() { printf '%s\n' "$BATS_TEST_TMPDIR/blueprints/common/hooks/post-app
   mktest::assert_stub_not_called logging::success
 }
 
-@test "_execute_hooks not in dry-run passes dry_run=false to _execute_hook and logs success" {
+@test "_execute_hooks not in dry-run passes dry_run=false to _execute_hook" {
   local hdir
   hdir="$(_hooks_dir)"
   mkdir -p "$hdir"
@@ -78,7 +140,7 @@ _hooks_dir() { printf '%s\n' "$BATS_TEST_TMPDIR/blueprints/common/hooks/post-app
   mktest::stub_function hooks::_execute_hook
   hooks::_execute_hooks "$hdir"
   MATCH="^false$" mktest::assert_stub_called hooks::_execute_hook
-  mktest::assert_stub_called logging::success
+  mktest::assert_stub_not_called logging::success
 }
 
 @test "_execute_hooks exports MACHINEKIT_SUPPORT so hooks can source it" {
