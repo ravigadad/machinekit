@@ -24,8 +24,8 @@ fi
 logging::step "Apply summary"
 
 # context::get returns 1 if a key is unset, so use || to provide a fallback.
-git_name=$(context::get "git.user_name"   || printf "(not set)")
-git_email=$(context::get "git.user_email"  || printf "(not set)")
+git_name=$(config::get "module.git.user_name"  || printf "(not set)")
+git_email=$(config::get "module.git.user_email" || printf "(not set)")
 blueprints=$(context::get "blueprints.source" || printf "(unknown)")
 os_family=$(context::get "os.family" || printf "(unknown)")
 os_arch=$(context::get "os.arch"     || printf "(unknown)")

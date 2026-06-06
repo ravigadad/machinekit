@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # git module — collects git user identity and ships the gitconfig template.
 #
-# Preflight publishes git.user_name and git.user_email into context;
-# dot_gitconfig.tmpl picks them up at apply time.
+# Preflight ensures that config.module.git.user_name and *.user_email are set (if
+# not declared in config already, the user is prompted), so dot_gitconfig.tmpl can
+# pick them up at apply time.
 
 git::preflight() {
   # Resolve eagerly so a missing value fails here with a clear message
