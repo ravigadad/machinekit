@@ -66,7 +66,14 @@ bin/machinekit apply --dry-run --blueprints-source file://$HOME/code/my-blueprin
 bin/machinekit apply --blueprints-source file://$HOME/code/my-blueprints
 ```
 
-To use the same blueprints on another machine, push your blueprints repo to GitHub, then on the new machine clone machinekit and run `bin/machinekit apply --blueprints-source https://github.com/<owner>/my-blueprints`.
+To use the same blueprints on another machine, push your blueprints repo to GitHub and run the one-liner installer:
+
+```bash
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/ravigadad/machinekit/main/install.sh)" -- \
+  --blueprints-source https://github.com/<owner>/my-blueprints
+```
+
+This clones machinekit to `~/.local/share/machinekit/framework` and hands off to `machinekit apply` with any flags you pass. On subsequent runs it updates the clone first. Override the location with `MACHINEKIT_FRAMEWORK_DIR=/your/path`.
 
 On a fresh machine, the first apply will prompt you to:
 
