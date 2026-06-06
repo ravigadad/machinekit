@@ -103,7 +103,7 @@ node = "lts"
 
 machinekit knows every supported module, its capability dependencies, and its config schema. Opting into one module pulls in everything it transitively needs — a `databases` module asking for the `container_runtime` capability pulls in the platform's default container runtime, and so on. You declare *intent* (which languages, which services); machinekit handles *implementation*. Most real-world configs live here.
 
-> Status: not yet implemented. Iteration 1 stops at Tier 1.
+> Status: the TOML config layer and module activation are implemented (iteration 2). `modules = [...]` in `machinekit.toml` drives `preflight::resolve_active_modules`, with topological dependency resolution via `resolver.sh`. The full intent-module / capability-resolution system (where users name abstract intents like `runtimes` rather than concrete tools) is iteration 3.
 
 **Tier 3 — Hooks (imperative escape hatch).** For tools machinekit doesn't know about, blueprints can drop shell scripts into lifecycle directories (`hooks/post-apply/`), and `machinekit apply` runs them in alphabetical order at the named phase. The intended graduation path: a hook prototypes a new tool; if it's broadly useful, it gets proposed upstream as a machinekit module; once accepted, the user's blueprint deletes the hook and replaces it with a few config lines in Tier 2.
 
@@ -289,7 +289,7 @@ Without `--machine-type`, only the common layer applies. There is no implicit "d
 
 Machine types are how blueprints *express variation* across a fleet. They're not a tagging system or a capability flag set — those concerns live in `[modules.*]` config (iteration 2/3) and in the modules' own capability declarations.
 
-> Status: the directory structure ships in iteration 1; layering of `common/` + `machine_types/<type>/` content (across all four moving pieces) lands in iteration 2.
+> Status: the directory structure ships in iteration 1. All four layers — `home/`, `Brewfile`, `hooks/post-apply/`, and `machinekit.toml` — are implemented (iteration 2). End-to-end validation with a non-default machine type is not yet done.
 
 mise is installed on every machine — it's lightweight enough that the consistency is worth it. No runtimes are pre-installed; users configure them per their needs.
 
@@ -312,7 +312,7 @@ machinekit walks a merged staging dir and applies each file to `$HOME`:
 Everything *around* file application is machinekit's:
 
 - **Source fetching** — machinekit clones (`git clone`) or copies (`cp -r`) blueprints into `~/.local/share/machinekit/blueprints` itself, depending on whether the source resolves to the `git` or `cp` protocol. The cached source is treated as ephemeral and re-fetched on every apply.
-- **Staging-dir composition** — machinekit operates against a *merged* staging dir at `~/.local/share/machinekit/staging`, not the raw blueprint. The staging dir is wiped and rebuilt every run, layered in this order: each active module's `lib/modules/<name>/templates/`, then the blueprint's `common/home/`, then (iteration 2+) `machine_types/<type>/home/`. Same-path files in a later layer overwrite earlier ones, so the blueprint owns final say. Sibling blueprint content (`common/Brewfile`, `common/hooks/`, `common/machinekit.toml`, `machine_types/`) never enters the staging dir. `.mkignore` is scoped to within-home exclusions.
+- **Staging-dir composition** — machinekit operates against a *merged* staging dir at `~/.local/share/machinekit/staging`, not the raw blueprint. The staging dir is wiped and rebuilt every run, layered in this order: each active module's `lib/modules/<name>/templates/`, then the blueprint's `common/home/`, then `machine_types/<type>/home/` (when `--machine-type` is set). Same-path files in a later layer overwrite earlier ones, so the blueprint owns final say. Sibling blueprint content (`common/Brewfile`, `common/hooks/`, `common/machinekit.toml`, `machine_types/`) never enters the staging dir. `.mkignore` is scoped to within-home exclusions.
 
 One flag picks the blueprint source; the protocol is sniffed and overridable:
 
@@ -362,7 +362,7 @@ There are two installation stages:
 
 The template ships with commented Brewfiles showing the conventions; your blueprints contain your real choices.
 
-> Status: per-machine-type Brewfile layering is iteration 2. Iteration 1 reads only `common/Brewfile`.
+> Status: both `common/Brewfile` and per-machine-type `machine_types/<type>/Brewfile` layering are implemented.
 
 ---
 

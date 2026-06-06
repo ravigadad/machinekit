@@ -55,7 +55,7 @@ Architecture is described in [architecture.md](./architecture.md); this document
 
 ## Iteration 2 — Machine type branching
 
-**Status: in progress.**
+**Status: implemented** (end-to-end validation pending).
 
 **Value**: blueprints can differentiate behavior per machine. A `personal` machine and a `server` machine running the same blueprints get appropriately different package sets and dotfile contents from the same source.
 
@@ -67,9 +67,9 @@ The directory structure (`machine_types/<type>/`) ships in iteration 1; this ite
   - `home/` — apply `common/home/` then `machine_types/<type>/home/` on top. **Implemented.**
   - `Brewfile` — run `common/Brewfile`, then `machine_types/<type>/Brewfile` (additive). **Implemented.**
   - `hooks/post-apply/` — run common hooks, then type-specific hooks. **Implemented.**
-  - `machinekit.toml` — load `common/machinekit.toml`, merge `machine_types/<type>/machinekit.toml` on top. **Not yet implemented** — requires TOML parsing.
-- `machinekit.toml` reader (TOML parsing in bash, or shelled-out via a small helper). At iteration 2 it reads at least `[machine_types.*]` for module activations. **Not yet implemented.**
-- Validation by provisioning at least one non-default machine type end-to-end.
+  - `machinekit.toml` — load `common/machinekit.toml`, merge `machine_types/<type>/machinekit.toml` on top. **Implemented** (`config.sh` via `toml2json`).
+- `machinekit.toml` reader — `config::load` parses both layers via `toml2json`, merges with `jq`, and stores the result in context. The `modules` key drives `preflight::resolve_active_modules` with topological dependency resolution. **Implemented.**
+- Validation by provisioning at least one non-default machine type end-to-end. **Not yet done.**
 
 **Why a separate iteration**: machine-type layering is mechanically simple, but the structural decisions (directory shape, override semantics, TOML schema) are load-bearing for everything above. Getting them right before adding the module system avoids lock-in.
 

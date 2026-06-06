@@ -11,8 +11,8 @@ For what's planned and what's deferred, see [docs/roadmap.md](./docs/roadmap.md)
 
 - Installs Homebrew, then jq, gomplate, git, age (machinekit's prerequisites) plus mise (installed by its module).
 - Manages an age private key at `~/.config/age/key.txt` for encrypted blueprint files. Never generates one silently — generation is consent-gated.
-- Builds a merged staging dir from module-shipped templates plus your blueprint's `common/home/`, then applies it to `$HOME`.
-- Runs `common/Brewfile` from your blueprints (if present), then `mise install`, then any `common/hooks/post-apply/*.sh` scripts you supply.
+- Builds a merged staging dir from module-shipped templates plus your blueprint's `common/home/` (and `machine_types/<type>/home/` when a machine type is set), then applies it to `$HOME`.
+- Runs `common/Brewfile` from your blueprints (if present), then `machine_types/<type>/Brewfile` additively (if present), then `mise install`, then any `common/hooks/post-apply/` and `machine_types/<type>/hooks/post-apply/` scripts you supply.
 
 What you get on disk after a successful run:
 
