@@ -1,11 +1,22 @@
 # Configuration shared across all machine types.
-#
-# Anything declared here applies wherever a machine type doesn't explicitly
-# override it. Per-machine-type overrides go in
-# machine_types/<type>/machinekit.toml.
+# Per-machine-type overrides go in machine_types/<type>/machinekit.toml.
 
-# Example: declare a machinekit module and its config.
+# Uncomment and edit to activate modules. Order doesn't matter — dependencies
+# resolve automatically.
 #
-# [modules.runtimes]
-# ruby = "latest"
-# node = "lts"
+# modules = [
+#   "git",
+#   "age",
+#   "brewfile",
+#   "mise",
+#   "zsh",
+# ]
+
+# Per-module config. Use [module.<name>] for each activated module that needs it.
+#
+# [module.git]
+# user_name  = "Your Name"
+# user_email = "you@example.com"
+#
+# [module.age]
+# key_path = "~/.config/age/key.txt"  # default; override only if needed
