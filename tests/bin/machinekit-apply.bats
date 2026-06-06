@@ -52,13 +52,13 @@ setup() {
 }
 
 @test "main logs a DRY RUN banner when in dry-run mode" {
-  input::is_dry_run() { return 0; }
+  STUB_RETURN=0 mktest::stub_function input::is_dry_run
   main
   MATCH="DRY RUN" mktest::assert_stub_called logging::step
 }
 
 @test "main skips DRY RUN banner when not in dry-run mode" {
-  input::is_dry_run() { return 1; }
+  STUB_RETURN=1 mktest::stub_function input::is_dry_run
   main
   MATCH="DRY RUN" mktest::assert_stub_not_called logging::step
 }

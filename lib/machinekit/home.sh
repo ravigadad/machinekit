@@ -106,7 +106,7 @@ home::_apply_file() {
   local src="$1" staging="$2" ctx_file="$3"
   local src_rel dest_rel dest_path is_private is_template
 
-  src_rel="${src#$staging/}"
+  src_rel="${src#"$staging"/}"
   home::_decode_path "$src_rel"
   dest_rel="$_MK_HOME_DEST_REL"
   is_private="$_MK_HOME_IS_PRIVATE"
@@ -160,7 +160,7 @@ home::_decode_path() {
 
   while [ -n "$remainder" ]; do
     comp="${remainder%%/*}"
-    remainder="${remainder#$comp}"
+    remainder="${remainder#"$comp"}"
     remainder="${remainder#/}"
 
     if [ "${comp#private_}" != "$comp" ]; then
@@ -206,7 +206,7 @@ home::_render_to_outdir() {
   local src="$1" staging="$2" ctx_file="$3" out_dir="$4"
   local src_rel dest_rel is_template out_path
 
-  src_rel="${src#$staging/}"
+  src_rel="${src#"$staging"/}"
   home::_decode_path "$src_rel"
   dest_rel="$_MK_HOME_DEST_REL"
   is_template="$_MK_HOME_IS_TEMPLATE"
@@ -264,7 +264,7 @@ home::_show_plain_diff() {
   local tmp_out="$1"
   local has_changes=0 out_path rel_path dest_path
   while IFS= read -r out_path; do
-    rel_path="${out_path#$tmp_out/}"
+    rel_path="${out_path#"$tmp_out"/}"
     dest_path="$HOME/$rel_path"
     if [ ! -f "$dest_path" ]; then
       git diff --no-index --no-color /dev/null "$out_path" 2>/dev/null || true
@@ -283,7 +283,7 @@ home::_generate_diff() {
   local tmp_out="$1"
   local out_path rel_path dest_path
   while IFS= read -r out_path; do
-    rel_path="${out_path#$tmp_out/}"
+    rel_path="${out_path#"$tmp_out"/}"
     dest_path="$HOME/$rel_path"
     if [ ! -f "$dest_path" ]; then
       git diff --no-index --color=always /dev/null "$out_path" 2>/dev/null || true

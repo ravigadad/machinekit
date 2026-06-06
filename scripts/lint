@@ -13,15 +13,12 @@ fi
 
 # Production code and shared test infra are linted strictly (default severity).
 shellcheck \
-  bin/machinekit \
-  bin/machinekit-apply \
-  bin/machinekit-generate \
-  lib/machinekit.sh \
-  lib/modules.sh \
-  lib/machinekit/*.sh \
-  lib/modules/*.sh \
-  scripts/lint \
-  scripts/test \
+  bin/* \
+  lib/**/*.sh \
+  scripts/* \
+  tests/**/*.sh \
+  tests/vm/cases/* \
+  tests/vm/run \
   tests/test_helper.bash
 
 # bats runs each @test in its own subshell, so SC2030/SC2031 ("modification in
@@ -29,5 +26,4 @@ shellcheck \
 # scoping is the point. SC2119 likewise fires on fixtures that intentionally
 # call a logging helper with no args.
 shellcheck --exclude=SC2030,SC2031,SC2119 \
-  tests/lib/machinekit/*.bats \
-  tests/lib/modules/*.bats
+  tests/**/*.bats

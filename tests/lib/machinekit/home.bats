@@ -3,6 +3,9 @@
 
 load "${BATS_TEST_DIRNAME}/../../test_helper"
 
+# Portable file-mode query: BSD stat uses -f '%A', GNU stat uses -c '%a'.
+_file_mode() { command stat -c '%a' "$1" 2>/dev/null || command stat -f '%A' "$1"; }
+
 setup() {
   # shellcheck source=../../../lib/machinekit/home.sh
   source "$MACHINEKIT_DIR/lib/machinekit/home.sh"
@@ -260,7 +263,7 @@ setup() {
   printf '{}' > "$ctx_file"
   home::_apply_file "$ssh_staging/private_config" "$_MK_HOME_STAGING_DIR" "$ctx_file"
   [ -f "$HOME/.ssh/config" ]
-  [ "$(stat -f '%A' "$HOME/.ssh/config")" = "600" ]
+  [ "$(_file_mode "$HOME/.ssh/config")" = "600" ]
 }
 
 @test "_apply_file sets mode 700 on a directory whose staging name had private_ prefix" {
@@ -273,7 +276,7 @@ setup() {
   local ctx_file="$BATS_TEST_TMPDIR/ctx.json"
   printf '{}' > "$ctx_file"
   home::_apply_file "$ssh_staging/private_config" "$_MK_HOME_STAGING_DIR" "$ctx_file"
-  [ "$(stat -f '%A' "$HOME/.ssh")" = "700" ]
+  [ "$(_file_mode "$HOME/.ssh")" = "700" ]
 }
 
 # --- home::_show_diff ---
