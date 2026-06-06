@@ -7,15 +7,17 @@ setup() {
   # shellcheck source=../../../lib/machinekit/ssh.sh
   source "$MACHINEKIT_DIR/lib/machinekit/ssh.sh"
   SSH_KEY_PATH="$BATS_TEST_TMPDIR/ssh/id_ed25519"
+  export MACHINEKIT_TTY="$BATS_TEST_TMPDIR/tty"
   unset MACHINEKIT_EXISTING_SSH_KEY_FILE
 }
 
 # --- ssh::setup_key ---
 
-@test "setup_key is a no-op when no flags are given" {
+@test "setup_key is a no-op when no flags are given and non-interactive" {
   STUB_OUTPUT="$SSH_KEY_PATH" mktest::stub_function context::get "ssh.key_path" "--default" "$SSH_KEY_PATH" "--store-default"
   STUB_RETURN=1 mktest::stub_function context::get "existing_ssh_key_file"
   STUB_OUTPUT="false" mktest::stub_function context::get "ssh.key_generate" "--coerce" "boolean" "--default" "false"
+  STUB_RETURN=1 mktest::stub_function input::is_interactive
   run ssh::setup_key
   [ "$status" -eq 0 ]
 }
@@ -72,6 +74,53 @@ setup() {
   ssh::setup_key
   mktest::assert_stub_called ssh::_confirm_overwrite "$SSH_KEY_PATH"
   mktest::assert_stub_called ssh::_generate "$SSH_KEY_PATH"
+}
+
+# --- ssh::_interactive_discover ---
+
+@test "_interactive_discover with a provided path installs the key" {
+  local keyfile="$BATS_TEST_TMPDIR/provided-key"
+  printf 'fake key\n' > "$keyfile"
+  printf '%s\n' "$keyfile" > "$MACHINEKIT_TTY"
+  mktest::stub_function ssh::_install_copy
+  ssh::_interactive_discover "$SSH_KEY_PATH"
+  mktest::assert_stub_called ssh::_install_copy "$keyfile" "$SSH_KEY_PATH"
+}
+
+@test "_interactive_discover with a provided path calls _confirm_overwrite when key exists at dest" {
+  local keyfile="$BATS_TEST_TMPDIR/provided-key"
+  printf 'fake key\n' > "$keyfile"
+  mkdir -p "$(dirname "$SSH_KEY_PATH")"
+  printf 'existing\n' > "$SSH_KEY_PATH"
+  printf '%s\n' "$keyfile" > "$MACHINEKIT_TTY"
+  mktest::stub_function ssh::_confirm_overwrite
+  mktest::stub_function ssh::_install_copy
+  ssh::_interactive_discover "$SSH_KEY_PATH"
+  mktest::assert_stub_called ssh::_confirm_overwrite "$SSH_KEY_PATH"
+}
+
+@test "_interactive_discover with blank input generates a new key" {
+  printf '\n' > "$MACHINEKIT_TTY"
+  mktest::stub_function ssh::_generate
+  ssh::_interactive_discover "$SSH_KEY_PATH"
+  mktest::assert_stub_called ssh::_generate "$SSH_KEY_PATH"
+}
+
+@test "_interactive_discover with blank input calls _confirm_overwrite when key exists at dest" {
+  mkdir -p "$(dirname "$SSH_KEY_PATH")"
+  printf 'existing\n' > "$SSH_KEY_PATH"
+  printf '\n' > "$MACHINEKIT_TTY"
+  mktest::stub_function ssh::_confirm_overwrite
+  mktest::stub_function ssh::_generate
+  ssh::_interactive_discover "$SSH_KEY_PATH"
+  mktest::assert_stub_called ssh::_confirm_overwrite "$SSH_KEY_PATH"
+}
+
+@test "_interactive_discover fails when provided path does not exist" {
+  printf '/nonexistent/key\n' > "$MACHINEKIT_TTY"
+  STUB_EXIT=1 mktest::stub_function lifecycle::fail
+  run ! ssh::_interactive_discover "$SSH_KEY_PATH"
+  MATCH="not found" mktest::assert_stub_called lifecycle::fail
 }
 
 # --- ssh::_confirm_overwrite ---
@@ -134,8 +183,7 @@ setup() {
 
 @test "_show_pubkey_instructions pauses for input in interactive mode" {
   mktest::stub_function input::is_interactive
-  printf '\n' > "$BATS_TEST_TMPDIR/tty"
-  export MACHINEKIT_TTY="$BATS_TEST_TMPDIR/tty"
+  printf '\n' > "$MACHINEKIT_TTY"
   run --separate-stderr ssh::_show_pubkey_instructions "ssh-ed25519 AAAAfake test@test"
   [ "$status" -eq 0 ]
   [[ "$stderr" == *"Press Enter"* ]]

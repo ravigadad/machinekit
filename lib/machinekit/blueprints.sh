@@ -84,8 +84,101 @@ blueprints::_prepare_dest() {
 blueprints::_fetch_git() {
   local source="$1" abs_source="$1"
   blueprints::_is_url "$source" || abs_source=$(blueprints::_resolve_source_path "$source")
+
+  # Proactive SSH setup when the user explicitly passed key flags — installs or
+  # generates the key before the first clone attempt so SSH URLs work first try.
+  local ssh_was_setup=0
+  local existing_key
+  existing_key=$(context::get "existing_ssh_key_file" || true)
+  if [ -n "$existing_key" ]; then
+    ssh::setup_key
+    ssh_was_setup=1
+  else
+    local generate
+    generate=$(context::get "ssh.key_generate" --coerce boolean --default false)
+    if [ "$generate" = "true" ]; then
+      ssh::setup_key
+      ssh_was_setup=1
+    fi
+  fi
+
   logging::info "Cloning $abs_source → $_MK_BLUEPRINTS_DIR"
-  git clone -- "$abs_source" "$_MK_BLUEPRINTS_DIR"
+
+  # Capture stderr so we can classify auth vs network vs not-found on failure.
+  # Progress output is sacrificed; on success the output is discarded silently.
+  local stderr_file clone_rc=0
+  stderr_file=$(mktemp)
+  git clone -- "$abs_source" "$_MK_BLUEPRINTS_DIR" 2>"$stderr_file" || clone_rc=$?
+
+  if [ "$clone_rc" -ne 0 ]; then
+    local stderr_out
+    stderr_out=$(cat "$stderr_file")
+    rm -f "$stderr_file"
+    printf '%s\n' "$stderr_out" >&2
+    blueprints::_handle_clone_failure "$stderr_out" "$abs_source" "$ssh_was_setup"
+    logging::step "Retrying clone after SSH key setup..."
+    git clone -- "$abs_source" "$_MK_BLUEPRINTS_DIR"
+    return
+  fi
+
+  rm -f "$stderr_file"
+}
+
+# blueprints::_classify_clone_error STDERR_OUT
+# Inspects captured git stderr and prints one of: auth, network, not_found, unknown.
+blueprints::_classify_clone_error() {
+  local stderr_out="$1"
+  case "$stderr_out" in
+    *"Permission denied"*|*"terminal prompts disabled"*|*"could not read Username"*)
+      printf 'auth\n' ;;
+    *"Could not resolve host"*|*"Network is unreachable"*|*"Connection refused"*|*"connect to host"*)
+      printf 'network\n' ;;
+    *"Repository not found"*)
+      printf 'not_found\n' ;;
+    *)
+      printf 'unknown\n' ;;
+  esac
+}
+
+# blueprints::_handle_clone_failure STDERR_OUT SOURCE SSH_WAS_SETUP
+# Called when git clone fails. Either sets up SSH and returns 0 (caller retries),
+# or exits via lifecycle::fail. Never returns non-zero.
+blueprints::_handle_clone_failure() {
+  local stderr_out="$1" source="$2" ssh_was_setup="${3:-0}"
+  local error_type is_ssh_url=0
+  error_type=$(blueprints::_classify_clone_error "$stderr_out")
+
+  case "$source" in
+    git@*|ssh://*) is_ssh_url=1 ;;
+  esac
+
+  case "$error_type" in
+    auth)
+      if [ "$is_ssh_url" = 1 ] && [ "$ssh_was_setup" = 1 ]; then
+        lifecycle::fail "Clone failed: SSH key installed but authentication still failed. Verify the key is authorized for $source."
+      elif [ "$is_ssh_url" = 1 ] && input::is_interactive >/dev/null; then
+        logging::warn "SSH authentication failed — setting up SSH key and retrying."
+        ssh::setup_key
+      elif [ "$is_ssh_url" = 1 ]; then
+        lifecycle::fail "SSH authentication failed. Rerun with --existing-ssh-key-file or --generate-ssh-key."
+      else
+        lifecycle::fail "Clone failed (authentication). Configure git credentials or switch to an SSH URL with --existing-ssh-key-file or --generate-ssh-key."
+      fi
+      ;;
+    network)
+      lifecycle::fail "Clone failed: check your network connection and try again."
+      ;;
+    not_found)
+      if [ "$is_ssh_url" = 1 ]; then
+        lifecycle::fail "Repository not found: $source"
+      else
+        lifecycle::fail "Repository not found, or this may be a private repo — HTTPS cannot distinguish. Switch to an SSH URL with --existing-ssh-key-file or --generate-ssh-key."
+      fi
+      ;;
+    *)
+      lifecycle::fail "Clone failed. Git output: $stderr_out"
+      ;;
+  esac
 }
 
 blueprints::_fetch_cp() {

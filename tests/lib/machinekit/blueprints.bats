@@ -148,11 +148,108 @@ setup() {
   mktest::assert_stub_called lifecycle::register_cleanup "blueprints::cleanup_dest"
 }
 
+# --- blueprints::_classify_clone_error ---
+
+@test "_classify_clone_error identifies SSH permission denied as auth" {
+  result=$(blueprints::_classify_clone_error "git@github.com: Permission denied (publickey).")
+  [ "$result" = "auth" ]
+}
+
+@test "_classify_clone_error identifies HTTPS terminal-prompts-disabled as auth" {
+  result=$(blueprints::_classify_clone_error "fatal: could not read Username for 'https://github.com': terminal prompts disabled")
+  [ "$result" = "auth" ]
+}
+
+@test "_classify_clone_error identifies could-not-read-Username as auth" {
+  result=$(blueprints::_classify_clone_error "fatal: could not read Username for 'https://host'")
+  [ "$result" = "auth" ]
+}
+
+@test "_classify_clone_error identifies DNS failure as network" {
+  result=$(blueprints::_classify_clone_error "fatal: unable to access '...': Could not resolve host: github.com")
+  [ "$result" = "network" ]
+}
+
+@test "_classify_clone_error identifies Network is unreachable as network" {
+  result=$(blueprints::_classify_clone_error "ssh: connect to host github.com port 22: Network is unreachable")
+  [ "$result" = "network" ]
+}
+
+@test "_classify_clone_error identifies Connection refused as network" {
+  result=$(blueprints::_classify_clone_error "ssh: connect to host github.com port 22: Connection refused")
+  [ "$result" = "network" ]
+}
+
+@test "_classify_clone_error identifies Repository not found as not_found" {
+  result=$(blueprints::_classify_clone_error "ERROR: Repository not found.")
+  [ "$result" = "not_found" ]
+}
+
+@test "_classify_clone_error returns unknown for unrecognized output" {
+  result=$(blueprints::_classify_clone_error "fatal: some completely unexpected error")
+  [ "$result" = "unknown" ]
+}
+
+# --- blueprints::_handle_clone_failure ---
+
+@test "_handle_clone_failure auth + SSH URL + interactive calls ssh::setup_key" {
+  mktest::stub_function input::is_interactive
+  mktest::stub_function ssh::setup_key
+  mktest::stub_function logging::warn
+  blueprints::_handle_clone_failure "Permission denied (publickey)" "git@github.com:user/repo" 0
+  mktest::assert_stub_called ssh::setup_key
+}
+
+@test "_handle_clone_failure auth + SSH URL + already-run ssh → lifecycle::fail" {
+  STUB_EXIT=1 mktest::stub_function lifecycle::fail
+  run ! blueprints::_handle_clone_failure "Permission denied (publickey)" "git@github.com:user/repo" 1
+  MATCH="still failed" mktest::assert_stub_called lifecycle::fail
+}
+
+@test "_handle_clone_failure auth + SSH URL + non-interactive → lifecycle::fail with key hint" {
+  STUB_RETURN=1 mktest::stub_function input::is_interactive
+  STUB_EXIT=1 mktest::stub_function lifecycle::fail
+  run ! blueprints::_handle_clone_failure "Permission denied (publickey)" "git@github.com:user/repo" 0
+  MATCH="existing-ssh-key" mktest::assert_stub_called lifecycle::fail
+}
+
+@test "_handle_clone_failure auth + HTTPS URL → lifecycle::fail with credentials hint" {
+  STUB_EXIT=1 mktest::stub_function lifecycle::fail
+  run ! blueprints::_handle_clone_failure "terminal prompts disabled" "https://github.com/user/repo" 0
+  MATCH="authentication" mktest::assert_stub_called lifecycle::fail
+}
+
+@test "_handle_clone_failure network error → lifecycle::fail with network hint" {
+  STUB_EXIT=1 mktest::stub_function lifecycle::fail
+  run ! blueprints::_handle_clone_failure "Could not resolve host: github.com" "git@github.com:user/repo" 0
+  MATCH="network" mktest::assert_stub_called lifecycle::fail
+}
+
+@test "_handle_clone_failure not_found + SSH URL → lifecycle::fail with repo-not-found message" {
+  STUB_EXIT=1 mktest::stub_function lifecycle::fail
+  run ! blueprints::_handle_clone_failure "ERROR: Repository not found." "git@github.com:user/repo" 0
+  MATCH="not found" mktest::assert_stub_called lifecycle::fail
+}
+
+@test "_handle_clone_failure not_found + HTTPS URL → lifecycle::fail with private-repo ambiguity note" {
+  STUB_EXIT=1 mktest::stub_function lifecycle::fail
+  run ! blueprints::_handle_clone_failure "ERROR: Repository not found." "https://github.com/user/repo" 0
+  MATCH="private" mktest::assert_stub_called lifecycle::fail
+}
+
+@test "_handle_clone_failure unknown error → lifecycle::fail" {
+  STUB_EXIT=1 mktest::stub_function lifecycle::fail
+  run ! blueprints::_handle_clone_failure "some weird git error" "git@github.com:user/repo" 0
+  mktest::assert_stub_called lifecycle::fail
+}
+
 # --- blueprints::_fetch_git ---
 
 @test "_fetch_git clones a URL source directly and does not resolve the path" {
   _MK_BLUEPRINTS_DIR="$BATS_TEST_TMPDIR/dest"
   mktest::stub_function blueprints::_resolve_source_path
+  STUB_RETURN=1 mktest::stub_function context::get "existing_ssh_key_file"
+  STUB_OUTPUT="false" mktest::stub_function context::get "ssh.key_generate" "--coerce" "boolean" "--default" "false"
   mktest::stub_function git "clone" "--" "https://github.com/user/bp" "$BATS_TEST_TMPDIR/dest"
   blueprints::_fetch_git "https://github.com/user/bp"
   mktest::assert_stub_called git "clone" "--" "https://github.com/user/bp" "$BATS_TEST_TMPDIR/dest"
@@ -162,9 +259,66 @@ setup() {
 @test "_fetch_git resolves a local path before cloning" {
   _MK_BLUEPRINTS_DIR="$BATS_TEST_TMPDIR/dest"
   STUB_OUTPUT="/abs/myrepo" mktest::stub_function blueprints::_resolve_source_path "./myrepo"
+  STUB_RETURN=1 mktest::stub_function context::get "existing_ssh_key_file"
+  STUB_OUTPUT="false" mktest::stub_function context::get "ssh.key_generate" "--coerce" "boolean" "--default" "false"
   mktest::stub_function git "clone" "--" "/abs/myrepo" "$BATS_TEST_TMPDIR/dest"
   blueprints::_fetch_git "./myrepo"
   mktest::assert_stub_called git "clone" "--" "/abs/myrepo" "$BATS_TEST_TMPDIR/dest"
+}
+
+@test "_fetch_git does not set up SSH when no flags are given" {
+  _MK_BLUEPRINTS_DIR="$BATS_TEST_TMPDIR/dest"
+  mktest::stub_function blueprints::_resolve_source_path
+  STUB_RETURN=1 mktest::stub_function context::get "existing_ssh_key_file"
+  STUB_OUTPUT="false" mktest::stub_function context::get "ssh.key_generate" "--coerce" "boolean" "--default" "false"
+  mktest::stub_function ssh::setup_key
+  mktest::stub_function git "clone" "--" "https://github.com/user/bp" "$BATS_TEST_TMPDIR/dest"
+  blueprints::_fetch_git "https://github.com/user/bp"
+  mktest::assert_stub_not_called ssh::setup_key
+}
+
+@test "_fetch_git installs SSH key proactively when existing_ssh_key_file is set" {
+  _MK_BLUEPRINTS_DIR="$BATS_TEST_TMPDIR/dest"
+  mktest::stub_function blueprints::_resolve_source_path
+  STUB_OUTPUT="/tmp/key" mktest::stub_function context::get "existing_ssh_key_file"
+  mktest::stub_function ssh::setup_key
+  mktest::stub_function git "clone" "--" "git@github.com:user/bp" "$BATS_TEST_TMPDIR/dest"
+  blueprints::_fetch_git "git@github.com:user/bp"
+  mktest::assert_stub_called ssh::setup_key
+}
+
+@test "_fetch_git installs SSH key proactively when generate flag is set" {
+  _MK_BLUEPRINTS_DIR="$BATS_TEST_TMPDIR/dest"
+  mktest::stub_function blueprints::_resolve_source_path
+  STUB_RETURN=1 mktest::stub_function context::get "existing_ssh_key_file"
+  STUB_OUTPUT="true" mktest::stub_function context::get "ssh.key_generate" "--coerce" "boolean" "--default" "false"
+  mktest::stub_function ssh::setup_key
+  mktest::stub_function git "clone" "--" "git@github.com:user/bp" "$BATS_TEST_TMPDIR/dest"
+  blueprints::_fetch_git "git@github.com:user/bp"
+  mktest::assert_stub_called ssh::setup_key
+}
+
+@test "_fetch_git calls _handle_clone_failure and retries on git failure" {
+  _MK_BLUEPRINTS_DIR="$BATS_TEST_TMPDIR/dest"
+  mktest::stub_function blueprints::_resolve_source_path
+  STUB_RETURN=1 mktest::stub_function context::get "existing_ssh_key_file"
+  STUB_OUTPUT="false" mktest::stub_function context::get "ssh.key_generate" "--coerce" "boolean" "--default" "false"
+  STUB_RETURN=1 mktest::stub_function git "clone" "--" "git@github.com:user/bp" "$BATS_TEST_TMPDIR/dest"
+  mktest::stub_function blueprints::_handle_clone_failure
+  run ! blueprints::_fetch_git "git@github.com:user/bp"
+  TIMES=2 mktest::assert_stub_called git "clone" "--" "git@github.com:user/bp" "$BATS_TEST_TMPDIR/dest"
+  mktest::assert_stub_called blueprints::_handle_clone_failure
+}
+
+@test "_fetch_git does not retry when _handle_clone_failure exits" {
+  _MK_BLUEPRINTS_DIR="$BATS_TEST_TMPDIR/dest"
+  mktest::stub_function blueprints::_resolve_source_path
+  STUB_RETURN=1 mktest::stub_function context::get "existing_ssh_key_file"
+  STUB_OUTPUT="false" mktest::stub_function context::get "ssh.key_generate" "--coerce" "boolean" "--default" "false"
+  STUB_RETURN=1 mktest::stub_function git "clone" "--" "git@github.com:user/bp" "$BATS_TEST_TMPDIR/dest"
+  STUB_EXIT=1 mktest::stub_function blueprints::_handle_clone_failure
+  run ! blueprints::_fetch_git "git@github.com:user/bp"
+  TIMES=1 mktest::assert_stub_called git "clone" "--" "git@github.com:user/bp" "$BATS_TEST_TMPDIR/dest"
 }
 
 # --- blueprints::_fetch_cp ---

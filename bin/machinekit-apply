@@ -117,7 +117,6 @@ main() {
   input::detect_mode
   input::is_dry_run && logging::step "DRY RUN — showing what would change; nothing will be modified"
   sudo::ensure
-  ssh::setup_key
   preflight::run
   home::sync
   modules::run_installs

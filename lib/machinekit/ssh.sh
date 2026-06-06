@@ -12,6 +12,7 @@ ssh::setup_key() {
   local key_path existing_key_file generate
   key_path=$(context::get "ssh.key_path" --default "$SSH_KEY_PATH" --store-default)
   existing_key_file=$(context::get "existing_ssh_key_file" || true)
+  existing_key_file="${existing_key_file/#\~/$HOME}"
 
   if [ -n "$existing_key_file" ]; then
     [ -f "$existing_key_file" ] || lifecycle::fail "SSH key not found at: $existing_key_file"
@@ -22,7 +23,27 @@ ssh::setup_key() {
     if [ "$generate" = "true" ]; then
       [ -f "$key_path" ] && ssh::_confirm_overwrite "$key_path"
       ssh::_generate "$key_path"
+    elif input::is_interactive >/dev/null; then
+      ssh::_interactive_discover "$key_path"
     fi
+  fi
+}
+
+# ssh::_interactive_discover KEY_PATH
+# Prompts for a key path (blank → generate). Called when no explicit SSH flags
+# were given but auth failed and the session is interactive.
+ssh::_interactive_discover() {
+  local key_path="$1" provided_path
+  printf 'Path to SSH private key (leave blank to generate a new one): ' >&2
+  read -r provided_path < "${MACHINEKIT_TTY:-/dev/tty}"
+  provided_path="${provided_path/#\~/$HOME}"
+  if [ -n "$provided_path" ]; then
+    [ -f "$provided_path" ] || lifecycle::fail "SSH key not found at: $provided_path"
+    [ -f "$key_path" ] && ssh::_confirm_overwrite "$key_path"
+    ssh::_install_copy "$provided_path" "$key_path"
+  else
+    [ -f "$key_path" ] && ssh::_confirm_overwrite "$key_path"
+    ssh::_generate "$key_path"
   fi
 }
 
