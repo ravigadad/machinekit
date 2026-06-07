@@ -21,8 +21,6 @@ set -euo pipefail
 MK_PATH='$mk_path'
 "\$MK_PATH/bin/machinekit" apply \
   --non-interactive \
-  --git-user-name "MK Smoke Test" \
-  --git-user-email "mk-smoke@example.com" \
   --blueprints-source "\$MK_PATH/tests/vm/fixture_blueprints"
 SCRIPT
 
@@ -37,14 +35,11 @@ grep -q "MK Smoke Test" ~/.gitconfig
 SCRIPT
 
   vm_step "Idempotency: second apply"
-  # No --generate-age-key: age key already exists at the default location.
   vm::shell <<SCRIPT
 set -euo pipefail
 MK_PATH='$mk_path'
 "\$MK_PATH/bin/machinekit" apply \
   --non-interactive \
-  --git-user-name "MK Smoke Test" \
-  --git-user-email "mk-smoke@example.com" \
   --blueprints-source "\$MK_PATH/tests/vm/fixture_blueprints"
 SCRIPT
 }

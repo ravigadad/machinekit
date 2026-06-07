@@ -40,16 +40,10 @@ setup() {
 
 # --- container_manager::requires ---
 
-@test "requires outputs orbstack on darwin" {
-  STUB_OUTPUT="darwin" mktest::stub_function context::get "os.family"
+@test "requires outputs the default_satisfier" {
+  STUB_OUTPUT="some-satisfier" mktest::stub_function container_manager::default_satisfier
   result=$(container_manager::requires)
-  [ "$result" = "orbstack" ]
-}
-
-@test "requires outputs docker_ce on linux" {
-  STUB_OUTPUT="linux" mktest::stub_function context::get "os.family"
-  result=$(container_manager::requires)
-  [ "$result" = "docker_ce" ]
+  [ "$result" = "some-satisfier" ]
 }
 
 # --- container_manager::install ---

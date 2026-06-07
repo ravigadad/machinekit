@@ -23,9 +23,10 @@ setup() {
 
 # --- tool_version_manager::requires ---
 
-@test "requires outputs the default satisfier" {
+@test "requires outputs the default_satisfier" {
+  STUB_OUTPUT="some-satisfier" mktest::stub_function tool_version_manager::default_satisfier
   result=$(tool_version_manager::requires)
-  [ "$result" = "mise" ]
+  [ "$result" = "some-satisfier" ]
 }
 
 # --- tool_version_manager::install ---
