@@ -8,6 +8,16 @@ Install [bats-core](https://bats-core.readthedocs.io/), then:
 scripts/test
 ```
 
+## Watching tests during development
+
+Install [watchexec](https://github.com/watchexec/watchexec) (`brew install watchexec`), then:
+
+```bash
+scripts/watch-tests
+```
+
+Whenever you save a file in `lib/`, `tests/`, or `bin/`, the corresponding test file runs automatically. Saving `lib/modules/age.sh` runs `tests/lib/modules/age.bats`; saving a `.bats` file runs it directly. If a source file has no matching test file, the script says so rather than silently running nothing. Saving again while a run is in progress interrupts it and starts fresh.
+
 ## Running the linter
 
 Install [shellcheck](https://www.shellcheck.net/), then:

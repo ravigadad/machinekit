@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+#
+# Watch lib/, tests/, and bin/ for changes and run the relevant bats test file
+# automatically. When a source file changes, the corresponding test file is run
+# (e.g. lib/modules/age.sh → tests/lib/modules/age.bats). When a test file
+# changes, it is run directly. Safe to run from any directory.
+#
+# Requires watchexec: brew install watchexec
+#
+# Usage:
+#   scripts/watch-tests        # from the repo root
+#   ./watch-tests              # from the scripts/ directory
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+SCRIPT="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
+
+if [[ "$1" == "--run" ]]; then
+  changed=$(head -1 "$WATCHEXEC_EVENTS_FILE" | sed 's/^[^:]*://')
+  rel="${changed#"$REPO_ROOT"/}"
+  case "$rel" in
+    tests/*.bats)
+      echo "⚡ $rel → running directly"
+      bats "$rel" 2>/dev/null
+      ;;
+    lib/*.sh|bin/*)
+      target="tests/${rel%.sh}.bats"
+      if [[ -f "$target" ]]; then
+        echo "⚡ $rel → $target"
+        bats "$target" 2>/dev/null
+      else
+        echo "⚠️  No test found for $rel (looked for $target)"
+      fi
+      ;;
+  esac
+else
+  cd "$REPO_ROOT"
+  watchexec \
+    --watch lib/ --watch tests/ --watch bin/ \
+    --filter '**/*.sh' --filter '**/*.bats' --filter 'bin/*' \
+    --emit-events-to=file \
+    --restart \
+    --clear \
+    -- bash "$SCRIPT" --run
+fi
