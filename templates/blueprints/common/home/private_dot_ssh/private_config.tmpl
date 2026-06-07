@@ -1,3 +1,8 @@
+{{- if has .modules.active "orbstack" }}
+# OrbStack: 'orb' SSH host for Linux machines (must precede any Host blocks).
+Include ~/.orbstack/ssh/config
+
+{{- end }}
 # ~/.ssh/config — managed by machinekit.
 # Defaults applied to every host. Per-host blocks can follow.
 

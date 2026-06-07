@@ -2,6 +2,8 @@
 # mise module — installs runtimes pinned in ~/.config/mise/config.toml
 # (or any discoverable .tool-versions). No-op when nothing is pinned.
 
+mise::provides() { printf 'tool_version_manager\n'; }
+
 mise::requires() { printf 'zsh\n'; }
 
 mise::install() {

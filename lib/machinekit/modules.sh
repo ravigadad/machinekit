@@ -16,7 +16,7 @@ modules::source_all() {
   _MK_MODULES_SOURCED=1
   local f
   # shellcheck disable=SC1090
-  for f in "$_MK_MODULES_DIR"/*.sh; do
+  for f in "$_MK_MODULES_DIR"/*.sh "$_MK_MODULES_DIR"/capabilities/*.sh; do
     [ -f "$f" ] || continue
     source "$f"
   done

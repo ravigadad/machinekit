@@ -7,6 +7,10 @@ setup() {
   # shellcheck source=../../../lib/machinekit/resolver.sh
   source "$MACHINEKIT_DIR/lib/machinekit/resolver.sh"
   unset _MK_RESOLVER_LOADED
+
+  # Prevent real module files from loading in resolver tests; capability
+  # functions are defined inline per-test.
+  mktest::stub_function modules::source_all
 }
 
 # --- load guard ---
@@ -74,4 +78,77 @@ setup() {
   run resolver::resolve alpha
   [ "$status" -ne 0 ]
   MATCH="circular" mktest::assert_stub_called lifecycle::fail
+}
+
+# --- capability expansion ---
+
+@test "resolve pulls in the default satisfier when a capability is listed" {
+  cap::is_capability()      { return 0; }
+  cap::default_satisfier()  { printf 'sat\n'; }
+  cap::requires()           { cap::default_satisfier; }
+  cap::install()            { :; }
+  result=$(resolver::resolve cap)
+  printf '%s\n' "$result" | grep -q '^sat$'
+  printf '%s\n' "$result" | grep -q '^cap$'
+}
+
+@test "resolve lists default satisfier before the capability module" {
+  cap::is_capability()     { return 0; }
+  cap::default_satisfier() { printf 'sat\n'; }
+  cap::requires()          { cap::default_satisfier; }
+  cap::install()           { :; }
+  result=$(resolver::resolve cap)
+  sat_line=$(printf '%s\n' "$result" | grep -n '^sat$' | cut -d: -f1)
+  cap_line=$(printf '%s\n' "$result" | grep -n '^cap$' | cut -d: -f1)
+  [ "$sat_line" -lt "$cap_line" ]
+}
+
+@test "resolve uses explicit satisfier over default when both are listed" {
+  cap::is_capability()     { return 0; }
+  cap::default_satisfier() { printf 'default_sat\n'; }
+  cap::requires()          { cap::default_satisfier; }
+  cap::install()           { :; }
+  explicit_sat::provides() { printf 'cap\n'; }
+  explicit_sat::install()  { :; }
+  result=$(resolver::resolve cap explicit_sat)
+  printf '%s\n' "$result" | grep -q '^explicit_sat$'
+  count=$(printf '%s\n' "$result" | grep -c '^default_sat$' || true)
+  [ "$count" -eq 0 ]
+}
+
+@test "resolve does not duplicate satisfier when listed explicitly alongside capability" {
+  cap::is_capability()     { return 0; }
+  cap::default_satisfier() { printf 'sat\n'; }
+  cap::requires()          { cap::default_satisfier; }
+  cap::install()           { :; }
+  sat::provides()          { printf 'cap\n'; }
+  sat::install()           { :; }
+  result=$(resolver::resolve cap sat)
+  count=$(printf '%s\n' "$result" | grep -c '^sat$')
+  [ "$count" -eq 1 ]
+}
+
+# --- conflict detection ---
+
+@test "resolve fails when two satisfiers claim the same capability" {
+  sat_a::provides() { printf 'cap\n'; }
+  sat_b::provides() { printf 'cap\n'; }
+  sat_a::install()  { :; }
+  sat_b::install()  { :; }
+  STUB_EXIT=1 mktest::stub_function lifecycle::fail
+  run resolver::resolve sat_a sat_b
+  [ "$status" -ne 0 ]
+  MATCH="cap" mktest::assert_stub_called lifecycle::fail
+}
+
+@test "resolve allows multiple satisfiers for the same capability when configured" {
+  sat_a::provides() { printf 'cap\n'; }
+  sat_b::provides() { printf 'cap\n'; }
+  sat_a::install()  { :; }
+  sat_b::install()  { :; }
+  STUB_OUTPUT="true" mktest::stub_function config::get \
+    "capability.cap.allow_multiple_satisfiers"
+  result=$(resolver::resolve sat_a sat_b)
+  printf '%s\n' "$result" | grep -q '^sat_a$'
+  printf '%s\n' "$result" | grep -q '^sat_b$'
 }

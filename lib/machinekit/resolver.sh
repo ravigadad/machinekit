@@ -6,15 +6,19 @@ _MK_RESOLVER_LOADED=1
 _resolver_visited=""
 _resolver_in_progress=""
 _resolver_result=()
+_resolver_requested=()
 
 resolver::resolve() {
+  modules::source_all
   _resolver_visited=""
   _resolver_in_progress=""
   _resolver_result=()
+  _resolver_requested=("$@")
   local mod
   for mod in "$@"; do
     resolver::_visit "$mod"
   done
+  resolver::_check_conflicts
   if [ "${#_resolver_result[@]}" -gt 0 ]; then
     printf '%s\n' "${_resolver_result[@]}"
   fi
@@ -27,14 +31,79 @@ resolver::_visit() {
     lifecycle::fail "resolver: circular dependency detected involving '$mod'"
   esac
   _resolver_in_progress="$_resolver_in_progress $mod"
-  if declare -f "${mod}::requires" > /dev/null 2>&1; then
+
+  # For capability modules, an explicit satisfier in the requested list takes
+  # precedence over the default. Skip ::requires entirely when one is found so
+  # the default satisfier is not also pulled in.
+  local skip_requires=0
+  if declare -f "${mod}::is_capability" > /dev/null 2>&1 && "${mod}::is_capability"; then
+    local satisfier
+    satisfier=$(resolver::_find_explicit_satisfier "$mod")
+    if [ -n "$satisfier" ]; then
+      resolver::_visit "$satisfier"
+      skip_requires=1
+    fi
+  fi
+
+  if [ "$skip_requires" -eq 0 ] && declare -f "${mod}::requires" > /dev/null 2>&1; then
     local dep
+
     while IFS= read -r dep; do
       [ -n "$dep" ] || continue
       resolver::_visit "$dep"
     done < <("${mod}::requires")
   fi
+
   _resolver_in_progress="${_resolver_in_progress/ $mod/}"
   _resolver_visited="$_resolver_visited $mod"
   _resolver_result+=("$mod")
+}
+
+# Returns the first module in _resolver_requested that provides the given
+# capability, or nothing if none do.
+resolver::_find_explicit_satisfier() {
+  local capability="$1" req provided
+  for req in "${_resolver_requested[@]}"; do
+    declare -f "${req}::provides" > /dev/null 2>&1 || continue
+    while IFS= read -r provided; do
+      [ "$provided" = "$capability" ] && printf '%s\n' "$req" && return 0
+    done < <("${req}::provides")
+  done
+}
+
+# Scans resolved modules for ::provides declarations. Fails if two modules
+# claim the same capability, unless allow_multiple_satisfiers is configured.
+resolver::_check_conflicts() {
+  local mod provided all_provided="" seen_caps="" cap count satisfier_names allow
+
+  for mod in "${_resolver_result[@]}"; do
+    declare -f "${mod}::provides" > /dev/null 2>&1 || continue
+    while IFS= read -r provided; do
+      [ -n "$provided" ] || continue
+      all_provided="$all_provided $provided"
+    done < <("${mod}::provides")
+  done
+
+  for cap in $all_provided; do
+    case " $seen_caps " in *" $cap "*) continue ;; esac
+    seen_caps="$seen_caps $cap"
+
+    count=0
+    satisfier_names=""
+    for mod in "${_resolver_result[@]}"; do
+      declare -f "${mod}::provides" > /dev/null 2>&1 || continue
+      while IFS= read -r provided; do
+        [ "$provided" = "$cap" ] || continue
+        count=$((count + 1))
+        satisfier_names="$satisfier_names $mod"
+        break
+      done < <("${mod}::provides")
+    done
+
+    if [ "$count" -ge 2 ]; then
+      allow=$(config::get "capability.${cap}.allow_multiple_satisfiers" 2>/dev/null || true)
+      [ "$allow" = "true" ] && continue
+      lifecycle::fail "resolver: conflict —$(printf '%s' "$satisfier_names") both satisfy '${cap}'. Remove one or set [capability.${cap}] allow_multiple_satisfiers = true."
+    fi
+  done
 }

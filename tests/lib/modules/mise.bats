@@ -13,6 +13,13 @@ setup() {
   mktest::stub_function logging::warn
 }
 
+# --- mise::provides ---
+
+@test "provides declares tool_version_manager" {
+  result=$(mise::provides)
+  printf '%s\n' "$result" | grep -q '^tool_version_manager$'
+}
+
 # --- mise::requires ---
 
 @test "requires declares zsh as a dependency" {

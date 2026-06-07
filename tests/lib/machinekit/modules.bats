@@ -36,6 +36,11 @@ setup() {
   declare -f age::install > /dev/null
 }
 
+@test "source_all makes capability module functions available" {
+  modules::source_all
+  declare -f tool_version_manager::is_capability > /dev/null
+}
+
 @test "source_all is idempotent" {
   modules::source_all
   age::install() { echo "sentinel"; }
