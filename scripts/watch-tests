@@ -33,7 +33,7 @@ if [[ "$1" == "--run" ]]; then
       ;;
   esac
 else
-  cd "$REPO_ROOT"
+  cd "$REPO_ROOT" || exit
   watchexec \
     --watch lib/ --watch tests/ --watch bin/ \
     --filter '**/*.sh' --filter '**/*.bats' --filter 'bin/*' \
