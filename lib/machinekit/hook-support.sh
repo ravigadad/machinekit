@@ -18,4 +18,6 @@ source "$_mk_support_dir/input.sh"
 source "$_mk_support_dir/lifecycle.sh"
 # shellcheck source=context.sh
 source "$_mk_support_dir/context.sh"
+# shellcheck source=config.sh
+source "$_mk_support_dir/config.sh"
 unset _mk_support_dir
