@@ -29,7 +29,7 @@ Architecture is described in [architecture.md](./architecture.md); this document
   - `common/Brewfile` — empty, commented.
   - `common/hooks/post-apply/` — empty placeholder.
   - `machine_types/README.md` — placeholder explaining the per-type override layout for iteration 2.
-- Home file application walks the staging dir, decodes chezmoi path conventions (dot_, private_, .tmpl), renders templates via gomplate with the full context JSON, and copies files to `$HOME` with appropriate permissions. machinekit owns the full pipeline — no external source manager.
+- Home file application walks the staging dir, decodes chezmoi path conventions (dot_, private_, .tmpl), renders templates via gomplate with the full context JSON, and copies files to `$HOME` with appropriate permissions. machinekit owns the full pipeline — no external source manager. Conflict resolution: when a staged file differs from the existing `$HOME` file, interactive mode prompts per-file (overwrite / skip / abort / diff, with bulk variants); non-interactive mode obeys `--conflict-behavior` (`MACHINEKIT_CONFLICT_BEHAVIOR`), defaulting to `overwrite`.
 - SSH module (`ssh.sh`) — installs an existing key or generates a fresh one before (proactive) or after (reactive, interactive mode only) the blueprints clone fails with an SSH auth error. Reactive path retries the clone automatically after key setup. Clone errors are classified from git stderr (auth / network / not-found / unknown) and produce targeted messages.
 - Blueprint source is cached at `~/.local/share/machinekit/blueprints/` (machinekit-owned, treated as an ephemeral cache — wiped and re-fetched on every real-run apply).
 - Cross-platform posture documented; macOS primary, Linux CI/e2e in place.
@@ -79,32 +79,17 @@ The directory structure (`machine_types/<type>/`) ships in iteration 1; this ite
 
 ## Iteration 3 — Module system
 
-**Status: concrete infrastructure implemented; intent-module layer not yet implemented.**
+**Status: implemented.**
 
 **Value**: optional tools become declarative. You opt in via `machinekit.toml` and dependencies resolve automatically. This is the architectural mechanism behind [Tier 2 customization](./architecture.md#three-tier-customization).
 
 **Deliverables:**
 
-- `lib/modules/<name>.sh` convention with `::preflight`, `::install`, and `::requires` declarations. **Implemented.**
+- `lib/modules/<name>.sh` convention with `::preflight`, `::install`, `::requires`, and `::provides` declarations. **Implemented.**
 - TOML config reader for `machinekit.toml`: `config::load` merges common and machine-type layers; `config::get "module.<name>.<key>"` gives modules access to their config. **Implemented.**
 - Dependency closure resolver: `resolver::resolve` does a DFS topological sort over `::requires` declarations so opting into one module pulls in its deps automatically. **Implemented.**
-- Validation: all five concrete modules (`age`, `brewfile`, `git`, `mise`, `zsh`) exercised end-to-end with the resolver and config layer. **Done.**
-
-**Remaining: intent modules, capabilities, satisfiers**
-
-The concrete module system lets users list `mise`, `git`, etc. directly in `machinekit.toml`. The planned abstraction layer above it — described in [docs/architecture.md § Modules, capabilities, and satisfiers](./architecture.md#modules-capabilities-and-satisfiers) — is not yet implemented:
-
-- **Intent modules** are what users list in `machinekit.toml` (`runtimes`, `databases`, etc.). They take semantic config and declare capability needs.
-- **Implementation modules** are concrete satisfiers (`mise`, `postgres`, `orbstack`). Usually pulled in automatically; users list them explicitly only when overriding the default satisfier.
-- **Capabilities** wire intent to implementation. `runtime_manager` is satisfied by `mise` (default); `container_runtime` is satisfied by `orbstack` on macOS / `docker-engine` on Linux.
-
-Modules support three operating modes for their config:
-
-- **Basic mode**: the user declares semantic intent via the intent module's config. The module translates this into the satisfier's native config, installs the satisfier, and runs the install step.
-- **Advanced mode**: the user provides the raw satisfier config in their home dir. The module detects this, defers to it, and just runs install.
-- **Bypass**: the user handles everything via `common/Brewfile` and post-apply hooks.
-
-The intent vocabulary (what intent modules exist, what config they accept) must stabilize before committing to tool-specific implementation. Don't design the module API around mise internals.
+- Capability modules (`lib/modules/capabilities/`): `tool_version_manager` (default: `mise`) and `container_manager` (default: `orbstack` on macOS, `docker_ce` on Linux). Resolver substitutes the default satisfier, detects multi-satisfier conflicts. **Implemented.**
+- Validation: concrete modules (`age`, `brewfile`, `git`, `mise`, `zsh`) and capability/satisfier resolution exercised end-to-end. **Done.**
 
 **Why a separate iteration**: the module system is the highest-leverage architectural change in the project. Shipping it with one real module (mise) first means the abstractions are exercised against something non-trivial before more modules build on it.
 
@@ -135,7 +120,6 @@ After the module system and bash modernization land, the framework's machinery i
 - Additional modules as needs arise (prompt themes, password-manager CLIs as a secrets-fetch layer, and so on).
 - Linux support: add a Linux test target, gate macOS-specific lines behind `os.family` checks, validate the Homebrew-on-Linux path.
 - A curl-pipe-bash installer shim (`install.sh`) for fresh-machine one-liner setup.
-- **Home file conflict resolution.** When `home::sync` would overwrite an existing file, give the user control over what happens. In interactive mode: per-file prompt with overwrite / skip / abort / diff-then-decide options, plus "apply to all remaining" shortcuts. In non-interactive mode: a `--conflict-behavior=<overwrite|skip|abort>` flag (env: `MACHINEKIT_CONFLICT_BEHAVIOR`) that sets the apply-all default, with `overwrite` as the default (current behavior). Merge/append is explicitly out of scope for this item — file-format-aware merging belongs in post-apply hooks.
 
 The roadmap stops being prescriptive here. The architecture supports incremental addition; what gets added is a function of what the framework actually needs in use.
 

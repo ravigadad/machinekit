@@ -10,7 +10,7 @@ For what's planned and what's deferred, see [docs/roadmap.md](./docs/roadmap.md)
 ## What it does
 
 - Installs Homebrew, then jq, toml2json, gomplate, and git — machinekit's prerequisites.
-- Builds a merged staging dir from module-shipped templates plus your blueprint's `common/home/` (and `machine_types/<type>/home/` when a machine type is set), then applies it to `$HOME`.
+- Builds a merged staging dir from module-shipped templates plus your blueprint's `common/home/` (and `machine_types/<type>/home/` when a machine type is set), then applies it to `$HOME`. Existing files that differ get a per-file prompt in interactive mode (overwrite / skip / abort / diff, with bulk shortcuts); non-interactive mode obeys `--conflict-behavior` (default: `overwrite`).
 - Runs `common/Brewfile` from your blueprints (if present), then `machine_types/<type>/Brewfile` additively (if present), then `mise install`, then any `common/hooks/post-apply/` and `machine_types/<type>/hooks/post-apply/` scripts you supply.
 
 What you get on disk after a successful run:

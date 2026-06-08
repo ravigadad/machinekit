@@ -94,16 +94,12 @@ machinekit is opinionated by default and configurable when you want more. Custom
 
 ```toml
 # machine_types/personal/machinekit.toml
-modules = ["runtimes", "databases"]
-
-[modules.runtimes]
-ruby = "latest"
-node = "lts"
+modules = ["tool_version_manager", "container_manager"]
 ```
 
-machinekit knows every supported module, its capability dependencies, and its config schema. Opting into one module pulls in everything it transitively needs — a `databases` module asking for the `container_runtime` capability pulls in the platform's default container runtime, and so on. You declare *intent* (which languages, which services); machinekit handles *implementation*. Most real-world configs live here.
+machinekit knows every supported module, its capability dependencies, and its config schema. Opting into a capability (`tool_version_manager`, `container_manager`) automatically pulls in the platform's default satisfier — no need to spell out the concrete tool. Users can override by listing a specific satisfier explicitly. Most real-world configs live here.
 
-> Status: the TOML config layer and module activation are implemented (iteration 2). `modules = [...]` in `machinekit.toml` drives `preflight::resolve_active_modules`, with topological dependency resolution via `resolver.sh`. The full intent-module / capability-resolution system (where users name abstract intents like `runtimes` rather than concrete tools) is iteration 3.
+> Status: implemented. `modules = [...]` in `machinekit.toml` drives `preflight::resolve_active_modules`. Capability modules and satisfier modules are both live.
 
 **Tier 3 — Hooks (imperative escape hatch).** For tools machinekit doesn't know about, blueprints can drop shell scripts into lifecycle directories (`hooks/post-apply/`), and `machinekit apply` runs them in alphabetical order at the named phase. The intended graduation path: a hook prototypes a new tool; if it's broadly useful, it gets proposed upstream as a machinekit module; once accepted, the user's blueprint deletes the hook and replaces it with a few config lines in Tier 2.
 
@@ -117,23 +113,21 @@ In practice:
 
 - An empty `machinekit.toml`, an empty `Brewfile`, an empty `dotfiles/` directory, and no `hooks/` should all be valid and produce a working machine.
 - Modules declare their own dependencies (via capabilities); users don't list transitive dependencies.
-- Cross-platform implementation choices have sensible defaults per platform (e.g. `container_runtime` defaults to OrbStack on macOS, Docker Engine on Linux). Users only override when they have a specific reason.
+- Cross-platform implementation choices have sensible defaults per platform (e.g. `container_manager` defaults to OrbStack on macOS, Docker Engine on Linux). Users only override when they have a specific reason.
 - "Listing a satisfier in `modules = [...]`" *is* the override mechanism — no separate flag, no special syntax. The blueprint stays declarative.
 
 The principle exists because the alternative (everything must be spelled out) makes blueprints brittle, verbose, and full of repeated knowledge that machinekit already has.
 
 ### Modules, capabilities, and satisfiers
 
-There are three roles in machinekit's module system, but only **one concept** — modules. The roles are about what *level* a module lives at in the resolution graph:
+There are two kinds of modules in machinekit's module system:
 
-- **Intent modules** are what users typically list in `machinekit.toml`. They name what the user wants (`runtimes`, `databases`). They're often thin: their job is to declare capability needs and take user config, not to install software directly.
-- **Implementation modules** are the concrete satisfiers (`mise`, `postgres`, `orbstack`, `docker-engine`). They install + configure specific tools. Users typically don't list them — they get pulled in automatically when an intent module needs the capability they provide. Users *can* list them explicitly when they want a specific implementation chosen.
+- **Regular modules** install and configure specific tools (`mise`, `orbstack`, `docker_ce`, `git`, `age`, etc.). Satisfier modules are regular modules that additionally declare `::provides` to advertise which capability they fulfill.
+- **Capability modules** (`lib/modules/capabilities/`) are abstract slots. Each declares a default satisfier (platform-aware where needed) and delegates `::requires` to it. Their `::install` is a no-op — the satisfier does the real work.
 
-**Capabilities** are the abstract slots that wire intent to implementation. A capability like `version_manager` says "something needs to manage language runtime versions"; modules like `mise` declare "I provide `version_manager`." Multiple modules can provide the same capability; machinekit picks the default satisfier per platform.
+**Capabilities** are the two implemented abstract slots: `tool_version_manager` (satisfied by `mise` by default) and `container_manager` (satisfied by `orbstack` on macOS, `docker_ce` on Linux). Users list a capability in `modules = [...]` and the resolver substitutes the default satisfier. Listing a concrete satisfier explicitly overrides the default — that's how someone says "use Docker, not OrbStack." If two satisfiers for the same capability end up in the active set, the resolver hard-fails unless `allow_multiple_satisfiers = true` is set.
 
-The user's blueprint reads as *intent*: "I want languages, I want a database." machinekit fills in the satisfiers per platform. The user can override by listing a specific satisfier in their module list — that's how someone says "use Docker, not OrbStack, on this machine."
-
-> Status: the module system is implemented — `::install`, `::preflight`, and `::requires` conventions are live; `resolver.sh` handles topological sort; modules are activated via `modules = [...]` in `machinekit.toml`. The capability / intent-vs-satisfier layer (abstract module names resolving to concrete satisfiers) is not yet implemented.
+> Status: implemented. `::install`, `::preflight`, `::requires`, and `::provides` conventions are live. `lib/modules/capabilities/` holds `tool_version_manager` and `container_manager`. `resolver.sh` handles topological sort, capability → default-satisfier substitution, and post-resolution conflict detection.
 
 ### Execution modes
 
@@ -314,6 +308,8 @@ machinekit walks a merged staging dir and applies each file to `$HOME`:
 
 **Ignore file** — `.mkignore` in the staging dir lists destination paths (relative to `$HOME`) to skip. The `.mkignore` file itself is always skipped.
 
+**Conflict resolution** — when a staged file would overwrite an existing `$HOME` file whose content differs, machinekit prompts rather than silently clobbering. In interactive mode: a per-file menu with overwrite / skip / abort / diff options, plus bulk overwrite-all / skip-all shortcuts. In non-interactive mode, the behavior is controlled by `--conflict-behavior=<overwrite|skip|abort>` (`MACHINEKIT_CONFLICT_BEHAVIOR`), defaulting to `overwrite` (previous behavior). File-format-aware merging is explicitly out of scope — that belongs in post-apply hooks.
+
 Everything *around* file application is machinekit's:
 
 - **Source fetching** — machinekit clones (`git clone`) or copies (`cp -r`) blueprints into `~/.local/share/machinekit/blueprints` itself, depending on whether the source resolves to the `git` or `cp` protocol. The cached source is treated as ephemeral and re-fetched on every apply.
@@ -387,7 +383,7 @@ machinekit/                             ← this repo (public)
 ├── lib/                                ← all execution code lives here
 │   ├── machinekit.sh                   ← single aggregator: sources lib/machinekit/* eagerly
 │   ├── machinekit/                     ← core machinekit code
-│   │   ├── logging.sh                  ← logging::* (info, warn, error, success, step, debug, dry_run, fail)
+│   │   ├── logging.sh                  ← logging::* (info, warn, error, success, step, attention, debug, dry_run, fail)
 │   │   ├── lifecycle.sh                ← lifecycle::* (cleanup chain, lock, fail)
 │   │   ├── sudo.sh                     ← sudo::* (credential probe + 60s keep-alive)
 │   │   ├── input.sh                    ← input::* (mode detection, confirm, dry-run, command_exists)
@@ -408,12 +404,17 @@ machinekit/                             ← this repo (public)
 │   └── modules/                        ← user-facing modules; each exposes ::install
 │       ├── age.sh                      ← age::preflight + age::install
 │       ├── brewfile.sh                 ← brewfile::install (common + machine_type Brewfile layers)
+│       ├── docker_ce.sh                ← docker_ce::provides + docker_ce::install (Linux container runtime)
 │       ├── git.sh                      ← git::preflight + git::install (no-op; ships templates)
 │       ├── git/templates/              ← module-shipped dotfile defaults (dot_gitconfig.tmpl, dot_config/git/ignore.tmpl)
-│       ├── mise.sh                     ← mise::requires + mise::install
+│       ├── mise.sh                     ← mise::requires + mise::provides + mise::install
 │       ├── mise/templates/             ← module-shipped dotfile defaults (dot_config/mise/…, env.zsh.d/mise.zsh)
+│       ├── orbstack.sh                 ← orbstack::provides + orbstack::install (macOS container runtime)
 │       ├── zsh.sh                      ← zsh::install (no-op; module ships templates only)
-│       └── zsh/templates/              ← framework zsh dotfiles (dot_zshrc, env.zsh w/ env.zsh.d loop)
+│       ├── zsh/templates/              ← framework zsh dotfiles (dot_zshrc, env.zsh w/ env.zsh.d loop)
+│       └── capabilities/               ← abstract capability modules; each exposes ::is_capability, ::default_satisfier
+│           ├── container_manager.sh    ← platform-defaulting capability (orbstack on macOS, docker_ce on Linux)
+│           └── tool_version_manager.sh ← satisfied by mise (default)
 ├── scripts/                            ← dev/maintainer tools (lint, test-vm)
 ├── tests/                              ← bats test suite mirroring lib/ and bin/
 └── templates/blueprints/               ← starter content copied by `machinekit generate`
@@ -421,7 +422,7 @@ machinekit/                             ← this repo (public)
 
 **Convention**: `bin/` files are thin orchestrators (flag parsing, mode detection, the apply pipeline as a sequence of namespaced calls). All execution code lives in `lib/`. `lib/<name>.sh` is the aggregator for `lib/<name>/*.sh`; each file's namespace matches its filename (`brew::*` in `brew.sh`, `age::*` in `age.sh`, etc.).
 
-**Module API**: every file in `lib/modules/` exposes `<name>::install` as its main entry point. Modules that need to resolve user inputs before the apply pipeline runs also expose `<name>::preflight`. Modules with inter-module dependencies declare them via `<name>::requires` (returning one dependency name per line); `resolver.sh` sorts the active set into install order. Modules may also ship a sibling directory `lib/modules/<name>/templates/` holding default dotfiles; `home::build_staging` picks these up automatically. Active modules are driven by `modules = [...]` in `machinekit.toml`, resolved at preflight time.
+**Module API**: every file in `lib/modules/` exposes `<name>::install` as its main entry point. Modules that need to resolve user inputs before the apply pipeline runs also expose `<name>::preflight`. Modules with inter-module dependencies declare them via `<name>::requires` (returning one dependency name per line); `resolver.sh` sorts the active set into install order. Satisfier modules additionally declare `<name>::provides` (returning the capability name they satisfy); the resolver uses this for conflict detection. Modules may also ship a sibling directory `lib/modules/<name>/templates/` holding default dotfiles; `home::build_staging` picks these up automatically. Active modules are driven by `modules = [...]` in `machinekit.toml`, resolved at preflight time.
 
 **Zsh hook pattern**: the `zsh` module ships `~/.config/machinekit/env.zsh`, which ends with a glob-source loop over `~/.config/machinekit/env.zsh.d/*.zsh`. Any module that needs to contribute zsh-level setup drops a single `.zsh` file in its own `templates/dot_config/machinekit/env.zsh.d/` directory — the staging-dir builder merges it in, the home module installs it, and env.zsh sources it on every zsh startup. When a module is inactive, no fragment ends up on disk and nothing is sourced. mise uses this pattern today (`templates/dot_config/machinekit/env.zsh.d/mise.zsh` for `eval "$(mise activate zsh)"`); future modules plug in the same way.
 
