@@ -43,3 +43,15 @@ input::is_dry_run() {
 input::command_exists() {
   command -v "$1" >/dev/null 2>&1
 }
+
+input::conflict_behavior() {
+  if [ -n "${MACHINEKIT_CONFLICT_BEHAVIOR:-}" ]; then
+    printf '%s\n' "$MACHINEKIT_CONFLICT_BEHAVIOR"
+    return 0
+  fi
+  local val
+  val=$(config::get "conflict_behavior" 2>/dev/null) || true
+  if [ -n "$val" ]; then
+    printf '%s\n' "$val"
+  fi
+}

@@ -83,7 +83,7 @@ ssh::_show_pubkey_instructions() {
   printf '  GitHub:    https://github.com/settings/ssh/new\n' >&2
   printf '  GitLab:    https://gitlab.com/-/user_settings/ssh_keys\n' >&2
   printf '  Bitbucket: https://bitbucket.org/account/settings/ssh-keys/\n\n' >&2
-  if input::is_interactive; then
+  if input::is_interactive >/dev/null; then
     printf 'Press Enter when done...' >&2
     read -r _ < "${MACHINEKIT_TTY:-/dev/tty}"
   fi

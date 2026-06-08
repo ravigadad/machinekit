@@ -81,6 +81,14 @@ _assert_level_calls_emit_with_prefix() {
   _assert_level_calls_emit_with_prefix success "✓"
 }
 
+@test "dry-run writes the message with dry-run: prefix to stderr" {
+  _assert_level_calls_emit_with_prefix dry_run "dry-run:"
+}
+
+@test "attention writes the message with [machinekit] prefix to stderr" {
+  _assert_level_calls_emit_with_prefix attention ""
+}
+
 @test "debug is silent when MACHINEKIT_VERBOSE is unset" {
   unset MACHINEKIT_VERBOSE
   mktest::stub_function logging::_emit

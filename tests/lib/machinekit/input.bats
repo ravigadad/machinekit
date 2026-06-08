@@ -7,6 +7,7 @@ setup() {
   # shellcheck source=../../../lib/machinekit/input.sh
   source "$MACHINEKIT_DIR/lib/machinekit/input.sh"
   unset MACHINEKIT_TTY
+  unset MACHINEKIT_CONFLICT_BEHAVIOR
 }
 
 # --- input::detect_mode ---
@@ -83,6 +84,34 @@ setup() {
 @test "is_dry_run returns false when mode.dry_run is false" {
   STUB_OUTPUT="false" mktest::stub_function context::get "mode.dry_run" "--coerce" "boolean" "--default" "false"
   run ! input::is_dry_run
+}
+
+# --- input::conflict_behavior ---
+
+@test "conflict_behavior returns the env var value when set" {
+  export MACHINEKIT_CONFLICT_BEHAVIOR=skip
+  mktest::stub_function config::get
+  result=$(input::conflict_behavior)
+  [ "$result" = "skip" ]
+}
+
+@test "conflict_behavior does not call config::get when env var is set" {
+  export MACHINEKIT_CONFLICT_BEHAVIOR=overwrite
+  mktest::stub_function config::get
+  input::conflict_behavior
+  mktest::assert_stub_not_called config::get
+}
+
+@test "conflict_behavior returns config value when env var is not set" {
+  STUB_OUTPUT="abort" mktest::stub_function config::get "conflict_behavior"
+  result=$(input::conflict_behavior)
+  [ "$result" = "abort" ]
+}
+
+@test "conflict_behavior returns empty when neither env var nor config is set" {
+  STUB_RETURN=1 mktest::stub_function config::get "conflict_behavior"
+  result=$(input::conflict_behavior)
+  [ -z "$result" ]
 }
 
 # --- input::command_exists ---

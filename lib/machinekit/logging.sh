@@ -42,9 +42,14 @@ logging::error()   { logging::_emit "$(logging::_color_for_level error)"   "erro
 logging::success() { logging::_emit "$(logging::_color_for_level success)" "✓"        "$@"; }
 logging::dry_run() { logging::_emit "$(logging::_color_for_level dry_run)" "dry-run:" "$@"; }
 
+logging::attention() {
+  printf '\n' >&2
+  logging::_emit "$(logging::_color_for_level attention)" ""     "$@";
+}
+
 logging::step() {
   printf '\n' >&2
-  logging::_emit "$MK_COLOR_BOLD" "" "${MK_COLOR_BOLD}$*"
+  logging::_emit "$MK_COLOR_BOLD" "" "${MK_COLOR_BOLD}$*${MK_COLOR_RESET}"
 }
 
 # Called by lifecycle::fail before exit. Separated from logging::error so this
@@ -77,6 +82,7 @@ logging::_color_for_level() {
     error)   color="$MK_COLOR_RED" ;;
     success) color="$MK_COLOR_GREEN" ;;
     dry_run) color="$MK_COLOR_YELLOW" ;;
+    attention) color="$MK_COLOR_YELLOW" ;;
   esac
   printf "%s\n" "$color"
 }

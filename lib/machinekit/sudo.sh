@@ -18,7 +18,7 @@ sudo::ensure() {
   elif input::is_dry_run; then
     logging::warn "sudo credentials not currently cached. A real (non-dry-run)"
     logging::warn "apply would prompt (interactive) or hard-fail (non-interactive)."
-  elif input::is_interactive; then
+  elif input::is_interactive >/dev/null; then
     logging::info "Pre-warming sudo credentials so prompts don't interrupt later steps..."
     sudo -v
     sudo::keepalive_start

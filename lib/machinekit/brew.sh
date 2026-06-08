@@ -56,7 +56,7 @@ brew::_setup_path() {
 
 brew::_install() {
   logging::info "Installing Homebrew..."
-  if ! input::is_interactive; then
+  if ! input::is_interactive >/dev/null; then
     NONINTERACTIVE=1 /bin/bash -c \
       "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
   else
