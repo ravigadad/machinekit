@@ -49,9 +49,8 @@ Architecture is described in [architecture.md](./architecture.md); this document
 - oh-my-zsh, starship, or any other prompt theme
 - Editor configs (`.editorconfig`, IDE settings) — repo-level concerns, not machine-level
 
-**Deferred** (will be addressed in iteration 1.x or later):
-
-- Curl-pipe-bash invocation. `machinekit apply` sources `lib/machinekit.sh` and `lib/modules.sh` from disk, so the one-liner needs a thin shim that clones machinekit first.
+- `install.sh` — thin curl-pipe-bash shim that clones machinekit to `~/.local/share/machinekit/framework` then execs `bin/machinekit-apply`. **Implemented.**
+- VM-based E2E tests — `tests/vm/` with Tart VM support (Ubuntu and macOS Sequoia images); `scripts/test-vm` wrapper; `.github/workflows/` for BATS and shellcheck CI. **Implemented** (VMs not in CI due to image size; run locally).
 
 ---
 
@@ -118,8 +117,9 @@ The directory structure (`machine_types/<type>/`) ships in iteration 1; this ite
 After the module system and bash modernization land, the framework's machinery is complete, and further work is driven by need rather than a planned phase list. Likely areas:
 
 - Additional modules as needs arise (prompt themes, password-manager CLIs as a secrets-fetch layer, and so on).
-- Linux support: add a Linux test target, gate macOS-specific lines behind `os.family` checks, validate the Homebrew-on-Linux path.
-- A curl-pipe-bash installer shim (`install.sh`) for fresh-machine one-liner setup.
+- Linux end-to-end validation: VM infrastructure and CI exist; a full apply pipeline walkthrough on Linux hasn't been done.
+- `blueprint_file_decryption` module: opt-in; walks `$HOME` post-sync, decrypts age-encrypted files by naming convention.
+- Input resolver steps 3–4: `~/.config/machinekit/bootstrap.toml` config file and `op://` secrets manager reference — would make non-interactive setups cleaner.
 
 The roadmap stops being prescriptive here. The architecture supports incremental addition; what gets added is a function of what the framework actually needs in use.
 
