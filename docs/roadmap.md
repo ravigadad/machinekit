@@ -84,7 +84,7 @@ The directory structure (`machine_types/<type>/`) ships in iteration 1; this ite
 
 **Deliverables:**
 
-- `lib/modules/<name>.sh` convention with `::preflight`, `::install`, `::requires`, and `::provides` declarations. **Implemented.**
+- `lib/modules/<name>.sh` convention with `::preflight`, `::install`, `::requires`, `::provides`, and `::post_apply` declarations. **Implemented.**
 - TOML config reader for `machinekit.toml`: `config::load` merges common and machine-type layers; `config::get "module.<name>.<key>"` gives modules access to their config. **Implemented.**
 - Dependency closure resolver: `resolver::resolve` does a DFS topological sort over `::requires` declarations so opting into one module pulls in its deps automatically. **Implemented.**
 - Capability modules (`lib/modules/capabilities/`): `tool_version_manager` (default: `mise`) and `container_manager` (default: `orbstack` on macOS, `docker_ce` on Linux). Resolver substitutes the default satisfier, detects multi-satisfier conflicts. **Implemented.**
