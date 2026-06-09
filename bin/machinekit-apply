@@ -124,8 +124,9 @@ main() {
   input::is_dry_run && logging::step "DRY RUN — showing what would change; nothing will be modified"
   sudo::ensure
   preflight::run
-  home::sync
   modules::run_installs
+  home::sync
+  modules::run_post_apply
   hooks::run_post_apply
   postflight::run
 }

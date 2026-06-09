@@ -12,6 +12,7 @@ set -euo pipefail
 #   input::is_dry_run / input::is_interactive   mode detection
 #   context::get / context::set / context::get_array   resolved apply values
 #   lifecycle::register_cleanup   register a function to run at script exit
+# shellcheck disable=SC1090
 source "$MACHINEKIT_SUPPORT"
 
 # Always handle dry-run. Use input::dry_run to describe what the hook *would*
