@@ -23,18 +23,22 @@ modules::source_all() {
 }
 
 modules::run_preflights() {
-  modules::source_all
-  local mod
-  while IFS= read -r mod; do
-    declare -f "${mod}::preflight" > /dev/null 2>&1 || continue
-    "${mod}::preflight"
-  done < <(context::get_array "modules.active")
+  modules::_call_function_per_module "preflight"
 }
 
 modules::run_installs() {
+  modules::_call_function_per_module "install"
+}
+
+modules::run_post_apply() {
+  modules::_call_function_per_module "post_apply"
+}
+
+modules::_call_function_per_module() {
   modules::source_all
   local mod
   while IFS= read -r mod; do
-    "${mod}::install"
+    declare -f "${mod}::$1" > /dev/null 2>&1 || continue
+    "${mod}::$1"
   done < <(context::get_array "modules.active")
 }

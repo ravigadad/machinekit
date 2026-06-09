@@ -51,29 +51,34 @@ setup() {
 # --- modules::run_preflights ---
 
 @test "run_preflights calls preflight for modules that declare it" {
-  mktest::stub_function modules::source_all
-  STUB_OUTPUT=$'age\nzsh\ngit' mktest::stub_function context::get_array "modules.active"
-  mktest::stub_function age::preflight
-  mktest::stub_function git::preflight
+  mktest::stub_function modules::_call_function_per_module "preflight"
   modules::run_preflights
-  mktest::assert_stub_called age::preflight
-  mktest::assert_stub_called git::preflight
-}
-
-@test "run_preflights skips modules with no preflight function" {
-  mktest::stub_function modules::source_all
-  STUB_OUTPUT=$'zsh' mktest::stub_function context::get_array "modules.active"
-  modules::run_preflights
+  mktest::assert_stub_called modules::_call_function_per_module "preflight"
 }
 
 # --- modules::run_installs ---
 
-@test "run_installs calls install for each active module in order" {
-  mktest::stub_function modules::source_all
-  STUB_OUTPUT=$'age\nmise' mktest::stub_function context::get_array "modules.active"
-  mktest::stub_function age::install
-  mktest::stub_function mise::install
+@test "run_installs calls install for modules that declare it" {
+  mktest::stub_function modules::_call_function_per_module "install"
   modules::run_installs
-  mktest::assert_stub_called age::install
-  mktest::assert_stub_called mise::install
+  mktest::assert_stub_called modules::_call_function_per_module "install"
+}
+
+# --- modules::run_post_apply ---
+
+@test "run_post_apply calls post_apply for modules that declare it" {
+  mktest::stub_function modules::_call_function_per_module "post_apply"
+  modules::run_post_apply
+  mktest::assert_stub_called modules::_call_function_per_module "post_apply"
+}
+
+@test "_call_function_per_module calls given function for all modules that declare it" {
+  mktest::stub_function modules::source_all
+  mktest::stub_function foo_module::test
+  mktest::stub_function bar_module::test
+  STUB_OUTPUT=$'foo_module\nbar_module\nbaz_module' mktest::stub_function context::get_array "modules.active"
+  modules::_call_function_per_module "test"
+  mktest::assert_stub_called modules::source_all
+  mktest::assert_stub_called foo_module::test
+  mktest::assert_stub_called bar_module::test
 }
