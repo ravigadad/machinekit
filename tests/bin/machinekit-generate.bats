@@ -24,22 +24,12 @@ setup() {
 # --- main (sourced) ---
 
 @test "main calls the full pipeline" {
-  STUB_OUTPUT="$BATS_TEST_TMPDIR/target" mktest::stub_function generate::resolve_path
+  STUB_OUTPUT="the-resolved-path" mktest::stub_function generate::resolve_path
   mktest::stub_function generate::copy_template
   mktest::stub_function generate::print_next_steps
   main
-  mktest::assert_stub_called generate::resolve_path
-  mktest::assert_stub_called generate::copy_template
-  mktest::assert_stub_called generate::print_next_steps
-}
-
-@test "main passes the resolved path to copy_template and print_next_steps" {
-  STUB_OUTPUT="$BATS_TEST_TMPDIR/target" mktest::stub_function generate::resolve_path
-  mktest::stub_function generate::copy_template
-  mktest::stub_function generate::print_next_steps
-  main
-  mktest::assert_stub_called generate::copy_template "$BATS_TEST_TMPDIR/target"
-  mktest::assert_stub_called generate::print_next_steps "$BATS_TEST_TMPDIR/target"
+  mktest::assert_stub_called_in_order generate::copy_template "the-resolved-path"
+  mktest::assert_stub_called_in_order generate::print_next_steps "the-resolved-path"
 }
 
 # --- generate::resolve_path ---

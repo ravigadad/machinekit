@@ -9,6 +9,7 @@
 #   TIMES=2 mktest::assert_stub_called FUNC [EXPECTED_ARG...]
 #   mktest::assert_stub_not_called FUNC [EXPECTED_ARG...]
 #   TIMES=2 mktest::assert_stub_not_called FUNC [EXPECTED_ARG...]
+#   mktest::assert_stub_called_in_order FUNC [EXPECTED_ARG...]
 #
 # Stub configuration (env vars, all optional):
 #   STUB_RETURN=N   return code when stub returns (default 0)
@@ -37,6 +38,11 @@ mktest::_dispatch_stub() {
   local call_json
   call_json=$(jq -cn '$ARGS.positional' --args -- "$@")
   printf '%s\n' "$call_json" >> "$calls_file"
+
+  # Append to the global ordered call log for assert_stub_called_in_order.
+  jq -cn --arg func "$func" --argjson args "$call_json" \
+    '{func:$func,args:$args}' \
+    >> "$BATS_TEST_TMPDIR/stub.global.calls"
 
   if [ ! -f "$rules_file" ]; then
     printf 'stub: %s: no rules defined\n' "$func" >&2
@@ -149,6 +155,52 @@ mktest::assert_stub_called() {
       return 1
     }
   fi
+}
+
+# mktest::assert_stub_called_in_order FUNC [EXPECTED_ARG...]
+# Asserts that FUNC (with optional args) was called after all previous
+# assert_stub_called_in_order calls within this test. Each call advances
+# a cursor through the global call log; matching is identical to
+# assert_stub_called.
+mktest::assert_stub_called_in_order() {
+  local func="$1"; shift
+  local global_log="$BATS_TEST_TMPDIR/stub.global.calls"
+  local cursor_file="$BATS_TEST_TMPDIR/stub.global.cursor"
+  local cursor=0
+  [ -f "$cursor_file" ] && cursor=$(< "$cursor_file")
+
+  if [ ! -f "$global_log" ]; then
+    printf 'assert_stub_called_in_order: %s: called out of order\n' "$func" >&2
+    return 1
+  fi
+
+  local expected_json
+  if [ $# -gt 0 ]; then
+    expected_json=$(jq -cn '$ARGS.positional' --args -- "$@")
+  else
+    expected_json='null'
+  fi
+
+  local found
+  found=$(jq -s \
+    --arg func "$func" \
+    --argjson expected "$expected_json" \
+    --argjson cursor "$cursor" \
+    'to_entries
+     | map(select(
+         .key >= $cursor
+         and .value.func == $func
+         and ($expected == null or .value.args == $expected)))
+     | first // empty
+     | .key' \
+    "$global_log")
+
+  if [ -z "$found" ]; then
+    printf 'assert_stub_called_in_order: %s: called out of order\n' "$func" >&2
+    return 1
+  fi
+
+  printf '%s\n' $(( found + 1 )) > "$cursor_file"
 }
 
 # mktest::assert_stub_not_called FUNC [EXPECTED_ARG...]

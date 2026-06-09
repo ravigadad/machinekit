@@ -21,8 +21,8 @@ setup() {
   mktest::stub_function blueprints::_fetch_git "https://github.com/user/bp"
   mktest::stub_function input::is_dry_run
   blueprints::fetch
-  mktest::assert_stub_called blueprints::_prepare_dest
-  mktest::assert_stub_called blueprints::_fetch_git "https://github.com/user/bp"
+  mktest::assert_stub_called_in_order blueprints::_prepare_dest
+  mktest::assert_stub_called_in_order blueprints::_fetch_git "https://github.com/user/bp"
 }
 
 @test "fetch prepares the destination and copies when protocol is cp" {
@@ -32,8 +32,8 @@ setup() {
   mktest::stub_function blueprints::_fetch_cp "/local/bp"
   mktest::stub_function input::is_dry_run
   blueprints::fetch
-  mktest::assert_stub_called blueprints::_prepare_dest
-  mktest::assert_stub_called blueprints::_fetch_cp "/local/bp"
+  mktest::assert_stub_called_in_order blueprints::_prepare_dest
+  mktest::assert_stub_called_in_order blueprints::_fetch_cp "/local/bp"
 }
 
 @test "fetch in non-dry-run moves the temp dir to the permanent location and updates _MK_BLUEPRINTS_DIR" {
