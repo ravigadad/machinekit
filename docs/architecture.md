@@ -17,7 +17,7 @@ machinekit is two cooperating repos:
 
 ## Scope
 
-macOS and Linux, by design (see [cross-platform posture](#cross-platform-posture)). machinekit is opinionated about a deliberately small stock toolset — Homebrew, jq, toml2json, gomplate, git — and agnostic about everything else. You extend it two ways: declare a machinekit-known module in TOML (Tier 2), or wire up anything at all via post-apply hooks (Tier 3). The fact that machinekit isn't opinionated about a tool doesn't mean you can't use machinekit to install and manage it — you can, via hooks. The small built-in set is just what machinekit has opinions about, not the limit of what it can do.
+macOS and Linux, by design (see [cross-platform posture](#cross-platform-posture)). machinekit is opinionated about a deliberately small stock toolset — Homebrew and the handful of CLI helpers it bootstraps with — and agnostic about everything else. You extend it two ways: declare a machinekit-known module in TOML (Tier 2), or wire up anything at all via post-apply hooks (Tier 3). The fact that machinekit isn't opinionated about a tool doesn't mean you can't use machinekit to install and manage it — you can, via hooks. The small built-in set is just what machinekit has opinions about, not the limit of what it can do.
 
 ---
 
@@ -31,7 +31,7 @@ The same vocabulary applies across the code, docs, and user-facing language. Wor
 - **a blueprint** (singular) — one machine type's full design: the assembled result of `common/` content + that machine type's `machine_types/<type>/` overrides. "Apply the personal blueprint."
 - **common layer** — the shared baseline that every blueprint inherits. Lives at `common/` in the blueprints repo. Not a blueprint by itself.
 - **machine type** — a label/key that names a blueprint, passed via `--machine-type <name>` or `MACHINEKIT_MACHINE_TYPE`. The directory `machine_types/<name>/` holds that type's overrides on top of `common/`.
-- **module** — a unit of orchestration logic (install + configure + integrate). Modules are named in `machinekit.toml`; they declare dependencies via `::requires` and machinekit resolves the install order automatically. The full intent-module / capability-satisfier layer (where abstract names like `runtimes` resolve to concrete tools like `mise`) is a future iteration.
+- **module** — a unit of orchestration logic (install + configure + integrate). Modules are named in `machinekit.toml`; they declare dependencies via `::requires` and machinekit resolves the install order automatically. Some modules are **capabilities** — abstract slots resolved to a concrete **satisfier** (see below). A small set are **base modules** — framework-owned and always active regardless of what a blueprint requests.
 - **capability** — an abstract slot that modules declare they need or provide. Lets multiple modules satisfy the same need (e.g. `container_manager` is satisfied by `orbstack` on macOS, `docker_ce` on Linux). Resolved by machinekit with per-platform defaults; the user overrides by listing a specific satisfier explicitly.
 
 ### Two repos
@@ -129,6 +129,14 @@ There are two kinds of modules in machinekit's module system:
 
 > Status: implemented. `::install`, `::preflight`, `::requires`, and `::provides` conventions are live. `lib/modules/capabilities/` holds `tool_version_manager` and `container_manager`. `resolver.sh` handles topological sort, capability → default-satisfier substitution, and post-resolution conflict detection.
 
+### Base modules
+
+A small set of modules are **framework-owned and always active**, independent of what a blueprint requests — they provide machinery the framework itself depends on. The set is static (`MK_BASE_MODULES` in `lib/machinekit/modules.sh`); `preflight::resolve_active_modules` folds it into every run's active set as `base ∪ requested`. Modules don't self-declare base-ness — the framework decides, keeping the concern in one place.
+
+gomplate is the motivating example. Template rendering is core, so the `.tmpl` content transform must always be available — but gomplate is otherwise an ordinary module (it installs via brew, ships a `file_transforms` handler, manages its own context). Making it a base module rather than a hardcoded prerequisite means it installs through the normal module pipeline and lives behind the same transform contract every other handler uses, instead of being special-cased in core.
+
+> Status: implemented. `MK_BASE_MODULES=(gomplate)`; the active set is therefore never empty.
+
 ### Execution modes
 
 Bootstrap supports two modes, detected automatically and overridable by flag:
@@ -181,7 +189,7 @@ machinekit is designed to support macOS and Linux, and will continue to be. Prim
 ### Already cross-platform
 
 - **Homebrew** is a [first-class Linux target](https://docs.brew.sh/Homebrew-on-Linux). Same `brew` CLI, same Brewfile concept. The install prefix varies (`/opt/homebrew`, `/usr/local`, `/home/linuxbrew/.linuxbrew`), but `brew shellenv` handles PATH uniformly across all three. Picking Homebrew is a unifying choice across mac and Linux, not a macOS lock-in.
-- **Framework prerequisites** — jq, toml2json, gomplate, git — and machinekit's built-in modules (mise, age) are all cross-platform binaries available via Homebrew on either OS.
+- **Framework prerequisites** (see `prerequisites.sh`), the always-on base modules (gomplate), and machinekit's built-in modules (mise, age, …) are all cross-platform binaries available via Homebrew on either OS.
 - **The conceptual architecture** — bootstrap, three tiers, modules, hooks, input resolution, execution modes, consent rule — is all shell-level and portable.
 
 ### Branch points
@@ -251,9 +259,9 @@ Eventually, a 1Password CLI (or other secrets-manager) wrapper can fetch the age
 
 > Status: secrets-manager wrapper not yet implemented.
 
-age-encrypted files can be committed to the blueprints repo. Decryption is opt-in: a future `blueprint_file_decryption` module will walk `$HOME` after files are copied and decrypt any it recognizes by naming convention. Without that module active, encrypted files copy over as-is — unreadable but not an error.
+age-encrypted files can be committed to the blueprints repo and are decrypted **during home sync** by the content-transform pipeline — not by a separate post-sync pass over `$HOME`. The age module claims the `.age` extension as a decode-tier transform, so `secret.age` in a home layer is decrypted to its final content at `~/secret` as the file is applied. Decryption happening inside the pipeline (rather than after a verbatim copy) is what keeps reconcile and `--dry-run` operating on plaintext and never leaves ciphertext on disk. With the age module inactive the marker isn't registered and `secret.age` copies over as-is — unreadable but not an error. See [home template system](#home-template-system) for the pipeline and its cross-tier ordering rules.
 
-> Status: `blueprint_file_decryption` module not yet implemented. The age module manages the key; decryption is a planned opt-in step, not core infrastructure.
+> Status: implemented. The age module manages the key and supplies the `.age` decode handler; the [home transform pipeline](#home-template-system) runs it.
 
 ---
 
@@ -296,17 +304,49 @@ Machine types are how blueprints *express variation* across a fleet. They're not
 
 ## home template system
 
-machinekit walks a merged staging dir and applies each file to `$HOME`:
+machinekit walks a merged staging dir and applies each file to `$HOME`. A staged filename encodes two **independent** things, resolved separately:
 
-**Path decoding** — each path component is decoded from the staging naming convention:
+1. **Addressing** — what the file is called and how it's permissioned. A pure function of the *name*, encoded as path-component prefixes.
+2. **Content representation** — what transforms the *bytes* need before they land. A function of the content, encoded as filename-suffix markers.
+
+These axes commute (renaming a file doesn't change how its bytes are transformed; decrypting it doesn't change where it lands), which is why machinekit resolves them independently.
+
+**Addressing (prefixes)** — each path component is decoded from the staging naming convention:
 
 - `dot_` prefix → leading `.` (e.g. `dot_zshrc` → `.zshrc`)
 - `private_` prefix → mode 600 on the file, mode 700 on the parent directory (e.g. `private_dot_ssh/private_config` → `~/.ssh/config` at 600, `~/.ssh/` at 700)
-- `.tmpl` suffix on the filename → render via gomplate; strip the suffix from the destination name
 
-**Template rendering** — `.tmpl` files are rendered through `gomplate` with the full machinekit context JSON as the root data source. Templates access context values as nested fields: `.git.user_name`, `.os.family`, `.machine_type`, etc.
+**Content representation (suffix markers)** — a trailing extension can name a content-pipeline stage. Each marker is registered by a module as `extension → (tier, handler)`:
 
-**Ignore file** — `.mkignore` in the staging dir lists destination paths (relative to `$HOME`) to skip. The `.mkignore` file itself is always skipped.
+- `.tmpl` (gomplate base module) → render the file as a template
+- `.age` (age module) → decrypt the file
+
+A marker is *consumed* — stripped from the destination name — when its stage runs: `dot_zshrc.tmpl` renders to `~/.zshrc`, `secret.age` decrypts to `~/secret`. An unregistered trailing extension is just part of the filename and kept as-is (`notes.md` → `~/notes.md`).
+
+**Two tiers, one law.** Markers fall into two tiers by a single test — *can a later pass read this file without this transform having run?*
+
+- **decode tier** (`.age`, future `.gz`) — no; the bytes are opaque until it runs (decrypt, decompress).
+- **content tier** (`.tmpl`) — yes; it operates on already-readable content (templating).
+
+The one hard rule (the **cross-tier law**): every decode stage runs before any content stage — you can't template bytes you can't yet read. On the filename, decode markers must therefore be the outermost (rightmost) contiguous group. machinekit validates this and fails clearly on an impossible order. So `secret.tmpl.age` is valid (decrypt, then template) but `secret.age.tmpl` is rejected. Order *among* decode markers is read straight off the suffix stack right-to-left — it's physically forced by how the file was produced, not a policy machinekit invents.
+
+**Markers come from modules.** A module that handles an extension declares it with one hook and supplies a handler that reads a path and writes the transformed bytes to stdout:
+
+```bash
+age::file_transforms() { printf '%s\n' "age decode age::decrypt"; }  # "ext tier handler"
+age::decrypt() { age --decrypt --identity "$KEY" "$1"; }             # IN_PATH → stdout
+```
+
+The registry is built and validated in **preflight** (before any install), scoped to *active* modules. Two consequences:
+
+- An extension maps to exactly one handler. A conflicting re-claim (same extension, different handler) is a hard failure naming both — there's no coherent "decode these bytes two ways." (An identical re-claim is a harmless no-op.)
+- A marker whose module is **inactive** is simply never registered, so the file copies through verbatim — fail-safe. With the age module off, `secret.age` lands as the literal file `~/secret.age` rather than erroring.
+
+Because transforms run *inside* the sync pipeline — between reading the staged file and reconciling it against `$HOME` — `$HOME` only ever sees final content at the final path. Reconcile, conflict detection, and `--dry-run` diffing all operate on the transformed result, so idempotency and diffs are correct regardless of which transforms a file passes through. (This is also why module installs run *before* home sync: a transform's binary or key must be present when the pipeline fires.)
+
+**Template rendering** — `.tmpl` files render through `gomplate` with the full machinekit context JSON as the root data source. gomplate is a framework-owned [base module](#base-modules) (always active) that prepares the context and supplies the `.tmpl` handler. Templates access context values as nested fields: `.git.user_name`, `.os.family`, `.machine_type`, etc.
+
+**Ignore file** — `.mkignore` in the staging dir lists destination paths (relative to `$HOME`, *after* markers are stripped) to skip. The `.mkignore` file itself is always skipped. An ignored file is never decrypted or rendered — the skip is decided from its resolved destination *before* any handler runs.
 
 **Conflict resolution** — when a staged file would overwrite an existing `$HOME` file whose content differs, machinekit prompts rather than silently clobbering. In interactive mode: a per-file menu with overwrite / skip / abort / diff options, plus bulk overwrite-all / skip-all shortcuts. In non-interactive mode, the behavior is controlled by `--conflict-behavior=<overwrite|skip|abort>` (`MACHINEKIT_CONFLICT_BEHAVIOR`), defaulting to `overwrite` (previous behavior). File-format-aware merging is explicitly out of scope — that belongs in post-apply hooks.
 
@@ -358,7 +398,7 @@ A Python or Rust developer using machinekit gets no gratuitous Ruby/Node install
 
 There are two installation stages:
 
-1. **Prerequisite stage** — `machinekit apply` installs `jq`, `toml2json`, `gomplate`, and `git` directly. These are hardcoded because `jq` must exist before preflight (it powers the context data layer), `toml2json` is needed to parse `machinekit.toml`, and `gomplate` and `git` must be available before blueprints are applied. `mise`, `age`, and other tools are installed by their respective modules, not as prerequisites.
+1. **Prerequisite stage** — `machinekit apply` installs the few CLI tools preflight needs before it can read a blueprint at all: `jq` (the `context::` store runs on it), `toml2json` (to parse `machinekit.toml`), and `git` (to clone). They're installed directly rather than as modules because they must exist before module resolution runs; the authoritative list is `_MK_PREREQUISITES` in `lib/machinekit/prerequisites.sh`. gomplate is **not** here — it moved to a [base module](#base-modules), since it's only needed once home sync renders templates, which is inside the module/apply stage. `mise`, `age`, and other tools are likewise installed by their modules, not as prerequisites.
 2. **Module install stage** — `brew bundle --file <blueprints>/common/Brewfile` runs as part of `modules::run_installs`, before home files are applied. With `--machine-type <type>`, `<blueprints>/machine_types/<type>/Brewfile` (if present) runs after, additively layering on top.
 
 The template ships with commented Brewfiles showing the conventions; your blueprints contain your real choices.
@@ -394,22 +434,24 @@ machinekit/                             ← this repo (public)
 │   │   ├── ssh.sh                      ← ssh::* (key install, generate, interactive discover)
 │   │   ├── config.sh                   ← config::* (parse + merge machinekit.toml via toml2json; stored in context)
 │   │   ├── resolver.sh                 ← resolver::resolve — DFS topological sort over ::requires declarations
-│   │   ├── modules.sh                  ← modules::* (source_all, run_preflights, run_installs, run_post_apply)
-│   │   ├── home.sh                     ← home::* (sync, _apply — core home management); sources home/staging.sh and home/dry_run.sh
+│   │   ├── modules.sh                  ← modules::* (source_all, run_preflights, run_installs, run_post_apply); MK_BASE_MODULES
+│   │   ├── home.sh                     ← home::* (sync, _apply — core home management); sources home/staging.sh, home/dry_run.sh, home/transforms.sh
 │   │   ├── home/
 │   │   │   ├── staging.sh              ← home::staging::* (build, dir, cleanup — staging dir construction)
-│   │   │   └── dry_run.sh              ← home::dry_run::* (show_diff — diff generation and display)
-│   │   ├── prerequisites.sh            ← prerequisites::* (jq/toml2json/gomplate/git via brew)
+│   │   │   ├── dry_run.sh              ← home::dry_run::* (show_diff — diff generation and display)
+│   │   │   └── transforms.sh           ← home::transforms::* (content pipeline: register markers, resolve, execute)
+│   │   ├── prerequisites.sh            ← prerequisites::* (jq/toml2json/git via brew — gomplate is a base module)
 │   │   ├── preflight.sh                ← preflight::* (system detect, blueprints fetch, config load, module resolution)
 │   │   ├── hooks.sh                    ← hooks::* (post-apply hook runner; common + machine_type layers)
 │   │   ├── hook-support.sh             ← library blueprint hooks source via $MACHINEKIT_SUPPORT
 │   │   └── postflight.sh               ← postflight::* (apply summary output)
 │   └── modules/                        ← user-facing modules; each exposes ::install
-│       ├── age.sh                      ← age::preflight + age::install
+│       ├── age.sh                      ← age::preflight + age::install + age::decrypt (the .age decode handler) + age::file_transforms
 │       ├── brewfile.sh                 ← brewfile::install (common + machine_type Brewfile layers)
 │       ├── docker_ce.sh                ← docker_ce::provides + docker_ce::install (Linux container runtime)
 │       ├── git.sh                      ← git::preflight + git::install (no-op; ships templates)
 │       ├── git/templates/              ← module-shipped dotfile defaults (dot_gitconfig.tmpl, dot_config/git/ignore.tmpl)
+│       ├── gomplate.sh                 ← gomplate::file_transforms + render + install (base module: the .tmpl handler)
 │       ├── mise.sh                     ← mise::requires + mise::provides + mise::install + mise::post_apply
 │       ├── mise/templates/             ← module-shipped dotfile defaults (dot_config/mise/…, env.zsh.d/mise.zsh)
 │       ├── orbstack.sh                 ← orbstack::provides + orbstack::install (macOS container runtime)
@@ -425,7 +467,7 @@ machinekit/                             ← this repo (public)
 
 **Convention**: `bin/` files are thin orchestrators (flag parsing, mode detection, the apply pipeline as a sequence of namespaced calls). All execution code lives in `lib/`. `lib/<name>.sh` is the aggregator for `lib/<name>/*.sh`; each file's namespace matches its filename (`brew::*` in `brew.sh`, `age::*` in `age.sh`, etc.).
 
-**Module API**: every file in `lib/modules/` exposes `<name>::install` as its main entry point. Modules that need to resolve user inputs before the apply pipeline runs also expose `<name>::preflight`. Modules that need to run after home files are applied expose `<name>::post_apply` — this runs after `home::sync` but before post-apply hooks, which is why `mise::post_apply` runs `mise install` (it needs `~/.config/mise/config.toml` placed by home sync). Modules with inter-module dependencies declare them via `<name>::requires` (returning one dependency name per line); `resolver.sh` sorts the active set into install order. Satisfier modules additionally declare `<name>::provides` (returning the capability name they satisfy); the resolver uses this for conflict detection. Modules may also ship a sibling directory `lib/modules/<name>/templates/` holding default dotfiles; `home::staging::build` picks these up automatically. Active modules are driven by `modules = [...]` in `machinekit.toml`, resolved at preflight time.
+**Module API**: every file in `lib/modules/` exposes `<name>::install` as its main entry point. Modules that need to resolve user inputs before the apply pipeline runs also expose `<name>::preflight`. Modules that need to run after home files are applied expose `<name>::post_apply` — this runs after `home::sync` but before post-apply hooks, which is why `mise::post_apply` runs `mise install` (it needs `~/.config/mise/config.toml` placed by home sync). Modules with inter-module dependencies declare them via `<name>::requires` (returning one dependency name per line); `resolver.sh` sorts the active set into install order. Satisfier modules additionally declare `<name>::provides` (returning the capability name they satisfy); the resolver uses this for conflict detection. Modules that transform file content by extension declare `<name>::file_transforms` (emitting `extension tier handler` lines, `tier` ∈ {`decode`, `content`}); `home::transforms` registers these at preflight and runs the matching handlers during sync — see [home template system](#home-template-system). Modules may also ship a sibling directory `lib/modules/<name>/templates/` holding default dotfiles; `home::staging::build` picks these up automatically. Active modules are driven by `modules = [...]` in `machinekit.toml` (plus the always-active `MK_BASE_MODULES`), resolved at preflight time.
 
 **Zsh hook pattern**: the `zsh` module ships `~/.config/machinekit/env.zsh`, which ends with a glob-source loop over `~/.config/machinekit/env.zsh.d/*.zsh`. Any module that needs to contribute zsh-level setup drops a single `.zsh` file in its own `templates/dot_config/machinekit/env.zsh.d/` directory — the staging-dir builder merges it in, the home module installs it, and env.zsh sources it on every zsh startup. When a module is inactive, no fragment ends up on disk and nothing is sourced. mise uses this pattern today (`templates/dot_config/machinekit/env.zsh.d/mise.zsh` for `eval "$(mise activate zsh)"`); future modules plug in the same way.
 

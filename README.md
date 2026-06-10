@@ -9,9 +9,9 @@ For what's planned and what's deferred, see [docs/roadmap.md](./docs/roadmap.md)
 
 ## What it does
 
-- Installs Homebrew, then jq, toml2json, gomplate, and git — machinekit's prerequisites.
-- Runs module installs: `common/Brewfile` from your blueprints (if present), then `machine_types/<type>/Brewfile` additively (if present), plus any module-specific brew installs (zsh, mise, age, etc.).
-- Builds a merged staging dir from module-shipped templates plus your blueprint's `common/home/` (and `machine_types/<type>/home/` when a machine type is set), then applies it to `$HOME`. Existing files that differ get a per-file prompt in interactive mode (overwrite / skip / abort / diff, with bulk shortcuts); non-interactive mode obeys `--conflict-behavior` (default: `overwrite`).
+- Installs Homebrew, then machinekit's prerequisites — `jq`, `toml2json`, and `git`, the tools it needs before it can read your blueprints.
+- Runs module installs: `common/Brewfile` from your blueprints (if present), then `machine_types/<type>/Brewfile` additively (if present), plus base modules (gomplate, the template renderer) and any module-specific brew installs (zsh, mise, age, etc.).
+- Builds a merged staging dir from module-shipped templates plus your blueprint's `common/home/` (and `machine_types/<type>/home/` when a machine type is set), then applies it to `$HOME`. As each file is applied, machinekit runs any content transforms its name calls for — `.tmpl` files are rendered, and `.age` files are decrypted when the age module is active. Existing files that differ get a per-file prompt in interactive mode (overwrite / skip / abort / diff, with bulk shortcuts); non-interactive mode obeys `--conflict-behavior` (default: `overwrite`).
 - Runs post-apply module steps (e.g. `mise install`, which needs its config placed by home sync first), then any `common/hooks/post-apply/` and `machine_types/<type>/hooks/post-apply/` scripts you supply.
 
 What you get on disk after a successful run:
@@ -163,7 +163,7 @@ machinekit/
 │   ├── machinekit.sh             # aggregator for lib/machinekit/*
 │   ├── modules.sh                # aggregator for lib/modules/*
 │   ├── machinekit/               # core: helpers, blueprints, brew bootstrap, preflight, hooks, prerequisites
-│   └── modules/                  # user-facing modules: age, brewfile, home, git, mise, zsh
+│   └── modules/                  # built-in modules (see lib/modules/)
 │       ├── git/templates/        # module-shipped defaults (dot_gitconfig.tmpl, dot_config/git/ignore.tmpl)
 │       ├── mise/templates/       # module-shipped defaults (dot_config/mise/…, env.zsh.d/mise.zsh)
 │       └── zsh/templates/        # framework zsh dotfiles (dot_zshrc, env.zsh w/ env.zsh.d loop)

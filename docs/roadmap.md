@@ -29,7 +29,7 @@ Architecture is described in [architecture.md](./architecture.md); this document
   - `common/Brewfile` — empty, commented.
   - `common/hooks/post-apply/` — empty placeholder.
   - `machine_types/README.md` — placeholder explaining the per-type override layout for iteration 2.
-- Home file application walks the staging dir, decodes chezmoi path conventions (dot_, private_, .tmpl), renders templates via gomplate with the full context JSON, and copies files to `$HOME` with appropriate permissions. machinekit owns the full pipeline — no external source manager. Conflict resolution: when a staged file differs from the existing `$HOME` file, interactive mode prompts per-file (overwrite / skip / abort / diff, with bulk variants); non-interactive mode obeys `--conflict-behavior` (`MACHINEKIT_CONFLICT_BEHAVIOR`), defaulting to `overwrite`.
+- Home file application walks the staging dir, decodes addressing prefixes (dot_, private_), renders `.tmpl` templates via gomplate with the full context JSON, and copies files to `$HOME` with appropriate permissions. (The `.tmpl` rendering later generalized into a content-transform pipeline — see [Home transform pipeline](#home-transform-pipeline).) machinekit owns the full pipeline — no external source manager. Conflict resolution: when a staged file differs from the existing `$HOME` file, interactive mode prompts per-file (overwrite / skip / abort / diff, with bulk variants); non-interactive mode obeys `--conflict-behavior` (`MACHINEKIT_CONFLICT_BEHAVIOR`), defaulting to `overwrite`.
 - SSH module (`ssh.sh`) — installs an existing key or generates a fresh one before (proactive) or after (reactive, interactive mode only) the blueprints clone fails with an SSH auth error. Reactive path retries the clone automatically after key setup. Clone errors are classified from git stderr (auth / network / not-found / unknown) and produce targeted messages.
 - Blueprint source is cached at `~/.local/share/machinekit/blueprints/` (machinekit-owned, treated as an ephemeral cache — wiped and re-fetched on every real-run apply).
 - Cross-platform posture documented; macOS primary, Linux CI/e2e in place.
@@ -37,7 +37,8 @@ Architecture is described in [architecture.md](./architecture.md); this document
 **Stock install** (what bootstrap puts on the machine with no extra config):
 
 - Homebrew
-- jq (powers `context::` store via JSON), toml2json, gomplate (renders dotfile templates), git (via brew, as prerequisites)
+- jq (powers `context::` store via JSON), toml2json, and git — installed directly as prerequisites
+- gomplate (renders dotfile templates) — a framework base module, always installed
 - mise (via brew, as part of the mise module)
 - age (via the age module, when declared — manages the user's age private key)
 - The dotfile templates above (blueprint-shipped) and the module-shipped defaults (gitconfig, mise config)
@@ -94,6 +95,23 @@ The directory structure (`machine_types/<type>/`) ships in iteration 1; this ite
 
 ---
 
+## Home transform pipeline
+
+**Status: implemented.**
+
+**Value**: dotfiles can carry content that needs work before it lands — templating today, decryption now, decompression later — and machinekit applies that work *during* home sync, so what reaches `$HOME` is always final content at the final path. Builds on iteration 1's home sync and iteration 3's module system rather than being a numbered iteration of its own.
+
+**What it delivers:**
+
+- A content pipeline keyed on filename-suffix markers (`.tmpl`, `.age`, …), resolved separately from the addressing prefixes (`dot_`, `private_`). Modules register markers as `extension → (tier, handler)` and the registry is built and validated in preflight. See [architecture.md#home-template-system](./architecture.md#home-template-system).
+- Two tiers — decode (decrypt/decompress) and content (templating) — with a cross-tier law (decode before content) that makes transform order self-describing from the filename.
+- Decryption during sync: the age module claims `.age`, so encrypted blueprint files are decrypted to plaintext as they're applied. This supersedes the earlier `blueprint_file_decryption` post-sync-walk idea, which broke reconcile, idempotency, and dry-run by operating on ciphertext.
+- Base modules: a framework-owned always-active set (`MK_BASE_MODULES`). gomplate became a base module here — the `.tmpl` renderer moved out of the hardcoded prerequisites and behind the same `file_transforms` contract every transform uses.
+
+**Why a pipeline, not per-feature code**: templating and decryption were heading toward two parallel code paths. Unifying them on one `extension → handler` mechanism means future transforms (decompression, etc.) are a module declaration, not new home-sync plumbing.
+
+---
+
 ## Iteration 4 — Bash 5.3+ bootstrap and modernization
 
 **Status: planned (after the module system).**
@@ -118,7 +136,7 @@ After the module system and bash modernization land, the framework's machinery i
 
 - Additional modules as needs arise (prompt themes, password-manager CLIs as a secrets-fetch layer, and so on).
 - Linux end-to-end validation: VM infrastructure and CI exist; a full apply pipeline walkthrough on Linux hasn't been done.
-- `blueprint_file_decryption` module: opt-in; walks `$HOME` post-sync, decrypts age-encrypted files by naming convention.
+- Additional content transforms as needs arise — the [home transform pipeline](#home-transform-pipeline) makes a new one (e.g. decompression) a module declaration rather than new plumbing.
 - Input resolver steps 3–4: `~/.config/machinekit/bootstrap.toml` config file and `op://` secrets manager reference — would make non-interactive setups cleaner.
 
 The roadmap stops being prescriptive here. The architecture supports incremental addition; what gets added is a function of what the framework actually needs in use.
