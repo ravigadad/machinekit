@@ -5,6 +5,12 @@ _MK_MODULES_LOADED=1
 
 _MK_MODULES_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/modules"
 
+# Framework-owned modules that are always active, independent of the blueprint's
+# requested set. preflight::resolve_active_modules folds these into every run.
+# Static and non-empty by design (the active set is therefore never empty).
+# shellcheck disable=SC2034  # consumed in preflight.sh
+MK_BASE_MODULES=(gomplate)
+
 modules::dir() {
   printf '%s\n' "$_MK_MODULES_DIR"
 }

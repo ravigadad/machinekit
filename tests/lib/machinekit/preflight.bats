@@ -31,6 +31,7 @@ setup() {
   mktest::stub_function config::load
   mktest::stub_function preflight::resolve_machine_type
   mktest::stub_function preflight::resolve_active_modules
+  mktest::stub_function home::transforms::register_from_modules
   mktest::stub_function modules::run_preflights
   preflight::run
   mktest::assert_stub_called system::detect
@@ -38,7 +39,11 @@ setup() {
   mktest::assert_stub_called config::load
   mktest::assert_stub_called preflight::resolve_machine_type
   mktest::assert_stub_called preflight::resolve_active_modules
+  mktest::assert_stub_called home::transforms::register_from_modules
   mktest::assert_stub_called modules::run_preflights
+  # The "transforms" registry is built from the active modules, so it must run after they're set.
+  mktest::assert_stub_called_in_order preflight::resolve_active_modules
+  mktest::assert_stub_called_in_order home::transforms::register_from_modules
 }
 
 # --- preflight::resolve_machine_type ---
@@ -58,19 +63,23 @@ setup() {
 
 # --- preflight::resolve_active_modules ---
 
-@test "resolve_active_modules handles empty modules list gracefully" {
+# Base modules are always active, so an empty requested set still resolves to
+# the base set — never to nothing. Fake base names keep this decoupled from the
+# current real value of MK_BASE_MODULES.
+@test "resolve_active_modules resolves the base set even when none are requested" {
+  MK_BASE_MODULES=(bm1 bm2)
   STUB_OUTPUT="" mktest::stub_function config::get_array "modules"
-  mktest::stub_function resolver::resolve
-  mktest::stub_function context::set_array
-  run preflight::resolve_active_modules
-  [ "$status" -eq 0 ]
-  mktest::assert_stub_not_called resolver::resolve
+  STUB_OUTPUT=$'bm1\nbm2\ndep' mktest::stub_function resolver::resolve bm1 bm2
+  mktest::stub_function context::set_array "modules.active" bm1 bm2 dep
+  preflight::resolve_active_modules
+  mktest::assert_stub_called context::set_array "modules.active" bm1 bm2 dep
 }
 
-@test "resolve_active_modules reads modules from config and stores resolved order" {
-  STUB_OUTPUT=$'home\nzsh\nmise' mktest::stub_function config::get_array "modules"
-  STUB_OUTPUT=$'home\nzsh\nmise' mktest::stub_function resolver::resolve home zsh mise
-  mktest::stub_function context::set_array "modules.active" home zsh mise
+@test "resolve_active_modules resolves the base set unioned with the requested modules" {
+  MK_BASE_MODULES=(bm1 bm2)
+  STUB_OUTPUT=$'foo\nbar' mktest::stub_function config::get_array "modules"
+  STUB_OUTPUT=$'bm1\nbm2\nfoo\nbar\nbaz' mktest::stub_function resolver::resolve bm1 bm2 foo bar
+  mktest::stub_function context::set_array "modules.active" bm1 bm2 foo bar baz
   preflight::resolve_active_modules
-  mktest::assert_stub_called context::set_array "modules.active" home zsh mise
+  mktest::assert_stub_called context::set_array "modules.active" bm1 bm2 foo bar baz
 }

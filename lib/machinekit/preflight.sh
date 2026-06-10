@@ -17,6 +17,7 @@ preflight::run() {
   preflight::resolve_machine_type
   config::load
   preflight::resolve_active_modules
+  home::transforms::register_from_modules
 
   modules::run_preflights
 
@@ -30,13 +31,14 @@ preflight::resolve_machine_type() {
 }
 
 preflight::resolve_active_modules() {
-  local requested=() mod
+  # Base modules are always active. The resolver dedups by name, so a blueprint
+  # requesting one explicitly is harmless. The union is never empty, so there is
+  # no empty-set short-circuit.
+  local requested=("${MK_BASE_MODULES[@]}") mod
   while IFS= read -r mod; do
     [ -n "$mod" ] || continue
     requested+=("$mod")
   done < <(config::get_array "modules")
-
-  [ "${#requested[@]}" -eq 0 ] && return 0
 
   local ordered=()
   while IFS= read -r mod; do
