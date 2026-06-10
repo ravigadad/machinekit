@@ -111,14 +111,153 @@ setup() {
   [ "$status" -eq 1 ]
 }
 
-# --- home::transforms::apply ---
+# --- home::transforms::resolve ---
 
-@test "apply parses the destination, then executes the pipeline against the source" {
-  mktest::stub_function home::transforms::_parse
-  mktest::stub_function home::transforms::_execute
-  home::transforms::apply "/staging/foo.md.tmpl.age" "foo.md.tmpl.age"
-  mktest::assert_stub_called_in_order home::transforms::_parse "foo.md.tmpl.age"
-  mktest::assert_stub_called_in_order home::transforms::_execute "/staging/foo.md.tmpl.age"
+@test "resolve strips a single registered suffix and records its handler" {
+  STUB_OUTPUT="content gomplate::render" mktest::stub_function home::transforms::lookup tmpl
+  STUB_RETURN=1 mktest::stub_function home::transforms::lookup conf
+  home::transforms::resolve "app.conf.tmpl"
+  [ "$_MK_HOME_TRANSFORM_DEST" = "app.conf" ]
+  [ "${#_MK_HOME_TRANSFORM_PIPELINE[@]}" -eq 1 ]
+  [ "${_MK_HOME_TRANSFORM_PIPELINE[0]}" = "gomplate::render" ]
+}
+
+@test "resolve peels nested suffixes right-to-left into execution order" {
+  STUB_OUTPUT="decode age::decrypt" mktest::stub_function home::transforms::lookup age
+  STUB_OUTPUT="content gomplate::render" mktest::stub_function home::transforms::lookup tmpl
+  STUB_RETURN=1 mktest::stub_function home::transforms::lookup md
+  home::transforms::resolve "foo.md.tmpl.age"
+  [ "$_MK_HOME_TRANSFORM_DEST" = "foo.md" ]
+  [ "${#_MK_HOME_TRANSFORM_PIPELINE[@]}" -eq 2 ]
+  [ "${_MK_HOME_TRANSFORM_PIPELINE[0]}" = "age::decrypt" ]
+  [ "${_MK_HOME_TRANSFORM_PIPELINE[1]}" = "gomplate::render" ]
+}
+
+@test "resolve keeps an unregistered terminal extension and yields an empty pipeline" {
+  STUB_RETURN=1 mktest::stub_function home::transforms::lookup md
+  home::transforms::resolve "README.md"
+  [ "$_MK_HOME_TRANSFORM_DEST" = "README.md" ]
+  [ "${#_MK_HOME_TRANSFORM_PIPELINE[@]}" -eq 0 ]
+}
+
+@test "resolve peels only the basename, leaving directory components intact" {
+  STUB_OUTPUT="content gomplate::render" mktest::stub_function home::transforms::lookup tmpl
+  STUB_RETURN=1 mktest::stub_function home::transforms::lookup conf
+  home::transforms::resolve ".config/app.conf.tmpl"
+  [ "$_MK_HOME_TRANSFORM_DEST" = ".config/app.conf" ]
+  [ "${_MK_HOME_TRANSFORM_PIPELINE[0]}" = "gomplate::render" ]
+}
+
+@test "resolve hard-fails when a decode marker follows a content marker" {
+  STUB_OUTPUT="content gomplate::render" mktest::stub_function home::transforms::lookup tmpl
+  STUB_OUTPUT="decode age::decrypt" mktest::stub_function home::transforms::lookup age
+  STUB_EXIT=1 mktest::stub_function lifecycle::fail
+  run ! home::transforms::resolve "foo.md.age.tmpl"
+  MATCH="decode" mktest::assert_stub_called lifecycle::fail
+}
+
+@test "resolve peels stacked decode markers without tripping the cross-tier law" {
+  STUB_OUTPUT="decode age::decrypt" mktest::stub_function home::transforms::lookup age
+  STUB_OUTPUT="decode zip::decompress" mktest::stub_function home::transforms::lookup gz
+  STUB_RETURN=1 mktest::stub_function home::transforms::lookup foo
+  home::transforms::resolve "foo.gz.age"
+  [ "$_MK_HOME_TRANSFORM_DEST" = "foo" ]
+  [ "${#_MK_HOME_TRANSFORM_PIPELINE[@]}" -eq 2 ]
+  [ "${_MK_HOME_TRANSFORM_PIPELINE[0]}" = "age::decrypt" ]
+  [ "${_MK_HOME_TRANSFORM_PIPELINE[1]}" = "zip::decompress" ]
+}
+
+@test "resolve keeps a leading-dot dotfile whose whole name matches a marker" {
+  # The leading dot is a dotfile marker, not an extension separator — '.tmpl'
+  # must stay '.tmpl', never collapse to ''. tmpl is registered here so the guard,
+  # not a lookup miss, is what stops the peel.
+  STUB_OUTPUT="content gomplate::render" mktest::stub_function home::transforms::lookup tmpl
+  home::transforms::resolve ".tmpl"
+  [ "$_MK_HOME_TRANSFORM_DEST" = ".tmpl" ]
+  [ "${#_MK_HOME_TRANSFORM_PIPELINE[@]}" -eq 0 ]
+}
+
+@test "resolve peels a real extension off a dotfile while preserving the leading-dot stem" {
+  STUB_OUTPUT="content gomplate::render" mktest::stub_function home::transforms::lookup tmpl
+  home::transforms::resolve ".foo.tmpl"
+  [ "$_MK_HOME_TRANSFORM_DEST" = ".foo" ]
+  [ "${#_MK_HOME_TRANSFORM_PIPELINE[@]}" -eq 1 ]
+  [ "${_MK_HOME_TRANSFORM_PIPELINE[0]}" = "gomplate::render" ]
+}
+
+# --- home::transforms::execute ---
+
+@test "execute runs a single handler and exposes its output as the content path" {
+  mktest::stub_function lifecycle::register_cleanup
+  fake_a::stage() { printf 'A:'; cat "$1"; }
+  _MK_HOME_TRANSFORM_PIPELINE=(fake_a::stage)
+  local src="$BATS_TEST_TMPDIR/src"
+  printf 'seed\n' > "$src"
+  home::transforms::execute "$src"
+  [ "$_MK_HOME_TRANSFORM_CONTENT" != "$src" ]
+  [ "$(cat "$_MK_HOME_TRANSFORM_CONTENT")" = "A:seed" ]
+}
+
+@test "execute chains handlers in pipeline order, threading each output into the next" {
+  mktest::stub_function lifecycle::register_cleanup
+  fake_a::stage() { printf 'A:'; cat "$1"; }
+  fake_b::stage() { printf 'B:'; cat "$1"; }
+  _MK_HOME_TRANSFORM_PIPELINE=(fake_a::stage fake_b::stage)
+  local src="$BATS_TEST_TMPDIR/src"
+  printf 'seed\n' > "$src"
+  home::transforms::execute "$src"
+  [ "$(cat "$_MK_HOME_TRANSFORM_CONTENT")" = "B:A:seed" ]
+}
+
+@test "execute removes the intermediate temp, keeping only the final content" {
+  mktest::stub_function lifecycle::register_cleanup
+  local marker="$BATS_TEST_TMPDIR/intermediate"
+  fake_a::stage() { printf 'A:'; cat "$1"; }
+  # The second stage's input is the first stage's output temp — the intermediate.
+  fake_b::stage() { printf '%s' "$1" > "$marker"; printf 'B:'; cat "$1"; }
+  _MK_HOME_TRANSFORM_PIPELINE=(fake_a::stage fake_b::stage)
+  local src="$BATS_TEST_TMPDIR/src"
+  printf 'seed\n' > "$src"
+  home::transforms::execute "$src"
+  local intermediate
+  intermediate=$(cat "$marker")
+  [ ! -f "$intermediate" ]
+  [ "$intermediate" != "$_MK_HOME_TRANSFORM_CONTENT" ]
+  [ -f "$_MK_HOME_TRANSFORM_CONTENT" ]
+}
+
+@test "execute identity-copies the source to a removable temp when the pipeline is empty" {
+  mktest::stub_function lifecycle::register_cleanup
+  _MK_HOME_TRANSFORM_PIPELINE=()
+  local src="$BATS_TEST_TMPDIR/src"
+  printf 'hello\n' > "$src"
+  home::transforms::execute "$src"
+  [ "$_MK_HOME_TRANSFORM_CONTENT" != "$src" ]
+  [ "$(cat "$_MK_HOME_TRANSFORM_CONTENT")" = "hello" ]
+}
+
+@test "execute registers a cleanup hook for the temps it creates" {
+  mktest::stub_function lifecycle::register_cleanup
+  fake_a::stage() { printf 'A:'; cat "$1"; }
+  _MK_HOME_TRANSFORM_PIPELINE=(fake_a::stage)
+  local src="$BATS_TEST_TMPDIR/src"
+  printf 'seed\n' > "$src"
+  home::transforms::execute "$src"
+  mktest::assert_stub_called lifecycle::register_cleanup home::transforms::_cleanup_temps
+}
+
+@test "execute aborts and skips later stages when a handler fails" {
+  mktest::stub_function lifecycle::register_cleanup
+  STUB_EXIT=1 mktest::stub_function lifecycle::fail
+  local second_ran="$BATS_TEST_TMPDIR/second_ran"
+  failing::stage() { return 1; }
+  second::stage() { printf 'ran' > "$second_ran"; cat "$1"; }
+  _MK_HOME_TRANSFORM_PIPELINE=(failing::stage second::stage)
+  local src="$BATS_TEST_TMPDIR/src"
+  printf 'seed\n' > "$src"
+  run ! home::transforms::execute "$src"
+  MATCH="failing::stage" mktest::assert_stub_called lifecycle::fail
+  [ ! -f "$second_ran" ]
 }
 
 # --- home::transforms::_index_of ---
@@ -132,155 +271,6 @@ setup() {
   _MK_HOME_TRANSFORM_EXTS=(gz)
   run ! home::transforms::_index_of age
   [ "$status" -eq 1 ]
-}
-
-# --- home::transforms::_parse ---
-
-@test "_parse strips a single registered suffix and records its handler" {
-  STUB_OUTPUT="content gomplate::render" mktest::stub_function home::transforms::lookup tmpl
-  STUB_RETURN=1 mktest::stub_function home::transforms::lookup conf
-  home::transforms::_parse "app.conf.tmpl"
-  [ "$_MK_HOME_TRANSFORM_DEST" = "app.conf" ]
-  [ "${#_MK_HOME_TRANSFORM_PIPELINE[@]}" -eq 1 ]
-  [ "${_MK_HOME_TRANSFORM_PIPELINE[0]}" = "gomplate::render" ]
-}
-
-@test "_parse peels nested suffixes right-to-left into execution order" {
-  STUB_OUTPUT="decode age::decrypt" mktest::stub_function home::transforms::lookup age
-  STUB_OUTPUT="content gomplate::render" mktest::stub_function home::transforms::lookup tmpl
-  STUB_RETURN=1 mktest::stub_function home::transforms::lookup md
-  home::transforms::_parse "foo.md.tmpl.age"
-  [ "$_MK_HOME_TRANSFORM_DEST" = "foo.md" ]
-  [ "${#_MK_HOME_TRANSFORM_PIPELINE[@]}" -eq 2 ]
-  [ "${_MK_HOME_TRANSFORM_PIPELINE[0]}" = "age::decrypt" ]
-  [ "${_MK_HOME_TRANSFORM_PIPELINE[1]}" = "gomplate::render" ]
-}
-
-@test "_parse keeps an unregistered terminal extension and yields an empty pipeline" {
-  STUB_RETURN=1 mktest::stub_function home::transforms::lookup md
-  home::transforms::_parse "README.md"
-  [ "$_MK_HOME_TRANSFORM_DEST" = "README.md" ]
-  [ "${#_MK_HOME_TRANSFORM_PIPELINE[@]}" -eq 0 ]
-}
-
-@test "_parse peels only the basename, leaving directory components intact" {
-  STUB_OUTPUT="content gomplate::render" mktest::stub_function home::transforms::lookup tmpl
-  STUB_RETURN=1 mktest::stub_function home::transforms::lookup conf
-  home::transforms::_parse ".config/app.conf.tmpl"
-  [ "$_MK_HOME_TRANSFORM_DEST" = ".config/app.conf" ]
-  [ "${_MK_HOME_TRANSFORM_PIPELINE[0]}" = "gomplate::render" ]
-}
-
-@test "_parse hard-fails when a decode marker follows a content marker" {
-  STUB_OUTPUT="content gomplate::render" mktest::stub_function home::transforms::lookup tmpl
-  STUB_OUTPUT="decode age::decrypt" mktest::stub_function home::transforms::lookup age
-  STUB_EXIT=1 mktest::stub_function lifecycle::fail
-  run ! home::transforms::_parse "foo.md.age.tmpl"
-  MATCH="decode" mktest::assert_stub_called lifecycle::fail
-}
-
-@test "_parse peels stacked decode markers without tripping the cross-tier law" {
-  STUB_OUTPUT="decode age::decrypt" mktest::stub_function home::transforms::lookup age
-  STUB_OUTPUT="decode zip::decompress" mktest::stub_function home::transforms::lookup gz
-  STUB_RETURN=1 mktest::stub_function home::transforms::lookup foo
-  home::transforms::_parse "foo.gz.age"
-  [ "$_MK_HOME_TRANSFORM_DEST" = "foo" ]
-  [ "${#_MK_HOME_TRANSFORM_PIPELINE[@]}" -eq 2 ]
-  [ "${_MK_HOME_TRANSFORM_PIPELINE[0]}" = "age::decrypt" ]
-  [ "${_MK_HOME_TRANSFORM_PIPELINE[1]}" = "zip::decompress" ]
-}
-
-@test "_parse keeps a leading-dot dotfile whose whole name matches a marker" {
-  # The leading dot is a dotfile marker, not an extension separator — '.tmpl'
-  # must stay '.tmpl', never collapse to ''. tmpl is registered here so the guard,
-  # not a lookup miss, is what stops the peel.
-  STUB_OUTPUT="content gomplate::render" mktest::stub_function home::transforms::lookup tmpl
-  home::transforms::_parse ".tmpl"
-  [ "$_MK_HOME_TRANSFORM_DEST" = ".tmpl" ]
-  [ "${#_MK_HOME_TRANSFORM_PIPELINE[@]}" -eq 0 ]
-}
-
-@test "_parse peels a real extension off a dotfile while preserving the leading-dot stem" {
-  STUB_OUTPUT="content gomplate::render" mktest::stub_function home::transforms::lookup tmpl
-  home::transforms::_parse ".foo.tmpl"
-  [ "$_MK_HOME_TRANSFORM_DEST" = ".foo" ]
-  [ "${#_MK_HOME_TRANSFORM_PIPELINE[@]}" -eq 1 ]
-  [ "${_MK_HOME_TRANSFORM_PIPELINE[0]}" = "gomplate::render" ]
-}
-
-# --- home::transforms::_execute ---
-
-@test "_execute runs a single handler and exposes its output as the content path" {
-  mktest::stub_function lifecycle::register_cleanup
-  fake_a::stage() { printf 'A:'; cat "$1"; }
-  _MK_HOME_TRANSFORM_PIPELINE=(fake_a::stage)
-  local src="$BATS_TEST_TMPDIR/src"
-  printf 'seed\n' > "$src"
-  home::transforms::_execute "$src"
-  [ "$_MK_HOME_TRANSFORM_CONTENT" != "$src" ]
-  [ "$(cat "$_MK_HOME_TRANSFORM_CONTENT")" = "A:seed" ]
-}
-
-@test "_execute chains handlers in pipeline order, threading each output into the next" {
-  mktest::stub_function lifecycle::register_cleanup
-  fake_a::stage() { printf 'A:'; cat "$1"; }
-  fake_b::stage() { printf 'B:'; cat "$1"; }
-  _MK_HOME_TRANSFORM_PIPELINE=(fake_a::stage fake_b::stage)
-  local src="$BATS_TEST_TMPDIR/src"
-  printf 'seed\n' > "$src"
-  home::transforms::_execute "$src"
-  [ "$(cat "$_MK_HOME_TRANSFORM_CONTENT")" = "B:A:seed" ]
-}
-
-@test "_execute removes the intermediate temp, keeping only the final content" {
-  mktest::stub_function lifecycle::register_cleanup
-  local marker="$BATS_TEST_TMPDIR/intermediate"
-  fake_a::stage() { printf 'A:'; cat "$1"; }
-  # The second stage's input is the first stage's output temp — the intermediate.
-  fake_b::stage() { printf '%s' "$1" > "$marker"; printf 'B:'; cat "$1"; }
-  _MK_HOME_TRANSFORM_PIPELINE=(fake_a::stage fake_b::stage)
-  local src="$BATS_TEST_TMPDIR/src"
-  printf 'seed\n' > "$src"
-  home::transforms::_execute "$src"
-  local intermediate
-  intermediate=$(cat "$marker")
-  [ ! -f "$intermediate" ]
-  [ "$intermediate" != "$_MK_HOME_TRANSFORM_CONTENT" ]
-  [ -f "$_MK_HOME_TRANSFORM_CONTENT" ]
-}
-
-@test "_execute identity-copies the source to a removable temp when the pipeline is empty" {
-  mktest::stub_function lifecycle::register_cleanup
-  _MK_HOME_TRANSFORM_PIPELINE=()
-  local src="$BATS_TEST_TMPDIR/src"
-  printf 'hello\n' > "$src"
-  home::transforms::_execute "$src"
-  [ "$_MK_HOME_TRANSFORM_CONTENT" != "$src" ]
-  [ "$(cat "$_MK_HOME_TRANSFORM_CONTENT")" = "hello" ]
-}
-
-@test "_execute registers a cleanup hook for the temps it creates" {
-  mktest::stub_function lifecycle::register_cleanup
-  fake_a::stage() { printf 'A:'; cat "$1"; }
-  _MK_HOME_TRANSFORM_PIPELINE=(fake_a::stage)
-  local src="$BATS_TEST_TMPDIR/src"
-  printf 'seed\n' > "$src"
-  home::transforms::_execute "$src"
-  mktest::assert_stub_called lifecycle::register_cleanup home::transforms::_cleanup_temps
-}
-
-@test "_execute aborts and skips later stages when a handler fails" {
-  mktest::stub_function lifecycle::register_cleanup
-  STUB_EXIT=1 mktest::stub_function lifecycle::fail
-  local second_ran="$BATS_TEST_TMPDIR/second_ran"
-  failing::stage() { return 1; }
-  second::stage() { printf 'ran' > "$second_ran"; cat "$1"; }
-  _MK_HOME_TRANSFORM_PIPELINE=(failing::stage second::stage)
-  local src="$BATS_TEST_TMPDIR/src"
-  printf 'seed\n' > "$src"
-  run ! home::transforms::_execute "$src"
-  MATCH="failing::stage" mktest::assert_stub_called lifecycle::fail
-  [ ! -f "$second_ran" ]
 }
 
 # --- home::transforms::_cleanup_temps ---

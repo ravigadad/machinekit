@@ -82,36 +82,14 @@ home::transforms::lookup() {
   printf '%s %s\n' "${_MK_HOME_TRANSFORM_TIERS[idx]}" "${_MK_HOME_TRANSFORM_FNS[idx]}"
 }
 
-# apply SRC DEST_REL — resolve DEST_REL's content pipeline and run it on SRC.
-# Sets _MK_HOME_TRANSFORM_DEST (suffixes stripped) and _MK_HOME_TRANSFORM_CONTENT
-# (the final temp). Communicates via globals, not stdout, so a handler's
-# memoized state (e.g. gomplate's context) survives across files.
-home::transforms::apply() {
-  local src="$1" dest_rel="$2"
-  home::transforms::_parse "$dest_rel"
-  home::transforms::_execute "$src"
-}
-
-# --- Internals ---
-
-# Print the registry index of EXT, or return nonzero if it is not registered.
-home::transforms::_index_of() {
-  local ext="$1" n i
-  n=${#_MK_HOME_TRANSFORM_EXTS[@]}
-  for (( i = 0; i < n; i++ )); do
-    if [ "${_MK_HOME_TRANSFORM_EXTS[i]}" = "$ext" ]; then
-      printf '%s\n' "$i"
-      return 0
-    fi
-  done
-  return 1
-}
-
-# Peel registered suffix markers off DEST_REL right-to-left (envelope order),
-# building the execution-ordered pipeline and the final destination. The first
-# unregistered extension is terminal and kept. Enforces the cross-tier law:
-# decode markers must be outermost, so no decode stage may follow a content one.
-home::transforms::_parse() {
+# resolve DEST_REL — parse only. Peel registered suffix markers off DEST_REL
+# right-to-left (envelope order) into _MK_HOME_TRANSFORM_PIPELINE (execution
+# order) and the final _MK_HOME_TRANSFORM_DEST (suffixes stripped). Runs no
+# handlers, so the caller can decide to skip a file (e.g. mkignore) before
+# paying to execute it. The first unregistered extension is terminal and kept;
+# enforces the cross-tier law: decode markers must be outermost, so no decode
+# stage may follow a content one.
+home::transforms::resolve() {
   local dest_rel="$1"
   local dir base
   case "$dest_rel" in
@@ -146,11 +124,12 @@ home::transforms::_parse() {
   fi
 }
 
-# Run the parsed pipeline over SRC, leaving the result in a temp file. Stages
-# are chained via redirection (not command substitution) so handler-global
-# state survives. The final temp is the caller's to consume; intermediates are
+# execute SRC — run the pipeline that resolve() built over SRC, leaving the
+# result in _MK_HOME_TRANSFORM_CONTENT (a temp the caller consumes). Stages are
+# chained via redirection, never command substitution, so a handler's memoized
+# state (e.g. gomplate's context) survives across files. Intermediates are
 # removed as they are spent.
-home::transforms::_execute() {
+home::transforms::execute() {
   local src="$1"
   local in="$src" tmp fn stages
   # No transforms still must yield a fresh temp; the identity copy (cat) does it
@@ -174,6 +153,21 @@ home::transforms::_execute() {
     in="$tmp"
   done
   _MK_HOME_TRANSFORM_CONTENT="$in"
+}
+
+# --- Internals ---
+
+# Print the registry index of EXT, or return nonzero if it is not registered.
+home::transforms::_index_of() {
+  local ext="$1" n i
+  n=${#_MK_HOME_TRANSFORM_EXTS[@]}
+  for (( i = 0; i < n; i++ )); do
+    if [ "${_MK_HOME_TRANSFORM_EXTS[i]}" = "$ext" ]; then
+      printf '%s\n' "$i"
+      return 0
+    fi
+  done
+  return 1
 }
 
 home::transforms::_track_temp() {
