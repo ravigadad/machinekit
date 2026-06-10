@@ -38,7 +38,7 @@ modules::_call_function_per_module() {
   modules::source_all
   local mod
   while IFS= read -r mod; do
-    declare -f "${mod}::$1" > /dev/null 2>&1 || continue
+    declare -F "${mod}::$1" > /dev/null 2>&1 || continue
     "${mod}::$1"
   done < <(context::get_array "modules.active")
 }

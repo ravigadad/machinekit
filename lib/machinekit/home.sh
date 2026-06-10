@@ -10,6 +10,7 @@ _MK_HOME_LOADED=1
 
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/home/dry_run.sh"
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/home/staging.sh"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/home/transforms.sh"
 
 _MK_HOME_STAGING_DIR=""
 _MK_HOME_CTX_FILE=""
