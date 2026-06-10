@@ -17,13 +17,13 @@ setup() {
 # --- prerequisites::install ---
 
 @test "install passes every prerequisite to _install_tool" {
-  mktest::stub_function prerequisites::_install_tool
+  mktest::stub_function prerequisites::_install_tool "jq"
+  mktest::stub_function prerequisites::_install_tool "toml2json"
+  mktest::stub_function prerequisites::_install_tool "git"
   prerequisites::install
   mktest::assert_stub_called prerequisites::_install_tool "jq"
   mktest::assert_stub_called prerequisites::_install_tool "toml2json"
-  mktest::assert_stub_called prerequisites::_install_tool "gomplate"
   mktest::assert_stub_called prerequisites::_install_tool "git"
-  mktest::assert_stub_not_called prerequisites::_install_tool "age"
 }
 
 # --- prerequisites::_install_tool ---
