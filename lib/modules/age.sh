@@ -114,3 +114,13 @@ age::_install_use_existing() {
   chmod 600 "$key_path" 2>/dev/null || true
   logging::success "Using existing age key at $key_path"
 }
+
+# age::decrypt FILE — decrypt FILE with the installed key, plaintext to stdout.
+# The decryption primitive; stdout output lets callers keep plaintext off disk.
+age::decrypt() {
+  local file="$1" key_path
+  key_path=$(config::get "module.age.key_path" --default "$AGE_KEY_PATH")
+  [ -f "$key_path" ] || lifecycle::fail "age::decrypt: no age key at $key_path"
+  [ -f "$file" ] || lifecycle::fail "age::decrypt: file not found: $file"
+  age --decrypt --identity "$key_path" "$file"
+}

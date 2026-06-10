@@ -224,3 +224,36 @@ setup() {
   [ "$(mktest::file_mode "$AGE_KEY_PATH")" = "600" ]
   mktest::assert_stub_called logging::success
 }
+
+# --- age::decrypt ---
+
+@test "decrypt invokes age with the configured identity and emits plaintext" {
+  local enc="$BATS_TEST_TMPDIR/secret.age"
+  mkdir -p "$(dirname "$AGE_KEY_PATH")"
+  printf 'AGE-SECRET-KEY-1FAKE\n' > "$AGE_KEY_PATH"
+  printf 'ciphertext\n' > "$enc"
+  STUB_OUTPUT="$AGE_KEY_PATH" mktest::stub_function config::get "module.age.key_path" "--default" "$AGE_KEY_PATH"
+  STUB_OUTPUT="decrypted-secret" mktest::stub_function age "--decrypt" "--identity" "$AGE_KEY_PATH" "$enc"
+  run age::decrypt "$enc"
+  [ "$status" -eq 0 ]
+  [ "$output" = "decrypted-secret" ]
+  mktest::assert_stub_called age "--decrypt" "--identity" "$AGE_KEY_PATH" "$enc"
+}
+
+@test "decrypt fails when the age key is missing" {
+  local enc="$BATS_TEST_TMPDIR/secret.age"
+  printf 'ciphertext\n' > "$enc"
+  STUB_OUTPUT="$BATS_TEST_TMPDIR/no-such-key" mktest::stub_function config::get "module.age.key_path" "--default" "$AGE_KEY_PATH"
+  STUB_EXIT=1 mktest::stub_function lifecycle::fail
+  run ! age::decrypt "$enc"
+  MATCH="no age key" mktest::assert_stub_called lifecycle::fail
+}
+
+@test "decrypt fails when the encrypted file is missing" {
+  mkdir -p "$(dirname "$AGE_KEY_PATH")"
+  printf 'AGE-SECRET-KEY-1FAKE\n' > "$AGE_KEY_PATH"
+  STUB_OUTPUT="$AGE_KEY_PATH" mktest::stub_function config::get "module.age.key_path" "--default" "$AGE_KEY_PATH"
+  STUB_EXIT=1 mktest::stub_function lifecycle::fail
+  run ! age::decrypt "$BATS_TEST_TMPDIR/missing.age"
+  MATCH="not found" mktest::assert_stub_called lifecycle::fail
+}
