@@ -11,26 +11,25 @@ home::dry_run::show_diff() {
   logging::step "home dry-run: diff against $HOME"
 
   tmp_out=$(mktemp -d)
-  home::_prepare_ctx
 
   while IFS= read -r src_path; do
-    home::dry_run::_render_to_outdir "$src_path" "$staging" "$_MK_HOME_CTX_FILE" "$tmp_out"
+    home::dry_run::_render_to_outdir "$src_path" "$staging" "$tmp_out"
   done < <(find "$staging" -type f | sort)
 
   home::dry_run::_show_diff "$tmp_out"
 
   rm -rf -- "$tmp_out"
-  home::_cleanup_ctx
 }
 
 home::dry_run::_render_to_outdir() {
-  local src="$1" staging="$2" ctx_file="$3" out_dir="$4"
-  local src_rel dest_rel is_template out_path
+  local src="$1" staging="$2" out_dir="$3"
+  local src_rel dest_rel out_path
 
   src_rel="${src#"$staging"/}"
   home::_decode_path "$src_rel"
-  dest_rel="$_MK_HOME_DEST_REL"
-  is_template="$_MK_HOME_IS_TEMPLATE"
+
+  home::transforms::resolve "$_MK_HOME_DEST_REL"
+  dest_rel="$_MK_HOME_TRANSFORM_DEST"
 
   [ "$dest_rel" = ".mkignore" ] && return 0
 
@@ -42,10 +41,9 @@ home::dry_run::_render_to_outdir() {
   out_path="$out_dir/$dest_rel"
   mkdir -p "$(dirname "$out_path")"
 
-  local tmp
-  tmp=$(home::_render_file "$src" "$is_template" "$ctx_file")
-  cp -- "$tmp" "$out_path"
-  rm -f -- "$tmp"
+  home::transforms::execute "$src"
+  cp -- "$_MK_HOME_TRANSFORM_CONTENT" "$out_path"
+  rm -f -- "$_MK_HOME_TRANSFORM_CONTENT"
 }
 
 home::dry_run::_show_diff() {

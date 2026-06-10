@@ -13,13 +13,11 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/home/staging.sh"
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/home/transforms.sh"
 
 _MK_HOME_STAGING_DIR=""
-_MK_HOME_CTX_FILE=""
 
 # Scratch variables set by home::_decode_path and consumed by
 # _apply_file / _render_to_outdir in the same call frame.
 _MK_HOME_DEST_REL=""
 _MK_HOME_IS_PRIVATE=0
-_MK_HOME_IS_TEMPLATE=0
 
 # --- Public API ---
 
@@ -35,31 +33,28 @@ home::sync() {
 # --- _apply and helpers ---
 
 home::_apply() {
-  home::_prepare_ctx
+  local staging src_path
+  staging="$(home::staging::dir)"
   logging::step "Applying home files"
-  home::_apply_files
-  home::_cleanup_ctx
+  while IFS= read -r src_path; do
+    home::_apply_file "$src_path" "$staging"
+  done < <(find "$staging" -type f | sort)
   logging::success "Home files applied."
 }
 
-home::_apply_files() {
-  local staging src_path
-  staging="$(home::staging::dir)"
-  while IFS= read -r src_path; do
-    home::_apply_file "$src_path" "$staging" "$_MK_HOME_CTX_FILE"
-  done < <(find "$staging" -type f | sort)
-}
-
-# Apply a single staging file to $HOME, decoding the path and permissions.
+# Apply a single staging file to $HOME: decode its addressing, resolve its
+# content pipeline, then (unless ignored) run the pipeline and reconcile the
+# result. Resolve is parse-only, so an ignored file is never executed.
 home::_apply_file() {
-  local src="$1" staging="$2" ctx_file="$3"
-  local src_rel dest_rel dest_path is_private is_template
+  local src="$1" staging="$2"
+  local src_rel dest_rel dest_path is_private
 
   src_rel="${src#"$staging"/}"
   home::_decode_path "$src_rel"
-  dest_rel="$_MK_HOME_DEST_REL"
   is_private="$_MK_HOME_IS_PRIVATE"
-  is_template="$_MK_HOME_IS_TEMPLATE"
+
+  home::transforms::resolve "$_MK_HOME_DEST_REL"
+  dest_rel="$_MK_HOME_TRANSFORM_DEST"
 
   [ "$dest_rel" = ".mkignore" ] && return 0
 
@@ -73,22 +68,21 @@ home::_apply_file() {
   mkdir -p "$(dirname "$dest_path")"
   home::_apply_parent_perms "$src_rel" "$dest_path"
 
-  local resolved
-  resolved=$(home::_render_file "$src" "$is_template" "$ctx_file")
-  home::_reconcile_file "$resolved" "$dest_path" "$dest_rel" "$is_private"
+  home::transforms::execute "$src"
+  home::_reconcile_file "$_MK_HOME_TRANSFORM_CONTENT" "$dest_path" "$dest_rel" "$is_private"
 }
 
 # home::_decode_path REL_PATH
-# Decodes a staging-dir relative path into the $HOME-relative destination.
-# Sets module-scope variables consumed by _apply_file / _render_to_outdir:
-#   _MK_HOME_DEST_REL    decoded path, e.g. ".ssh/config"
+# Decodes the addressing of a staging-dir relative path into the $HOME-relative
+# destination. Prefixes only (dot_/private_); content-suffix markers like .tmpl
+# are owned by home::transforms and left intact here. Sets module-scope
+# variables consumed by _apply_file / _render_to_outdir in the same call frame:
+#   _MK_HOME_DEST_REL    decoded path, e.g. ".ssh/config" (markers intact)
 #   _MK_HOME_IS_PRIVATE  1 if any component had the private_ prefix, else 0
-#   _MK_HOME_IS_TEMPLATE 1 if the filename ends in .tmpl, else 0
 home::_decode_path() {
   local rel="$1"
   local result="" remainder="$rel" comp
   _MK_HOME_IS_PRIVATE=0
-  _MK_HOME_IS_TEMPLATE=0
 
   while [ -n "$remainder" ]; do
     comp="${remainder%%/*}"
@@ -106,11 +100,6 @@ home::_decode_path() {
     if [ -z "$result" ]; then result="$comp"; else result="$result/$comp"; fi
   done
 
-  if [ "${result%.tmpl}" != "$result" ]; then
-    _MK_HOME_IS_TEMPLATE=1
-    result="${result%.tmpl}"
-  fi
-
   _MK_HOME_DEST_REL="$result"
 }
 
@@ -125,19 +114,6 @@ home::_apply_parent_perms() {
       fi
       ;;
   esac
-}
-
-home::_render_file() {
-  local src="$1" is_template="$2" ctx_file="$3"
-  local tmp
-  tmp=$(mktemp)
-  if [ "$is_template" = "1" ]; then
-    gomplate --context ".=file://${ctx_file}?type=application/json" \
-      -f "$src" > "$tmp"
-  else
-    cp -- "$src" "$tmp"
-  fi
-  printf '%s\n' "$tmp"
 }
 
 home::_reconcile_file() {
@@ -242,16 +218,4 @@ home::_show_conflict_diff() {
     less -R "$diff_file"
   fi
   rm -f -- "$diff_file"
-}
-
-home::_prepare_ctx() {
-  _MK_HOME_CTX_FILE=$(mktemp)
-  context::json > "$_MK_HOME_CTX_FILE"
-  lifecycle::register_cleanup home::_cleanup_ctx
-}
-
-home::_cleanup_ctx() {
-  [ -n "$_MK_HOME_CTX_FILE" ] || return 0
-  rm -f -- "$_MK_HOME_CTX_FILE"
-  _MK_HOME_CTX_FILE=""
 }

@@ -12,10 +12,8 @@ setup() {
   unset _MK_HOME_LOADED
   unset MACHINEKIT_CONFLICT_BEHAVIOR
   _MK_HOME_STAGING_DIR=""
-  _MK_HOME_CTX_FILE=""
   _MK_HOME_DEST_REL=""
   _MK_HOME_IS_PRIVATE=0
-  _MK_HOME_IS_TEMPLATE=0
 
   # Logging collaborators — allow-only; they are mechanism, not contract.
   mktest::stub_function logging::step
@@ -61,152 +59,81 @@ setup() {
 
 # --- home::_apply ---
 
-@test "_apply prepares, calls _apply_files, and cleans up" {
-  mktest::stub_function home::_prepare_ctx
-  mktest::stub_function home::_apply_files
-  mktest::stub_function home::_cleanup_ctx
-  home::_apply
-  mktest::assert_stub_called_in_order home::_prepare_ctx
-  mktest::assert_stub_called_in_order home::_apply_files
-  mktest::assert_stub_called_in_order home::_cleanup_ctx
-}
-
-# --- home::_apply_files ---
-
-@test "_apply_files calls _apply_file for each file in staging" {
+@test "_apply calls _apply_file for each file in staging" {
   _MK_HOME_STAGING_DIR="$BATS_TEST_TMPDIR/staging"
-  _MK_HOME_CTX_FILE="dummy_file"
   mkdir -p "$_MK_HOME_STAGING_DIR"
   printf 'foo\n' > "$_MK_HOME_STAGING_DIR/dot_1"
   printf 'bar\n' > "$_MK_HOME_STAGING_DIR/dot_2"
   STUB_OUTPUT="$_MK_HOME_STAGING_DIR" mktest::stub_function home::staging::dir
   mktest::stub_function home::_apply_file
-  home::_apply_files
-  mktest::assert_stub_called_in_order home::_apply_file "$_MK_HOME_STAGING_DIR/dot_1" "$_MK_HOME_STAGING_DIR" "dummy_file"
-  mktest::assert_stub_called_in_order home::_apply_file "$_MK_HOME_STAGING_DIR/dot_2" "$_MK_HOME_STAGING_DIR" "dummy_file"
+  home::_apply
+  mktest::assert_stub_called_in_order home::_apply_file "$_MK_HOME_STAGING_DIR/dot_1" "$_MK_HOME_STAGING_DIR"
+  mktest::assert_stub_called_in_order home::_apply_file "$_MK_HOME_STAGING_DIR/dot_2" "$_MK_HOME_STAGING_DIR"
 }
 
 # --- home::_apply_file ---
 
-@test "_apply_file skips .mkignore itself" {
-  mktest::stub_function home::_render_file
-  mktest::stub_function home::_apply_parent_perms
+@test "_apply_file skips .mkignore itself, without executing or reconciling" {
+  mktest::stub_function home::_decode_path
+  mktest::stub_function home::transforms::resolve
+  mktest::stub_function home::transforms::execute
   mktest::stub_function home::_reconcile_file
-  _MK_HOME_STAGING_DIR="$BATS_TEST_TMPDIR/staging"
-  mkdir -p "$_MK_HOME_STAGING_DIR"
-  printf '.zshrc.local\n' > "$_MK_HOME_STAGING_DIR/.mkignore"
-  export HOME="$BATS_TEST_TMPDIR/home"
-  mkdir -p "$HOME"
-  local ctx_file="$BATS_TEST_TMPDIR/ctx.json"
-  printf '{}' > "$ctx_file"
-  home::_apply_file "$_MK_HOME_STAGING_DIR/.mkignore" "$_MK_HOME_STAGING_DIR" "$ctx_file"
+  _MK_HOME_TRANSFORM_DEST=".mkignore"
+  home::_apply_file "/staging/.mkignore" "/staging"
+  mktest::assert_stub_not_called home::transforms::execute
   mktest::assert_stub_not_called home::_reconcile_file
 }
 
-@test "_apply_file skips files listed in .mkignore" {
-  mktest::stub_function home::_render_file
-  mktest::stub_function home::_apply_parent_perms
+@test "_apply_file skips a file listed in .mkignore, without executing or reconciling" {
+  mktest::stub_function home::_decode_path
+  mktest::stub_function home::transforms::resolve
+  mktest::stub_function home::transforms::execute
   mktest::stub_function home::_reconcile_file
-  _MK_HOME_STAGING_DIR="$BATS_TEST_TMPDIR/staging"
-  mkdir -p "$_MK_HOME_STAGING_DIR"
-  printf '.zshrc.local\n' > "$_MK_HOME_STAGING_DIR/.mkignore"
-  printf 'local settings\n' > "$_MK_HOME_STAGING_DIR/dot_zshrc.local"
-  export HOME="$BATS_TEST_TMPDIR/home"
-  mkdir -p "$HOME"
-  local ctx_file="$BATS_TEST_TMPDIR/ctx.json"
-  printf '{}' > "$ctx_file"
-  home::_apply_file "$_MK_HOME_STAGING_DIR/dot_zshrc.local" "$_MK_HOME_STAGING_DIR" "$ctx_file"
+  local staging="$BATS_TEST_TMPDIR/staging"
+  mkdir -p "$staging"
+  printf '.zshrc.local\n' > "$staging/.mkignore"
+  _MK_HOME_TRANSFORM_DEST=".zshrc.local"
+  home::_apply_file "$staging/dot_zshrc.local" "$staging"
+  mktest::assert_stub_not_called home::transforms::execute
   mktest::assert_stub_not_called home::_reconcile_file
 }
 
-@test "_apply_file does not skip a file absent from .mkignore" {
-  local render_out="$BATS_TEST_TMPDIR/rendered"
-  printf 'content\n' > "$render_out"
-  STUB_OUTPUT="$render_out" mktest::stub_function home::_render_file
+@test "_apply_file resolves the decoded path, executes the pipeline, and reconciles the result" {
+  mktest::stub_function home::_decode_path
+  mktest::stub_function home::transforms::resolve
+  mktest::stub_function home::transforms::execute
   mktest::stub_function home::_apply_parent_perms
   mktest::stub_function home::_reconcile_file
-  _MK_HOME_STAGING_DIR="$BATS_TEST_TMPDIR/staging"
-  mkdir -p "$_MK_HOME_STAGING_DIR"
-  printf 'other_file\n' > "$_MK_HOME_STAGING_DIR/.mkignore"
-  printf 'content\n' > "$_MK_HOME_STAGING_DIR/dot_zshrc"
+  local staging="$BATS_TEST_TMPDIR/staging"
+  mkdir -p "$staging"
   export HOME="$BATS_TEST_TMPDIR/home"
   mkdir -p "$HOME"
-  local ctx_file="$BATS_TEST_TMPDIR/ctx.json"
-  printf '{}' > "$ctx_file"
-  home::_apply_file "$_MK_HOME_STAGING_DIR/dot_zshrc" "$_MK_HOME_STAGING_DIR" "$ctx_file"
-  mktest::assert_stub_called home::_reconcile_file
+  _MK_HOME_DEST_REL=".gitconfig.tmpl"
+  _MK_HOME_TRANSFORM_DEST=".gitconfig"
+  _MK_HOME_TRANSFORM_CONTENT="$BATS_TEST_TMPDIR/rendered"
+  home::_apply_file "$staging/dot_gitconfig.tmpl" "$staging"
+  mktest::assert_stub_called home::_decode_path "dot_gitconfig.tmpl"
+  mktest::assert_stub_called home::transforms::resolve ".gitconfig.tmpl"
+  mktest::assert_stub_called home::transforms::execute "$staging/dot_gitconfig.tmpl"
+  mktest::assert_stub_called home::_reconcile_file "$BATS_TEST_TMPDIR/rendered" "$HOME/.gitconfig" ".gitconfig" "0"
 }
 
-@test "_apply_file calls _reconcile_file with rendered output and decoded destination" {
-  local render_out="$BATS_TEST_TMPDIR/rendered"
-  printf 'rendered content\n' > "$render_out"
-  STUB_OUTPUT="$render_out" mktest::stub_function home::_render_file
+@test "_apply_file forwards is_private and the parent path for a private nested file" {
+  mktest::stub_function home::_decode_path
+  mktest::stub_function home::transforms::resolve
+  mktest::stub_function home::transforms::execute
   mktest::stub_function home::_apply_parent_perms
   mktest::stub_function home::_reconcile_file
-  _MK_HOME_STAGING_DIR="$BATS_TEST_TMPDIR/staging"
-  mkdir -p "$_MK_HOME_STAGING_DIR"
-  printf 'staging\n' > "$_MK_HOME_STAGING_DIR/dot_zshrc"
+  local staging="$BATS_TEST_TMPDIR/staging"
+  mkdir -p "$staging/private_dot_ssh"
   export HOME="$BATS_TEST_TMPDIR/home"
   mkdir -p "$HOME"
-  local ctx_file="$BATS_TEST_TMPDIR/ctx.json"
-  printf '{}' > "$ctx_file"
-  home::_apply_file "$_MK_HOME_STAGING_DIR/dot_zshrc" "$_MK_HOME_STAGING_DIR" "$ctx_file"
-  mktest::assert_stub_called home::_reconcile_file "$render_out" "$HOME/.zshrc" ".zshrc" "0"
-}
-
-@test "_apply_file calls _render_file with src, is_template flag, and ctx_file" {
-  local render_out="$BATS_TEST_TMPDIR/rendered"
-  printf 'rendered content\n' > "$render_out"
-  STUB_OUTPUT="$render_out" mktest::stub_function home::_render_file
-  mktest::stub_function home::_apply_parent_perms
-  mktest::stub_function home::_reconcile_file
-  _MK_HOME_STAGING_DIR="$BATS_TEST_TMPDIR/staging"
-  mkdir -p "$_MK_HOME_STAGING_DIR"
-  printf 'template\n' > "$_MK_HOME_STAGING_DIR/dot_gitconfig.tmpl"
-  export HOME="$BATS_TEST_TMPDIR/home"
-  mkdir -p "$HOME"
-  local ctx_file="$BATS_TEST_TMPDIR/ctx.json"
-  printf '{}' > "$ctx_file"
-  home::_apply_file "$_MK_HOME_STAGING_DIR/dot_gitconfig.tmpl" "$_MK_HOME_STAGING_DIR" "$ctx_file"
-  mktest::assert_stub_called home::_render_file \
-    "$_MK_HOME_STAGING_DIR/dot_gitconfig.tmpl" "1" "$ctx_file"
-}
-
-@test "_apply_file passes is_private=1 to _reconcile_file for a file with private_ in its path" {
-  local render_out="$BATS_TEST_TMPDIR/rendered"
-  printf 'Host *\n' > "$render_out"
-  STUB_OUTPUT="$render_out" mktest::stub_function home::_render_file
-  mktest::stub_function home::_apply_parent_perms
-  mktest::stub_function home::_reconcile_file
-  _MK_HOME_STAGING_DIR="$BATS_TEST_TMPDIR/staging"
-  local ssh_staging="$_MK_HOME_STAGING_DIR/private_dot_ssh"
-  mkdir -p "$ssh_staging"
-  printf 'Host *\n' > "$ssh_staging/private_config"
-  export HOME="$BATS_TEST_TMPDIR/home"
-  mkdir -p "$HOME"
-  local ctx_file="$BATS_TEST_TMPDIR/ctx.json"
-  printf '{}' > "$ctx_file"
-  home::_apply_file "$ssh_staging/private_config" "$_MK_HOME_STAGING_DIR" "$ctx_file"
-  mktest::assert_stub_called home::_reconcile_file "$render_out" "$HOME/.ssh/config" ".ssh/config" "1"
-}
-
-@test "_apply_file calls _apply_parent_perms with src_rel and dest_path" {
-  local render_out="$BATS_TEST_TMPDIR/rendered"
-  printf 'Host *\n' > "$render_out"
-  STUB_OUTPUT="$render_out" mktest::stub_function home::_render_file
-  mktest::stub_function home::_apply_parent_perms
-  mktest::stub_function home::_reconcile_file
-  _MK_HOME_STAGING_DIR="$BATS_TEST_TMPDIR/staging"
-  local ssh_staging="$_MK_HOME_STAGING_DIR/private_dot_ssh"
-  mkdir -p "$ssh_staging"
-  printf 'Host *\n' > "$ssh_staging/private_config"
-  export HOME="$BATS_TEST_TMPDIR/home"
-  mkdir -p "$HOME"
-  local ctx_file="$BATS_TEST_TMPDIR/ctx.json"
-  printf '{}' > "$ctx_file"
-  home::_apply_file "$ssh_staging/private_config" "$_MK_HOME_STAGING_DIR" "$ctx_file"
-  mktest::assert_stub_called home::_apply_parent_perms \
-    "private_dot_ssh/private_config" "$HOME/.ssh/config"
+  _MK_HOME_IS_PRIVATE=1
+  _MK_HOME_TRANSFORM_DEST=".ssh/config"
+  _MK_HOME_TRANSFORM_CONTENT="$BATS_TEST_TMPDIR/rendered"
+  home::_apply_file "$staging/private_dot_ssh/private_config" "$staging"
+  mktest::assert_stub_called home::_reconcile_file "$BATS_TEST_TMPDIR/rendered" "$HOME/.ssh/config" ".ssh/config" "1"
+  mktest::assert_stub_called home::_apply_parent_perms "private_dot_ssh/private_config" "$HOME/.ssh/config"
 }
 
 # --- home::_decode_path ---
@@ -215,19 +142,12 @@ setup() {
   home::_decode_path "env.zsh"
   [ "$_MK_HOME_DEST_REL" = "env.zsh" ]
   [ "$_MK_HOME_IS_PRIVATE" = "0" ]
-  [ "$_MK_HOME_IS_TEMPLATE" = "0" ]
 }
 
 @test "_decode_path converts dot_ prefix to a leading dot" {
   home::_decode_path "dot_zshrc"
   [ "$_MK_HOME_DEST_REL" = ".zshrc" ]
   [ "$_MK_HOME_IS_PRIVATE" = "0" ]
-}
-
-@test "_decode_path strips .tmpl suffix and sets is_template" {
-  home::_decode_path "dot_gitconfig.tmpl"
-  [ "$_MK_HOME_DEST_REL" = ".gitconfig" ]
-  [ "$_MK_HOME_IS_TEMPLATE" = "1" ]
 }
 
 @test "_decode_path strips private_ prefix and sets is_private" {
@@ -243,17 +163,15 @@ setup() {
 }
 
 @test "_decode_path decodes a nested path with all conventions" {
-  home::_decode_path "private_dot_ssh/private_config.tmpl"
+  home::_decode_path "private_dot_ssh/private_config"
   [ "$_MK_HOME_DEST_REL" = ".ssh/config" ]
   [ "$_MK_HOME_IS_PRIVATE" = "1" ]
-  [ "$_MK_HOME_IS_TEMPLATE" = "1" ]
 }
 
 @test "_decode_path decodes a deep path preserving intermediate directories" {
   home::_decode_path "dot_config/machinekit/env.zsh.d/mise.zsh"
   [ "$_MK_HOME_DEST_REL" = ".config/machinekit/env.zsh.d/mise.zsh" ]
   [ "$_MK_HOME_IS_PRIVATE" = "0" ]
-  [ "$_MK_HOME_IS_TEMPLATE" = "0" ]
 }
 
 # --- home::_apply_parent_perms ---
@@ -279,41 +197,9 @@ setup() {
   mktest::assert_stub_not_called chmod
 }
 
-# --- home::_render_file ---
-
-@test "_render_file copies a non-template file to a temp file and returns the path" {
-  local src="$BATS_TEST_TMPDIR/source.txt"
-  printf 'hello\n' > "$src"
-  local ctx_file="$BATS_TEST_TMPDIR/ctx.json"
-  printf '{}' > "$ctx_file"
-  result=$(home::_render_file "$src" "0" "$ctx_file")
-  [ -f "$result" ]
-  [ "$(cat "$result")" = "hello" ]
-}
-
-@test "_render_file runs gomplate and returns the rendered path for a template file" {
-  local src="$BATS_TEST_TMPDIR/source.tmpl"
-  printf 'template\n' > "$src"
-  local ctx_file="$BATS_TEST_TMPDIR/ctx.json"
-  printf '{}' > "$ctx_file"
-  STUB_OUTPUT="rendered content" mktest::stub_function gomplate
-  result=$(home::_render_file "$src" "1" "$ctx_file")
-  [ "$(cat "$result")" = "rendered content" ]
-}
-
-@test "_render_file passes the context file to gomplate" {
-  local src="$BATS_TEST_TMPDIR/source.tmpl"
-  printf 'template\n' > "$src"
-  local ctx_file="$BATS_TEST_TMPDIR/ctx.json"
-  printf '{}' > "$ctx_file"
-  mktest::stub_function gomplate
-  home::_render_file "$src" "1" "$ctx_file"
-  MATCH="ctx.json" mktest::assert_stub_called gomplate
-}
-
 # --- home::_reconcile_file ---
 
-@test "_reconcile_file writes and logs applied for a new file" {
+@test "_reconcile_file writes a new file directly, without conflict resolution" {
   local resolved="$BATS_TEST_TMPDIR/resolved"
   local dest="$BATS_TEST_TMPDIR/home/.zshrc"
   printf 'content\n' > "$resolved"
@@ -324,7 +210,7 @@ setup() {
   mktest::assert_stub_not_called home::_conflict_action
 }
 
-@test "_reconcile_file removes resolved and logs unchanged when dest content is identical" {
+@test "_reconcile_file skips the write and removes the resolved temp when content is unchanged" {
   local resolved="$BATS_TEST_TMPDIR/resolved"
   local dest="$BATS_TEST_TMPDIR/home/.zshrc"
   mkdir -p "$BATS_TEST_TMPDIR/home"
@@ -570,22 +456,3 @@ setup() {
   mktest::assert_stub_not_called less
 }
 
-# --- home::_prepare_ctx ---
-
-@test "_prepare_ctx populates _MK_HOME_CTX_FILE with context::json, and registers cleanup" {
-  STUB_OUTPUT="the-context" mktest::stub_function context::json
-  mktest::stub_function lifecycle::register_cleanup
-  home::_prepare_ctx
-  [ "$(cat "$_MK_HOME_CTX_FILE")" = "the-context" ]
-  mktest::assert_stub_called lifecycle::register_cleanup home::_cleanup_ctx
-}
-
-# --- home::_cleanup_ctx ---
-
-@test "_cleanup_ctx removes file at, and unsets _MK_HOME_CTX_FILE" {
-  file=$(mktemp)
-  _MK_HOME_CTX_FILE="$file"
-  home::_cleanup_ctx
-  [ -z "$_MK_HOME_CTX_FILE" ]
-  [ ! -f "$file" ]
-}
