@@ -225,6 +225,14 @@ setup() {
   mktest::assert_stub_called logging::success
 }
 
+# --- age::file_transforms ---
+
+@test "file_transforms maps .age to the decrypt decode handler" {
+  run age::file_transforms
+  [ "$status" -eq 0 ]
+  [ "$output" = "age decode age::decrypt" ]
+}
+
 # --- age::decrypt ---
 
 @test "decrypt invokes age with the configured identity and emits plaintext" {

@@ -115,6 +115,12 @@ age::_install_use_existing() {
   logging::success "Using existing age key at $key_path"
 }
 
+# Claims the .age extension for home sync: a decode-tier transform handled by
+# age::decrypt directly.
+age::file_transforms() {
+  printf '%s\n' "age decode age::decrypt"
+}
+
 # age::decrypt FILE — decrypt FILE with the installed key, plaintext to stdout.
 # The decryption primitive; stdout output lets callers keep plaintext off disk.
 age::decrypt() {
