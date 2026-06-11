@@ -88,8 +88,8 @@ setup() {
 
 @test "diff calls logging::dry_run for a formula that would be installed" {
   mktest::stub_function input::command_exists "brew"
-  STUB_OUTPUT="jq" mktest::stub_function brew::_installed_formulae
-  mktest::stub_function brew "list" "--cask"
+  STUB_OUTPUT="jq" mktest::stub_function brew::_installed formula
+  mktest::stub_function brew::_installed cask
   mktest::stub_function logging::dry_run
   local brewfile="$BATS_TEST_TMPDIR/Brewfile"
   printf 'brew "git"\n' > "$brewfile"
@@ -99,8 +99,8 @@ setup() {
 
 @test "diff does not call logging::dry_run for a formula already installed" {
   mktest::stub_function input::command_exists "brew"
-  STUB_OUTPUT="git" mktest::stub_function brew::_installed_formulae
-  mktest::stub_function brew "list" "--cask"
+  STUB_OUTPUT="git" mktest::stub_function brew::_installed formula
+  mktest::stub_function brew::_installed cask
   mktest::stub_function logging::dry_run
   local brewfile="$BATS_TEST_TMPDIR/Brewfile"
   printf 'brew "git"\n' > "$brewfile"
@@ -110,8 +110,8 @@ setup() {
 
 @test "diff calls logging::dry_run for a cask that would be installed" {
   mktest::stub_function input::command_exists "brew"
-  STUB_OUTPUT="" mktest::stub_function brew::_installed_formulae
-  mktest::stub_function brew "list" "--cask"
+  STUB_OUTPUT="" mktest::stub_function brew::_installed formula
+  mktest::stub_function brew::_installed cask
   mktest::stub_function logging::dry_run
   local brewfile="$BATS_TEST_TMPDIR/Brewfile"
   printf 'cask "1password"\n' > "$brewfile"
@@ -121,8 +121,8 @@ setup() {
 
 @test "diff does not call logging::dry_run for a cask already installed" {
   mktest::stub_function input::command_exists "brew"
-  STUB_OUTPUT="" mktest::stub_function brew::_installed_formulae
-  STUB_OUTPUT="1password" mktest::stub_function brew "list" "--cask"
+  STUB_OUTPUT="" mktest::stub_function brew::_installed formula
+  STUB_OUTPUT="1password" mktest::stub_function brew::_installed cask
   mktest::stub_function logging::dry_run
   local brewfile="$BATS_TEST_TMPDIR/Brewfile"
   printf 'cask "1password"\n' > "$brewfile"
@@ -132,8 +132,8 @@ setup() {
 
 @test "diff ignores comment lines and produces no output for them" {
   mktest::stub_function input::command_exists "brew"
-  STUB_OUTPUT="" mktest::stub_function brew::_installed_formulae
-  mktest::stub_function brew "list" "--cask"
+  STUB_OUTPUT="" mktest::stub_function brew::_installed formula
+  mktest::stub_function brew::_installed cask
   mktest::stub_function logging::dry_run
   local brewfile="$BATS_TEST_TMPDIR/Brewfile"
   printf '# just a comment\n' > "$brewfile"

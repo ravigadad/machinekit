@@ -6,8 +6,10 @@ load "${BATS_TEST_DIRNAME}/../../test_helper"
 setup() {
   # shellcheck source=../../../lib/machinekit/brew.sh
   source "$MACHINEKIT_DIR/lib/machinekit/brew.sh"
-  _MK_BREW_FORMULAE_CACHED=0
-  _MK_BREW_FORMULAE_CACHE=""
+  _MK_BREW_FORMULA_CACHED=0
+  _MK_BREW_FORMULA_CACHE=""
+  _MK_BREW_CASK_CACHED=0
+  _MK_BREW_CASK_CACHE=""
   unset _MK_BREW_LOADED
 
   # Logging collaborators — allow-only; they are mechanism, not contract.
@@ -32,88 +34,116 @@ setup() {
 @test "bootstrap does not install when brew is already on PATH" {
   mktest::stub_function brew::_setup_path
   mktest::stub_function input::command_exists "brew"
-  mktest::stub_function brew::_install
+  mktest::stub_function brew::_install_homebrew
   brew::bootstrap
-  mktest::assert_stub_not_called brew::_install
+  mktest::assert_stub_not_called brew::_install_homebrew
 }
 
 @test "bootstrap installs when brew is not on PATH" {
   mktest::stub_function brew::_setup_path
   STUB_RETURN=1 mktest::stub_function input::command_exists "brew"
-  mktest::stub_function brew::_install
+  mktest::stub_function brew::_install_homebrew
   brew::bootstrap
-  mktest::assert_stub_called brew::_install
+  mktest::assert_stub_called brew::_install_homebrew
 }
 
-# --- brew::install_formula ---
+# --- brew::install_formula / install_cask (delegation) ---
 
-@test "install_formula fails with a clear error when homebrew is not installed" {
+@test "install_formula delegates to _install_pkg as a formula" {
+  mktest::stub_function brew::_install_pkg
+  brew::install_formula "git" --override-dry-run
+  mktest::assert_stub_called brew::_install_pkg "formula" "git" "--override-dry-run"
+}
+
+@test "install_cask delegates to _install_pkg as a cask" {
+  mktest::stub_function brew::_install_pkg
+  brew::install_cask "tailscale" --override-dry-run
+  mktest::assert_stub_called brew::_install_pkg "cask" "tailscale" "--override-dry-run"
+}
+
+# --- brew::_install_pkg ---
+
+@test "_install_pkg fails with a clear error when homebrew is not installed" {
   mktest::stub_function input::is_dry_run
   STUB_RETURN=1 mktest::stub_function input::command_exists "brew"
   STUB_EXIT=1 mktest::stub_function lifecycle::fail
-  run ! brew::install_formula "git"
+  run ! brew::_install_pkg formula "git"
   MATCH="not installed" mktest::assert_stub_called lifecycle::fail
 }
 
-@test "install_formula skips when formula is already installed" {
+@test "_install_pkg skips when the package is already installed" {
   mktest::stub_function input::is_dry_run
   mktest::stub_function input::command_exists "brew"
-  mktest::stub_function brew::is_formula_installed "git"
+  mktest::stub_function brew::_is_installed "formula" "git"
   mktest::stub_function brew "install" "git"
-  brew::install_formula "git"
+  brew::_install_pkg formula "git"
   mktest::assert_stub_not_called brew "install" "git"
 }
 
-@test "install_formula in dry-run reports a would-install message" {
+@test "_install_pkg in dry-run reports a would-install message" {
   mktest::stub_function input::is_dry_run
   mktest::stub_function input::command_exists "brew"
-  STUB_RETURN=1 mktest::stub_function brew::is_formula_installed "someformula"
+  STUB_RETURN=1 mktest::stub_function brew::_is_installed "formula" "someformula"
   mktest::stub_function logging::dry_run
-  brew::install_formula "someformula"
+  brew::_install_pkg formula "someformula"
   MATCH="someformula" mktest::assert_stub_called logging::dry_run
 }
 
-@test "install_formula calls brew install when formula is absent and not dry-run" {
+@test "_install_pkg runs 'brew install NAME' for an absent formula" {
   STUB_RETURN=1 mktest::stub_function input::is_dry_run
   mktest::stub_function input::command_exists "brew"
-  STUB_RETURN=1 mktest::stub_function brew::is_formula_installed "git"
+  STUB_RETURN=1 mktest::stub_function brew::_is_installed "formula" "git"
   mktest::stub_function brew "install" "git"
-  brew::install_formula "git"
+  brew::_install_pkg formula "git"
   mktest::assert_stub_called brew "install" "git"
 }
 
-@test "install_formula with --override-dry-run installs even in dry-run mode" {
+@test "_install_pkg adds --cask for an absent cask" {
+  STUB_RETURN=1 mktest::stub_function input::is_dry_run
+  mktest::stub_function input::command_exists "brew"
+  STUB_RETURN=1 mktest::stub_function brew::_is_installed "cask" "tailscale"
+  mktest::stub_function brew "install" "--cask" "tailscale"
+  brew::_install_pkg cask "tailscale"
+  mktest::assert_stub_called brew "install" "--cask" "tailscale"
+}
+
+@test "_install_pkg with --override-dry-run installs even in dry-run mode" {
   mktest::stub_function input::is_dry_run
   mktest::stub_function input::command_exists "brew"
-  STUB_RETURN=1 mktest::stub_function brew::is_formula_installed "git"
+  STUB_RETURN=1 mktest::stub_function brew::_is_installed "formula" "git"
   mktest::stub_function brew "install" "git"
-  brew::install_formula "git" --override-dry-run
+  brew::_install_pkg formula "git" --override-dry-run
   mktest::assert_stub_called brew "install" "git"
   mktest::assert_stub_not_called input::is_dry_run
 }
 
-@test "install_formula fails on an unknown option" {
+@test "_install_pkg fails on an unknown option" {
   mktest::stub_function input::is_dry_run
   STUB_EXIT=1 mktest::stub_function lifecycle::fail
-  run ! brew::install_formula "git" "--bad-flag"
+  run ! brew::_install_pkg formula "git" "--bad-flag"
   MATCH="unknown option" mktest::assert_stub_called lifecycle::fail
 }
 
-# --- brew::is_formula_installed ---
+# --- brew::_is_installed ---
 
-@test "is_formula_installed returns true for a formula in the list" {
-  STUB_OUTPUT="$(printf 'git\njq\nage')" mktest::stub_function brew::_installed_formulae
-  brew::is_formula_installed "jq"
+@test "_is_installed returns true for a name in the list" {
+  STUB_OUTPUT="$(printf 'git\njq\nage')" mktest::stub_function brew::_installed "formula"
+  brew::_is_installed formula "jq"
 }
 
-@test "is_formula_installed returns false for a formula not in the list" {
-  STUB_OUTPUT="$(printf 'git\njq')" mktest::stub_function brew::_installed_formulae
-  run ! brew::is_formula_installed "age"
+@test "_is_installed returns false for a name not in the list" {
+  STUB_OUTPUT="$(printf 'git\njq')" mktest::stub_function brew::_installed "formula"
+  run ! brew::_is_installed formula "age"
 }
 
-@test "is_formula_installed does not partial-match formula names" {
-  STUB_OUTPUT="$(printf 'git\njq-extras')" mktest::stub_function brew::_installed_formulae
-  run ! brew::is_formula_installed "jq"
+@test "_is_installed does not partial-match names" {
+  STUB_OUTPUT="$(printf 'git\njq-extras')" mktest::stub_function brew::_installed "formula"
+  run ! brew::_is_installed formula "jq"
+}
+
+@test "_is_installed checks the cask list for a cask" {
+  STUB_OUTPUT="$(printf 'tailscale\nfirefox')" mktest::stub_function brew::_installed "cask"
+  brew::_is_installed cask "tailscale"
 }
 
 # --- brew::_setup_path ---
@@ -122,63 +152,84 @@ setup() {
   brew::_setup_path
 }
 
-# --- brew::_install ---
+# --- brew::_bin ---
 
-@test "_install runs the installer with NONINTERACTIVE=1 when not interactive" {
+@test "_bin resolves the brew binary so sudo can find it" {
+  mktest::stub_function brew
+  run brew::_bin
+  [ "$output" = "brew" ]
+}
+
+# --- brew::_install_homebrew ---
+
+@test "_install_homebrew runs the installer with NONINTERACTIVE=1 when not interactive" {
   # shellcheck disable=SC2016
   STUB_OUTPUT='echo brew_curled:$NONINTERACTIVE' mktest::stub_function curl "-fsSL" "https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh"
   STUB_RETURN=1 mktest::stub_function input::is_interactive
   mktest::stub_function brew::_setup_path
   mktest::stub_function input::command_exists "brew"
-  run --separate-stderr brew::_install
+  run --separate-stderr brew::_install_homebrew
   [ "$status" -eq 0 ]
   [ "$output" = "brew_curled:1" ]
   mktest::assert_stub_called brew::_setup_path
 }
 
-@test "_install runs the installer without NONINTERACTIVE when interactive" {
+@test "_install_homebrew runs the installer without NONINTERACTIVE when interactive" {
   # shellcheck disable=SC2016
   STUB_OUTPUT='echo brew_curled:$NONINTERACTIVE' mktest::stub_function curl "-fsSL" "https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh"
   mktest::stub_function input::is_interactive
   mktest::stub_function brew::_setup_path
   mktest::stub_function input::command_exists "brew"
-  run --separate-stderr brew::_install
+  run --separate-stderr brew::_install_homebrew
   [ "$status" -eq 0 ]
   [ "$output" = "brew_curled:" ]
   mktest::assert_stub_called brew::_setup_path
 }
 
-@test "_install fails when brew is not found after installing" {
+@test "_install_homebrew fails when brew is not found after installing" {
   mktest::stub_function curl "-fsSL" "https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh"
   mktest::stub_function input::is_interactive
   mktest::stub_function brew::_setup_path
   STUB_RETURN=1 mktest::stub_function input::command_exists "brew"
   STUB_EXIT=1 mktest::stub_function lifecycle::fail
-  run ! brew::_install
+  run ! brew::_install_homebrew
   MATCH="not found" mktest::assert_stub_called lifecycle::fail
 }
 
-# --- brew::_installed_formulae ---
+# --- brew::_installed ---
 
-@test "_installed_formulae returns the list from brew list --formula" {
+@test "_installed formula returns the list from brew list --formula" {
   mktest::stub_function input::command_exists "brew"
   STUB_OUTPUT="$(printf 'git\njq\nage')" mktest::stub_function brew "list" "--formula"
-  result=$(brew::_installed_formulae)
+  result=$(brew::_installed formula)
   [ "$result" = "$(printf 'git\njq\nage')" ]
 }
 
-@test "_installed_formulae returns empty without caching when brew is not installed" {
+@test "_installed cask returns the list from brew list --cask" {
+  mktest::stub_function input::command_exists "brew"
+  STUB_OUTPUT="$(printf 'tailscale\nfirefox')" mktest::stub_function brew "list" "--cask"
+  result=$(brew::_installed cask)
+  [ "$result" = "$(printf 'tailscale\nfirefox')" ]
+}
+
+@test "_installed returns empty without caching when brew is not installed" {
   STUB_RETURN=1 mktest::stub_function input::command_exists "brew"
   mktest::stub_function brew "list" "--formula"
-  result=$(brew::_installed_formulae)
+  result=$(brew::_installed formula)
   [ -z "$result" ]
   mktest::assert_stub_not_called brew "list" "--formula"
 }
 
-@test "_installed_formulae calls brew only once across repeated calls" {
+@test "_installed caches per kind across repeated calls" {
   mktest::stub_function input::command_exists "brew"
   STUB_OUTPUT="git" mktest::stub_function brew "list" "--formula"
-  brew::_installed_formulae >/dev/null
-  brew::_installed_formulae >/dev/null
+  brew::_installed formula >/dev/null
+  brew::_installed formula >/dev/null
   TIMES=1 mktest::assert_stub_called brew "list" "--formula"
+}
+
+@test "_installed fails on an unknown kind" {
+  STUB_EXIT=1 mktest::stub_function lifecycle::fail
+  run ! brew::_installed bogus
+  MATCH="unknown kind" mktest::assert_stub_called lifecycle::fail
 }

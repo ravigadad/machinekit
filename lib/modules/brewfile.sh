@@ -43,8 +43,8 @@ brewfile::_diff() {
     return 0
   fi
 
-  installed_formulae=$(brew::_installed_formulae)
-  installed_casks=$(brew list --cask 2>/dev/null || true)
+  installed_formulae=$(brew::_installed formula)
+  installed_casks=$(brew::_installed cask)
 
   while IFS= read -r line; do
     line="${line%%#*}"
