@@ -20,3 +20,15 @@
 #
 # [module.age]
 # key_path = "~/.config/age/key.txt"  # default; override only if needed
+#
+# [module.tailscale]
+# # Omit `tag` on a user device (laptop): installs the client (GUI app on
+# # macOS); you sign in yourself.
+# # Set `tag` on a headless service device: installs the daemon and joins the
+# # tailnet itself using an age-encrypted OAuth secret. Requires the age module.
+# tag = "server"
+# # `tailnet` is your label for which tailnet's secret to use; omit it for the
+# # default tailnet. The secret lives in the blueprint-global secrets pool — a
+# # sibling of common/ and machine_types/, not inside either:
+# #   secrets/tailscale/<tailnet>.age
+# tailnet = "work"

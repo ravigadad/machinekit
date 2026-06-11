@@ -1,6 +1,5 @@
 # Brewfile.common — installed on every machine, in addition to the
-# prerequisite tools (chezmoi, mise, git, age) that `machinekit apply`
-# installs directly.
+# prerequisite tools that `machinekit apply` installs directly.
 
 # Add formulae and casks as you want them:
 #   brew "ripgrep"
