@@ -165,6 +165,12 @@ Local idempotent installs (`brew install`, `mise install`) do *not* require cons
 
 When consent is required and absent, machinekit exits with a clear error explaining what was attempted, where we looked for the input, and exactly how to provide it.
 
+**Config declares; consent authorizes — the config file is never a consent channel.** A value in `machinekit.toml` is declarative standing intent: desired state, committed to the blueprint and applied on *every* run, often authored by someone other than whoever runs `apply` today. Consent is the opposite — a *per-run* authorization for the irreversible act itself. The split is the one between *"what should be true?"* (config) and *"may I do the irreversible thing to make it true, on this machine, right now?"* (consent). If config counted as consent, merely running `apply` against a blueprint would silently perform every outward action the repo declares — exactly the surprise this rule prevents. So consent always comes from a per-run channel (flag, env var, or interactive prompt), never from config. The age module embodies the split: `module.age.key_path` is config (a parameter), but *generating* a key is gated on `--generate-age-key` / env / prompt; tailscale mirrors it (`tag`/`tailnet` are config, the join is gated on a per-run signal).
+
+**This is a discipline machinekit keeps in its own code, not a sandbox it enforces.** The rule governs first-party framework behavior; it is *not* enforced against blueprint-supplied code. Hooks run arbitrary shell with full privileges — a `post-apply` hook (or any `pre-apply` hook the framework later grows) can export an env var, call `context::set`, or simply perform the irreversible action directly, bypassing every gate. machinekit does not and will not police what a blueprint's own scripts do; the protection is real for the framework's actions and deliberately absent for blueprint-authored ones.
+
+That's coherent because of the trust model: **your blueprint is yours.** A blueprint is as trusted as your dotfiles or shell rc — you author it, you run it, you own what it does; running someone else's blueprint is running someone else's code, with the same caveats. In practice the blast radius is further bounded by encryption: a blueprint that depends on age-encrypted secrets generally can't even run to completion on an arbitrary machine without the owner's private key.
+
 ### Input resolution
 
 Every required input passes through the same resolution chain:
