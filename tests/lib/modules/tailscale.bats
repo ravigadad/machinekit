@@ -57,23 +57,52 @@ setup() {
 @test "install delegates to _install_cask when the device wants the macOS GUI app" {
   mktest::stub_function tailscale::_use_cask
   mktest::stub_function tailscale::_install_cask
+  mktest::stub_function tailscale::_install_linux
   mktest::stub_function brew::install_formula "tailscale"
   mktest::stub_function tailscale::_start_daemon
   tailscale::install
   mktest::assert_stub_called tailscale::_install_cask
+  mktest::assert_stub_not_called tailscale::_install_linux
   mktest::assert_stub_not_called brew::install_formula "tailscale"
   mktest::assert_stub_not_called tailscale::_start_daemon
 }
 
-@test "install uses the brew formula and starts the daemon otherwise (tagged, or any Linux device)" {
+@test "install on Linux delegates to the official-installer path" {
   STUB_RETURN=1 mktest::stub_function tailscale::_use_cask
-  mktest::stub_function tailscale::_install_cask
+  STUB_OUTPUT="linux" mktest::stub_function tailscale::_os_family
+  mktest::stub_function tailscale::_install_linux
   mktest::stub_function brew::install_formula "tailscale"
   mktest::stub_function tailscale::_start_daemon
   tailscale::install
+  mktest::assert_stub_called tailscale::_install_linux
+  mktest::assert_stub_not_called brew::install_formula "tailscale"
+  mktest::assert_stub_not_called tailscale::_start_daemon
+}
+
+@test "install on a tagged Mac installs the formula, then starts the daemon" {
+  STUB_RETURN=1 mktest::stub_function tailscale::_use_cask
+  STUB_OUTPUT="darwin" mktest::stub_function tailscale::_os_family
+  mktest::stub_function tailscale::_install_linux
+  mktest::stub_function brew::install_formula "tailscale"
+  STUB_RETURN=1 mktest::stub_function input::is_dry_run
+  mktest::stub_function tailscale::_start_daemon
+  tailscale::install
+  # Order is the contract: the daemon can't start a formula that isn't installed.
+  mktest::assert_stub_called_in_order brew::install_formula "tailscale"
+  mktest::assert_stub_called_in_order tailscale::_start_daemon
+  mktest::assert_stub_not_called tailscale::_install_linux
+}
+
+@test "install on a tagged Mac in dry-run installs the formula but reports instead of starting" {
+  STUB_RETURN=1 mktest::stub_function tailscale::_use_cask
+  STUB_OUTPUT="darwin" mktest::stub_function tailscale::_os_family
+  mktest::stub_function brew::install_formula "tailscale"
+  mktest::stub_function input::is_dry_run
+  mktest::stub_function tailscale::_start_daemon
+  tailscale::install
   mktest::assert_stub_called brew::install_formula "tailscale"
-  mktest::assert_stub_called tailscale::_start_daemon
-  mktest::assert_stub_not_called tailscale::_install_cask
+  mktest::assert_stub_not_called tailscale::_start_daemon
+  mktest::assert_stub_called logging::dry_run
 }
 
 # --- tailscale::_install_cask ---
@@ -88,6 +117,32 @@ setup() {
   STUB_RETURN=1 mktest::stub_function brew::install_cask "tailscale-app"
   tailscale::_install_cask
   mktest::assert_stub_called logging::warn
+}
+
+# --- tailscale::_install_linux ---
+
+@test "_install_linux runs the official installer when tailscale is absent" {
+  STUB_RETURN=1 mktest::stub_function input::command_exists "tailscale"
+  STUB_RETURN=1 mktest::stub_function input::is_dry_run
+  mktest::stub_function tailscale::_run_official_installer
+  tailscale::_install_linux
+  mktest::assert_stub_called tailscale::_run_official_installer
+}
+
+@test "_install_linux is a no-op when tailscale is already installed" {
+  mktest::stub_function input::command_exists "tailscale"
+  mktest::stub_function tailscale::_run_official_installer
+  tailscale::_install_linux
+  mktest::assert_stub_not_called tailscale::_run_official_installer
+}
+
+@test "_install_linux in dry-run reports without installing" {
+  STUB_RETURN=1 mktest::stub_function input::command_exists "tailscale"
+  mktest::stub_function input::is_dry_run
+  mktest::stub_function tailscale::_run_official_installer
+  tailscale::_install_linux
+  mktest::assert_stub_not_called tailscale::_run_official_installer
+  mktest::assert_stub_called logging::dry_run
 }
 
 # --- tailscale::_start_daemon ---

@@ -43,10 +43,19 @@ tailscale::install() {
   logging::step "tailscale install"
   if tailscale::_use_cask; then
     tailscale::_install_cask
-  else
-    brew::install_formula tailscale
-    tailscale::_start_daemon
+    return 0
   fi
+  if [ "$(tailscale::_os_family)" = "linux" ]; then
+    tailscale::_install_linux
+    return 0
+  fi
+  # macOS, tagged/headless: the brew formula daemon.
+  brew::install_formula tailscale
+  if input::is_dry_run; then
+    logging::dry_run "would start the tailscale system daemon"
+    return 0
+  fi
+  tailscale::_start_daemon
 }
 
 # The cask can fail on a fresh Mac until its system extension is approved
@@ -57,13 +66,37 @@ tailscale::_install_cask() {
     "tailscale: cask install failed. If it was the system-extension prompt, approve it in System Settings → Privacy & Security and re-run; otherwise see the error above."
 }
 
-# The formula installs tailscaled but leaves it stopped, and a headless server
-# has no GUI login to start it. `sudo brew services start` registers the system
-# LaunchDaemon (/Library/LaunchDaemons, RunAtLoad) so it comes up at boot with no
-# desktop session — a plain `brew services start` makes a session-only
-# LaunchAgent that never loads headless. Idempotent (exit 0 when already
-# started), so it runs unconditionally. The cask path leaves the daemon to the
-# GUI app.
+# Linux: tailscaled must run as root with a system service — it manages netfilter
+# (iptables/nft) and binds /var/run/tailscale, all of which fail unprivileged.
+# brew on Linux can't deliver that: it refuses to run under sudo, and a user
+# systemd unit runs tailscaled unprivileged, where it dies on permission errors.
+# Tailscale's official installer adds the distro repo, installs tailscaled, and
+# registers a proper root system service (started now and on boot) — the
+# canonical Linux install. It runs its own sudo for the package steps. A local
+# idempotent install, so no consent gate.
+tailscale::_install_linux() {
+  if input::command_exists tailscale; then
+    logging::debug "tailscale: already installed"
+    return 0
+  fi
+  if input::is_dry_run; then
+    logging::dry_run "would install tailscale via the official installer (tailscale.com/install.sh)"
+    return 0
+  fi
+  tailscale::_run_official_installer
+}
+
+tailscale::_run_official_installer() {
+  curl -fsSL https://tailscale.com/install.sh | sh
+}
+
+# macOS only — Linux uses the official installer's system service (see above). The
+# formula installs tailscaled stopped, and a headless Mac has no GUI login to
+# start it. `sudo brew services start` registers the system LaunchDaemon
+# (/Library/LaunchDaemons, RunAtLoad) so it comes up at boot with no desktop
+# session — a plain `brew services start` makes a session-only LaunchAgent that
+# never loads headless. Idempotent (exit 0 when already started). The cask path
+# leaves the daemon to the GUI app.
 tailscale::_start_daemon() {
   sudo "$(brew::_bin)" services start tailscale
 }
