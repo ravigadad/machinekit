@@ -21,6 +21,21 @@
 # [module.age]
 # key_path = "~/.config/age/key.txt"  # default; override only if needed
 #
+# [module.postgres]
+# # By default (no config) postgres manages the host's port-5432 instance,
+# # installing the latest major if none exists. To pin specific majors to
+# # specific ports, list them — every entry needs both a version and a port,
+# # and exactly one must be 5432 (the instance consumers use). machinekit
+# # installs whichever are missing and verifies the rest; it never changes the
+# # port of an already-installed cluster, so a request must include every
+# # installed version (matching its current port) and may add more.
+# [[module.postgres.versions]]
+# version = "18"
+# port = "5432"
+# [[module.postgres.versions]]
+# version = "17"
+# port = "5433"
+#
 # [module.tailscale]
 # # Omit `tag` on a user device (laptop): installs the client (GUI app on
 # # macOS); you sign in yourself.

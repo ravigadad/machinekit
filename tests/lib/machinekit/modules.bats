@@ -82,3 +82,22 @@ setup() {
   mktest::assert_stub_called foo_module::test
   mktest::assert_stub_called bar_module::test
 }
+
+# --- modules::capability_active ---
+
+@test "capability_active is true when an active module provides the capability" {
+  fake_runtime::provides() { printf 'container_manager\n'; }
+  STUB_OUTPUT="fake_runtime" mktest::stub_function context::get_array "modules.active"
+  modules::capability_active container_manager
+}
+
+@test "capability_active is false when an active provider offers a different capability" {
+  fake_runtime::provides() { printf 'something_else\n'; }
+  STUB_OUTPUT="fake_runtime" mktest::stub_function context::get_array "modules.active"
+  run ! modules::capability_active container_manager
+}
+
+@test "capability_active is false when no active module declares provides" {
+  STUB_OUTPUT="plain_module" mktest::stub_function context::get_array "modules.active"
+  run ! modules::capability_active container_manager
+}

@@ -48,3 +48,17 @@ modules::_call_function_per_module() {
     "${mod}::$1"
   done < <(context::get_array "modules.active")
 }
+
+# modules::capability_active CAPABILITY — true if any active module provides it.
+# The mechanism for a soft, optional dependency: a module that integrates with a
+# capability only when present (without `require`-ing it) asks here at run time.
+modules::capability_active() {
+  local capability="$1" mod provided
+  while IFS= read -r mod; do
+    declare -F "${mod}::provides" > /dev/null 2>&1 || continue
+    while IFS= read -r provided; do
+      [ "$provided" = "$capability" ] && return 0
+    done < <("${mod}::provides")
+  done < <(context::get_array "modules.active")
+  return 1
+}

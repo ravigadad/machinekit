@@ -53,3 +53,46 @@ setup() {
   [ "$status" -eq 0 ]
   [ -z "$output" ]
 }
+
+# --- container_manager::container_subnet ---
+
+@test "container_subnet returns the subnet of the existing machinekit network" {
+  mktest::stub_function container_manager::_docker "network" "inspect" "machinekit"
+  STUB_OUTPUT="172.30.0.0/16" mktest::stub_function container_manager::_docker \
+    "network" "inspect" "machinekit" "--format" "{{ (index .IPAM.Config 0).Subnet }}"
+  run container_manager::container_subnet
+  [ "$output" = "172.30.0.0/16" ]
+}
+
+@test "container_subnet creates the machinekit network when absent, then returns its subnet" {
+  STUB_RETURN=1 mktest::stub_function container_manager::_docker "network" "inspect" "machinekit"
+  mktest::stub_function container_manager::_docker "network" "create" "machinekit"
+  STUB_OUTPUT="172.31.0.0/16" mktest::stub_function container_manager::_docker \
+    "network" "inspect" "machinekit" "--format" "{{ (index .IPAM.Config 0).Subnet }}"
+  run container_manager::container_subnet
+  [ "$output" = "172.31.0.0/16" ]
+  mktest::assert_stub_called container_manager::_docker "network" "create" "machinekit"
+}
+
+# --- container_manager::host_alias ---
+
+@test "host_alias returns the container-to-host DNS name" {
+  run container_manager::host_alias
+  [ "$output" = "host.docker.internal" ]
+}
+
+# --- container_manager::_docker ---
+
+@test "_docker runs docker under sudo on Linux" {
+  STUB_OUTPUT="linux" mktest::stub_function context::get "os.family"
+  mktest::stub_function sudo "docker" "network" "ls"
+  container_manager::_docker network ls
+  mktest::assert_stub_called sudo "docker" "network" "ls"
+}
+
+@test "_docker runs docker directly on macOS" {
+  STUB_OUTPUT="darwin" mktest::stub_function context::get "os.family"
+  mktest::stub_function docker "network" "ls"
+  container_manager::_docker network ls
+  mktest::assert_stub_called docker "network" "ls"
+}

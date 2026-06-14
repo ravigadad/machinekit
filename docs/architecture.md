@@ -127,7 +127,9 @@ There are two kinds of modules in machinekit's module system:
 
 **Capabilities** are the two implemented abstract slots: `tool_version_manager` (satisfied by `mise` by default) and `container_manager` (satisfied by `orbstack` on macOS, `docker_ce` on Linux). Users list a capability in `modules = [...]` and the resolver substitutes the default satisfier. Listing a concrete satisfier explicitly overrides the default — that's how someone says "use Docker, not OrbStack." If two satisfiers for the same capability end up in the active set, the resolver hard-fails unless `allow_multiple_satisfiers = true` is set.
 
-> Status: implemented. `::install`, `::preflight`, `::requires`, and `::provides` conventions are live. `lib/modules/capabilities/` holds `tool_version_manager` and `container_manager`. `resolver.sh` handles topological sort, capability → default-satisfier substitution, and post-resolution conflict detection.
+**Soft (optional) dependencies.** `::requires` is a *hard* dependency — it pulls the capability into the active set and constrains install order. A module can also *opt into* a capability only when it happens to be present, without requiring it, by asking `modules::capability_active <capability>` at run time (it scans the active set for a `::provides` match). Example: `postgres` opens itself to containers in `post_apply` if a `container_manager` is active, but a plain database host that lists no container runtime stays localhost-only — postgres never drags a runtime in. Use a hard `::requires` when the module can't function without the capability; use the soft check when the integration is a bonus.
+
+> Status: implemented. `::install`, `::preflight`, `::requires`, and `::provides` conventions are live, plus `modules::capability_active` for soft dependencies. `lib/modules/capabilities/` holds `tool_version_manager` and `container_manager`. `resolver.sh` handles topological sort, capability → default-satisfier substitution, and post-resolution conflict detection.
 
 ### Base modules
 
