@@ -9,6 +9,7 @@ setup() {
 
   # Allow-only logging collaborators — logging is mechanism, not contract.
   mktest::stub_function logging::step
+  mktest::stub_function logging::debug
   mktest::stub_function logging::info
   mktest::stub_function logging::warn
   mktest::stub_function logging::success
@@ -259,6 +260,7 @@ setup() {
 
 @test "_up brings tailscale up off-argv via file:/dev/stdin with the advertised tag" {
   STUB_OUTPUT="/opt/homebrew/bin/tailscale" mktest::stub_function tailscale::_bin
+  STUB_OUTPUT="" mktest::stub_function tailscale::_hostname
   mktest::stub_function sudo
   tailscale::_up "fake-oauth-secret" "server"
   # The secret is NOT among these args — it rides stdin (asserted below).
@@ -266,8 +268,18 @@ setup() {
     "--auth-key" "file:/dev/stdin" "--advertise-tags" "tag:server"
 }
 
+@test "_up pins the hostname when one is configured" {
+  STUB_OUTPUT="/opt/homebrew/bin/tailscale" mktest::stub_function tailscale::_bin
+  STUB_OUTPUT="memory-server" mktest::stub_function tailscale::_hostname
+  mktest::stub_function sudo
+  tailscale::_up "fake-oauth-secret" "server"
+  mktest::assert_stub_called sudo "/opt/homebrew/bin/tailscale" "up" \
+    "--auth-key" "file:/dev/stdin" "--advertise-tags" "tag:server" "--hostname=memory-server"
+}
+
 @test "_up passes the secret on stdin, never as an argument" {
   STUB_OUTPUT="/opt/homebrew/bin/tailscale" mktest::stub_function tailscale::_bin
+  STUB_OUTPUT="" mktest::stub_function tailscale::_hostname
   # The stub framework records args, not stdin; capture stdin to a file instead.
   local capture; capture=$(mktemp)
   sudo() { cat > "$capture"; }
@@ -296,6 +308,14 @@ setup() {
   STUB_OUTPUT="poomba" mktest::stub_function config::get "module.tailscale.tag" --default ""
   run tailscale::_tag
   [ "$output" = "poomba" ]
+}
+
+# --- tailscale::_hostname ---
+
+@test "_hostname reads module.tailscale.hostname from config, defaulting to empty" {
+  STUB_OUTPUT="memory-server" mktest::stub_function config::get "module.tailscale.hostname" --default ""
+  run tailscale::_hostname
+  [ "$output" = "memory-server" ]
 }
 
 # --- tailscale::_os_family ---

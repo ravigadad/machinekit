@@ -162,10 +162,19 @@ tailscale::_join() {
 # ?ephemeral=false makes the OAuth-minted device persistent (the param defaults
 # to true); confirmed end-to-end against a real OAuth client secret. It is parsed
 # only for OAuth secrets — appending it to a plain auth key invalidates the key.
+#
+# --hostname pins the device's tailnet (MagicDNS) name when configured, so other
+# machines can address it by a known name (e.g. a hindsight_integration
+# server_host) without a manual rename. Only takes effect here, on the join
+# machinekit performs for tagged devices; an untagged device is named by whoever
+# signs it in.
 tailscale::_up() {
-  local secret="$1" tag="$2"
+  local secret="$1" tag="$2" hostname
+  hostname="$(tailscale::_hostname)"
+  local args=(up --auth-key file:/dev/stdin --advertise-tags "tag:${tag}")
+  [ -n "$hostname" ] && args+=("--hostname=${hostname}")
   printf '%s' "${secret}?ephemeral=false" \
-    | sudo "$(tailscale::_bin)" up --auth-key file:/dev/stdin --advertise-tags "tag:${tag}"
+    | sudo "$(tailscale::_bin)" "${args[@]}"
 }
 
 tailscale::_bin() {
@@ -178,6 +187,13 @@ tailscale::_is_connected() {
 
 tailscale::_tag() {
   config::get "module.tailscale.tag" --default ""
+}
+
+# Optional pinned tailnet (MagicDNS) hostname for a machinekit-joined device. A
+# consumer addresses this device by this name (e.g. hindsight_integration's
+# server_host). Empty → Tailscale derives the name from the OS hostname.
+tailscale::_hostname() {
+  config::get "module.tailscale.hostname" --default ""
 }
 
 tailscale::_os_family() {

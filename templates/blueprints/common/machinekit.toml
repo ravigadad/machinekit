@@ -42,6 +42,11 @@
 # # Set `tag` on a headless service device: installs the daemon and joins the
 # # tailnet itself using an age-encrypted OAuth secret. Requires the age module.
 # tag = "server"
+# # `hostname` pins this device's tailnet (MagicDNS) name when machinekit joins it
+# # (tagged devices only). Set it to the name other machines will use to reach
+# # this box — e.g. a memory server's `hostname` here matches the clients'
+# # [module.hindsight_integration] server_host. Omit to keep the OS hostname.
+# hostname = "memory-server"
 # # `tailnet` is your label for which tailnet's secret to use; omit it for the
 # # default tailnet. The secret lives in the blueprint-global secrets pool — a
 # # sibling of common/ and machine_types/, not inside either:
