@@ -17,6 +17,9 @@ modules::dir() {
 
 # Source all module files once. Idempotent via _MK_MODULES_SOURCED guard.
 # Called by the resolver when it needs to discover capability satisfiers.
+#
+# Only top-level *.sh are auto-sourced as modules (plus capability satisfiers in
+# capabilities/). A module that spans several files sources them itself.
 modules::source_all() {
   [ -n "${_MK_MODULES_SOURCED:-}" ] && return 0
   _MK_MODULES_SOURCED=1
