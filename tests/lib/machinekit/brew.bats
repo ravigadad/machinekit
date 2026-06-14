@@ -124,6 +124,45 @@ setup() {
   MATCH="unknown option" mktest::assert_stub_called lifecycle::fail
 }
 
+@test "_install_pkg invalidates the formula cache after a real install" {
+  STUB_RETURN=1 mktest::stub_function input::is_dry_run
+  mktest::stub_function input::command_exists "brew"
+  STUB_RETURN=1 mktest::stub_function brew::_is_installed "formula" "git"
+  mktest::stub_function brew "install" "git"
+  _MK_BREW_FORMULA_CACHED=1
+  brew::_install_pkg formula "git"
+  [ "$_MK_BREW_FORMULA_CACHED" = "0" ]
+}
+
+@test "_install_pkg invalidates the cask cache after a real install" {
+  STUB_RETURN=1 mktest::stub_function input::is_dry_run
+  mktest::stub_function input::command_exists "brew"
+  STUB_RETURN=1 mktest::stub_function brew::_is_installed "cask" "some-app"
+  mktest::stub_function brew "install" "--cask" "some-app"
+  _MK_BREW_CASK_CACHED=1
+  brew::_install_pkg cask "some-app"
+  [ "$_MK_BREW_CASK_CACHED" = "0" ]
+}
+
+@test "_install_pkg leaves the cache intact when the package is already installed" {
+  mktest::stub_function input::is_dry_run
+  mktest::stub_function input::command_exists "brew"
+  mktest::stub_function brew::_is_installed "formula" "git"
+  _MK_BREW_FORMULA_CACHED=1
+  brew::_install_pkg formula "git"
+  [ "$_MK_BREW_FORMULA_CACHED" = "1" ]
+}
+
+@test "_install_pkg leaves the cache intact in dry-run" {
+  mktest::stub_function input::is_dry_run
+  mktest::stub_function input::command_exists "brew"
+  STUB_RETURN=1 mktest::stub_function brew::_is_installed "formula" "someformula"
+  mktest::stub_function logging::dry_run
+  _MK_BREW_FORMULA_CACHED=1
+  brew::_install_pkg formula "someformula"
+  [ "$_MK_BREW_FORMULA_CACHED" = "1" ]
+}
+
 # --- brew::_is_installed ---
 
 @test "_is_installed returns true for a name in the list" {

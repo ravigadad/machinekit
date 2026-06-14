@@ -46,10 +46,24 @@ brew::_install_pkg() {
   elif [ "$kind" = cask ]; then
     logging::info "brew install --cask $name"
     brew install --cask "$name"
+    brew::_invalidate_installed "$kind"
   else
     logging::info "brew install $name"
     brew install "$name"
+    brew::_invalidate_installed "$kind"
   fi
+}
+
+# A real install changes what `brew list` reports, but the per-kind cache was
+# warmed before it ran. Drop the cache so the next query re-fetches — otherwise
+# same-run introspection (e.g. "is the formula we just installed present?", which
+# postgres::introspect::instance_version depends on) reads a stale, pre-install
+# list and silently finds nothing.
+brew::_invalidate_installed() {
+  case "$1" in
+    formula) _MK_BREW_FORMULA_CACHED=0 ;;
+    cask)    _MK_BREW_CASK_CACHED=0 ;;
+  esac
 }
 
 # brew::_is_installed KIND NAME — is the named formula/cask already present?
