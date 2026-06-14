@@ -45,12 +45,25 @@ brew::_install_pkg() {
     logging::dry_run "would install ($kind): $name"
   elif [ "$kind" = cask ]; then
     logging::info "brew install --cask $name"
-    brew install --cask "$name"
+    brew::_run_install --cask "$name"
     brew::_invalidate_installed "$kind"
   else
     logging::info "brew install $name"
-    brew install "$name"
+    brew::_run_install "$name"
     brew::_invalidate_installed "$kind"
+  fi
+}
+
+# Runs `brew install` with the interactivity machinekit is running in, mirroring
+# the Homebrew bootstrap's mode-matching. In non-interactive mode HOMEBREW_NO_ASK
+# suppresses the install-plan confirmation prompt Homebrew 6.0 made the default
+# (it stops on transitive deps and waits for y/n, which would hang). Interactive
+# runs leave it on, so the user can see and answer the plan.
+brew::_run_install() {
+  if input::is_interactive >/dev/null; then
+    brew install "$@"
+  else
+    HOMEBREW_NO_ASK=1 brew install "$@"
   fi
 }
 

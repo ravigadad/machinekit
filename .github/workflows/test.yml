@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: [main]
 
+# Homebrew 6.0 made install-plan confirmation ("proceed? [y/n]") the default,
+# which hangs a non-interactive runner the moment a formula pulls in deps.
+env:
+  HOMEBREW_NO_ASK: "1"
+
 jobs:
   bats:
     runs-on: ubuntu-latest

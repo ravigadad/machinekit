@@ -75,9 +75,9 @@ setup() {
   mktest::stub_function input::is_dry_run
   mktest::stub_function input::command_exists "brew"
   mktest::stub_function brew::_is_installed "formula" "git"
-  mktest::stub_function brew "install" "git"
+  mktest::stub_function brew::_run_install "git"
   brew::_install_pkg formula "git"
-  mktest::assert_stub_not_called brew "install" "git"
+  mktest::assert_stub_not_called brew::_run_install "git"
 }
 
 @test "_install_pkg in dry-run reports a would-install message" {
@@ -89,31 +89,31 @@ setup() {
   MATCH="someformula" mktest::assert_stub_called logging::dry_run
 }
 
-@test "_install_pkg runs 'brew install NAME' for an absent formula" {
+@test "_install_pkg installs an absent formula via _run_install" {
   STUB_RETURN=1 mktest::stub_function input::is_dry_run
   mktest::stub_function input::command_exists "brew"
   STUB_RETURN=1 mktest::stub_function brew::_is_installed "formula" "git"
-  mktest::stub_function brew "install" "git"
+  mktest::stub_function brew::_run_install "git"
   brew::_install_pkg formula "git"
-  mktest::assert_stub_called brew "install" "git"
+  mktest::assert_stub_called brew::_run_install "git"
 }
 
-@test "_install_pkg adds --cask for an absent cask" {
+@test "_install_pkg installs an absent cask with --cask via _run_install" {
   STUB_RETURN=1 mktest::stub_function input::is_dry_run
   mktest::stub_function input::command_exists "brew"
   STUB_RETURN=1 mktest::stub_function brew::_is_installed "cask" "tailscale"
-  mktest::stub_function brew "install" "--cask" "tailscale"
+  mktest::stub_function brew::_run_install "--cask" "tailscale"
   brew::_install_pkg cask "tailscale"
-  mktest::assert_stub_called brew "install" "--cask" "tailscale"
+  mktest::assert_stub_called brew::_run_install "--cask" "tailscale"
 }
 
 @test "_install_pkg with --override-dry-run installs even in dry-run mode" {
   mktest::stub_function input::is_dry_run
   mktest::stub_function input::command_exists "brew"
   STUB_RETURN=1 mktest::stub_function brew::_is_installed "formula" "git"
-  mktest::stub_function brew "install" "git"
+  mktest::stub_function brew::_run_install "git"
   brew::_install_pkg formula "git" --override-dry-run
-  mktest::assert_stub_called brew "install" "git"
+  mktest::assert_stub_called brew::_run_install "git"
   mktest::assert_stub_not_called input::is_dry_run
 }
 
@@ -128,7 +128,7 @@ setup() {
   STUB_RETURN=1 mktest::stub_function input::is_dry_run
   mktest::stub_function input::command_exists "brew"
   STUB_RETURN=1 mktest::stub_function brew::_is_installed "formula" "git"
-  mktest::stub_function brew "install" "git"
+  mktest::stub_function brew::_run_install "git"
   _MK_BREW_FORMULA_CACHED=1
   brew::_install_pkg formula "git"
   [ "$_MK_BREW_FORMULA_CACHED" = "0" ]
@@ -138,7 +138,7 @@ setup() {
   STUB_RETURN=1 mktest::stub_function input::is_dry_run
   mktest::stub_function input::command_exists "brew"
   STUB_RETURN=1 mktest::stub_function brew::_is_installed "cask" "some-app"
-  mktest::stub_function brew "install" "--cask" "some-app"
+  mktest::stub_function brew::_run_install "--cask" "some-app"
   _MK_BREW_CASK_CACHED=1
   brew::_install_pkg cask "some-app"
   [ "$_MK_BREW_CASK_CACHED" = "0" ]
@@ -161,6 +161,26 @@ setup() {
   _MK_BREW_FORMULA_CACHED=1
   brew::_install_pkg formula "someformula"
   [ "$_MK_BREW_FORMULA_CACHED" = "1" ]
+}
+
+# --- brew::_run_install ---
+
+@test "_run_install in interactive mode installs without HOMEBREW_NO_ASK" {
+  mktest::stub_function input::is_interactive
+  unset HOMEBREW_NO_ASK
+  # The stub framework records args, not env; capture both via a fake brew.
+  local capture; capture=$(mktemp)
+  brew() { printf '%s|%s' "${HOMEBREW_NO_ASK:-unset}" "$*" > "$capture"; }
+  brew::_run_install git
+  [ "$(cat "$capture")" = "unset|install git" ]
+}
+
+@test "_run_install in non-interactive mode installs with HOMEBREW_NO_ASK=1" {
+  STUB_RETURN=1 mktest::stub_function input::is_interactive
+  local capture; capture=$(mktemp)
+  brew() { printf '%s|%s' "${HOMEBREW_NO_ASK:-unset}" "$*" > "$capture"; }
+  brew::_run_install --cask some-app
+  [ "$(cat "$capture")" = "1|install --cask some-app" ]
 }
 
 # --- brew::start_service / brew::restart_service ---
