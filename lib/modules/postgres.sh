@@ -88,21 +88,22 @@ postgres::ensure_extension() {
   postgres::_psql_exec "$db" -c "CREATE EXTENSION IF NOT EXISTS \"$ext\""
 }
 
-# Create-only: an existing role is left untouched (password rotation is out of
-# scope). The password is a local-DB credential that also lives in the consumer's
-# on-disk env file, so its brief presence on the psql argv is not a new exposure.
+# Ensures a LOGIN role exists with the given password. Converges rather than
+# skipping: an existing role's password is updated to match, so a password
+# argument is never silently ignored.
 postgres::ensure_role() {
   local name="$1" password="$2"
   if input::is_dry_run; then
-    logging::dry_run "would ensure role $name exists"
+    logging::dry_run "would ensure role $name exists with the given password"
     return 0
   fi
   if postgres::_role_exists "$name"; then
-    logging::debug "postgres: role $name already exists"
-    return 0
+    postgres::_psql_exec postgres -c "ALTER ROLE \"$name\" WITH LOGIN PASSWORD '$password'"
+    logging::debug "postgres: updated role $name password"
+  else
+    postgres::_psql_exec postgres -c "CREATE ROLE \"$name\" WITH LOGIN PASSWORD '$password'"
+    logging::success "postgres: created role $name."
   fi
-  postgres::_psql_exec postgres -c "CREATE ROLE \"$name\" WITH LOGIN PASSWORD '$password'"
-  logging::success "postgres: created role $name."
 }
 
 postgres::_install_requested() {

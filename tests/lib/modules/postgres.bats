@@ -158,12 +158,14 @@ setup() {
   mktest::assert_stub_called logging::dry_run
 }
 
-@test "ensure_role is a no-op when the role already exists" {
+@test "ensure_role updates the password when the role already exists" {
   STUB_RETURN=1 mktest::stub_function input::is_dry_run
   mktest::stub_function postgres::_role_exists "someuser"
-  mktest::stub_function postgres::_psql_exec
+  mktest::stub_function postgres::_psql_exec \
+    "postgres" "-c" "ALTER ROLE \"someuser\" WITH LOGIN PASSWORD 'somepass'"
   postgres::ensure_role "someuser" "somepass"
-  mktest::assert_stub_not_called postgres::_psql_exec
+  mktest::assert_stub_called postgres::_psql_exec \
+    "postgres" "-c" "ALTER ROLE \"someuser\" WITH LOGIN PASSWORD 'somepass'"
 }
 
 @test "ensure_role creates a login role with the password when missing" {
