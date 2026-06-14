@@ -32,18 +32,22 @@ setup() {
   mktest::stub_function preflight::resolve_machine_type
   mktest::stub_function preflight::resolve_active_modules
   mktest::stub_function home::transforms::register_from_modules
+  mktest::stub_function home::staging::build
   mktest::stub_function modules::run_preflights
   preflight::run
-  mktest::assert_stub_called system::detect
-  mktest::assert_stub_called blueprints::fetch
-  mktest::assert_stub_called config::load
-  mktest::assert_stub_called preflight::resolve_machine_type
-  mktest::assert_stub_called preflight::resolve_active_modules
-  mktest::assert_stub_called home::transforms::register_from_modules
-  mktest::assert_stub_called modules::run_preflights
-  # The "transforms" registry is built from the active modules, so it must run after they're set.
+  # preflight::run is an ordered pipeline — each step consumes earlier output:
+  # config reads the fetched blueprint and the resolved machine type; the active
+  # module set comes from config; the transform registry and the staging tree are
+  # each built from that set; and the module preflights query the staging tree
+  # (via will_exist), so it must be built before they run.
+  mktest::assert_stub_called_in_order system::detect
+  mktest::assert_stub_called_in_order blueprints::fetch
+  mktest::assert_stub_called_in_order preflight::resolve_machine_type
+  mktest::assert_stub_called_in_order config::load
   mktest::assert_stub_called_in_order preflight::resolve_active_modules
   mktest::assert_stub_called_in_order home::transforms::register_from_modules
+  mktest::assert_stub_called_in_order home::staging::build
+  mktest::assert_stub_called_in_order modules::run_preflights
 }
 
 # --- preflight::resolve_machine_type ---

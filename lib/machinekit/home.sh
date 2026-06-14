@@ -21,13 +21,39 @@ _MK_HOME_IS_PRIVATE=0
 
 # --- Public API ---
 
+# The staging dir is built in preflight (so modules can query it via will_exist
+# before anything is installed); sync only applies it.
 home::sync() {
-  home::staging::build
   if input::is_dry_run; then
     home::dry_run::show_diff
     return 0
   fi
   home::_apply
+}
+
+# home::will_exist DEST_REL — true if DEST_REL will exist under $HOME after sync.
+# Lets a module preflight depend on a home file by its clean destination path,
+# not the blueprint's private_/.age encoding. Precondition: staging is built.
+home::will_exist() {
+  local dest_rel="$1"
+  [ -e "$HOME/$dest_rel" ] && return 0
+
+  local staging ignore_file src src_rel
+  staging="$(home::staging::dir)"
+
+  # An mkignored destination is never written — answer before walking the tree.
+  ignore_file="$staging/.mkignore"
+  if [ -f "$ignore_file" ] && grep -qxF "$dest_rel" "$ignore_file" 2>/dev/null; then
+    return 1
+  fi
+
+  while IFS= read -r src; do
+    src_rel="${src#"$staging"/}"
+    home::_decode_path "$src_rel"
+    home::transforms::resolve "$_MK_HOME_DEST_REL"
+    [ "$_MK_HOME_TRANSFORM_DEST" = "$dest_rel" ] && return 0
+  done < <(find "$staging" -type f)
+  return 1
 }
 
 # --- _apply and helpers ---

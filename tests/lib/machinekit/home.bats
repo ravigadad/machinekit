@@ -35,26 +35,75 @@ setup() {
 
 # --- home::sync ---
 
-@test "sync in dry-run calls dry_run::show_diff and not _apply" {
+@test "sync in dry-run shows the diff and does not apply" {
   mktest::stub_function input::is_dry_run
-  mktest::stub_function home::staging::build
   mktest::stub_function home::dry_run::show_diff
   mktest::stub_function home::_apply
   home::sync
-  mktest::assert_stub_called_in_order home::staging::build
-  mktest::assert_stub_called_in_order home::dry_run::show_diff
+  mktest::assert_stub_called home::dry_run::show_diff
   mktest::assert_stub_not_called home::_apply
 }
 
-@test "sync in real mode calls staging::build then _apply" {
+@test "sync in real mode applies the staging tree" {
   STUB_RETURN=1 mktest::stub_function input::is_dry_run
-  mktest::stub_function home::staging::build
   mktest::stub_function home::dry_run::show_diff
   mktest::stub_function home::_apply
   home::sync
-  mktest::assert_stub_called_in_order home::staging::build
-  mktest::assert_stub_called_in_order home::_apply
+  mktest::assert_stub_called home::_apply
   mktest::assert_stub_not_called home::dry_run::show_diff
+}
+
+# --- home::will_exist ---
+
+@test "will_exist is true when the file already exists under HOME (sync never removes)" {
+  export HOME="$BATS_TEST_TMPDIR/home"
+  mkdir -p "$HOME/.config"
+  : > "$HOME/.config/already_there"
+  # Literal existence short-circuits before any staging lookup.
+  home::will_exist ".config/already_there"
+}
+
+@test "will_exist is true when a staged file maps to the queried destination" {
+  export HOME="$BATS_TEST_TMPDIR/home"
+  mkdir -p "$HOME"
+  local staging="$BATS_TEST_TMPDIR/staging"
+  mkdir -p "$staging"
+  : > "$staging/staged_file"
+  STUB_OUTPUT="$staging" mktest::stub_function home::staging::dir
+  # Fake, deterministic mapping derived from the input — so a match can only
+  # happen if will_exist actually runs the staged file through decode → resolve.
+  # The mappings are obviously not the real addressing/transform rules.
+  home::_decode_path()       { _MK_HOME_DEST_REL="decoded:$1"; }
+  home::transforms::resolve() { _MK_HOME_TRANSFORM_DEST="resolved:$1"; }
+  home::will_exist "resolved:decoded:staged_file"
+}
+
+@test "will_exist is false when no staged file maps to the queried destination" {
+  export HOME="$BATS_TEST_TMPDIR/home"
+  mkdir -p "$HOME"
+  local staging="$BATS_TEST_TMPDIR/staging"
+  mkdir -p "$staging"
+  : > "$staging/staged_file"
+  STUB_OUTPUT="$staging" mktest::stub_function home::staging::dir
+  home::_decode_path()       { _MK_HOME_DEST_REL="decoded:$1"; }
+  home::transforms::resolve() { _MK_HOME_TRANSFORM_DEST="resolved:$1"; }
+  # staged_file maps to resolved:decoded:staged_file, not the queried path.
+  run ! home::will_exist "not_the_staged_file"
+}
+
+@test "will_exist is false when the queried destination is mkignored" {
+  export HOME="$BATS_TEST_TMPDIR/home"
+  mkdir -p "$HOME"
+  local staging="$BATS_TEST_TMPDIR/staging"
+  mkdir -p "$staging"
+  : > "$staging/staged_file"
+  STUB_OUTPUT="$staging" mktest::stub_function home::staging::dir
+  home::_decode_path()       { _MK_HOME_DEST_REL="decoded:$1"; }
+  home::transforms::resolve() { _MK_HOME_TRANSFORM_DEST="resolved:$1"; }
+  # The staged file *would* map to the query, but mkignore suppresses it — so
+  # dropping the mkignore check would flip this into a (wrong) match.
+  printf 'resolved:decoded:staged_file\n' > "$staging/.mkignore"
+  run ! home::will_exist "resolved:decoded:staged_file"
 }
 
 # --- home::_apply ---
@@ -455,4 +504,3 @@ setup() {
   home::_show_conflict_diff "the-source" "the-dest"
   mktest::assert_stub_not_called less
 }
-

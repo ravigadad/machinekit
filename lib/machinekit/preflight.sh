@@ -2,8 +2,10 @@
 # Preflight orchestration.
 #
 # Resolves user inputs into context, fetches the blueprints into the local
-# cache, then calls preflight on each active module so modules can fail
-# fast on missing config before any changes happen.
+# cache, builds the home staging tree, then calls preflight on each active
+# module so modules can fail fast on missing config before any changes happen.
+# Staging is built here (not in home::sync) so a module's preflight can ask
+# home::will_exist whether a home file it depends on is going to be there.
 #
 # Precondition: jq must be on PATH (the data layer uses it).
 [ -n "${_MK_PREFLIGHT_LOADED:-}" ] && return 0
@@ -18,6 +20,7 @@ preflight::run() {
   config::load
   preflight::resolve_active_modules
   home::transforms::register_from_modules
+  home::staging::build
 
   modules::run_preflights
 
