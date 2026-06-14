@@ -66,6 +66,29 @@ brew::_invalidate_installed() {
   esac
 }
 
+# Start/restart a formula's background service so it survives with no interactive
+# session. darwin: `sudo brew services` registers a system LaunchDaemon (a plain
+# user invocation makes a GUI-session agent that never loads headless). linux:
+# brew refuses to run under sudo (it can't fetch the formula API as root), so run
+# brew as the invoking user and enable lingering — which keeps the user's systemd
+# service alive across logout and reboot, the headless equivalent of the mac
+# LaunchDaemon. Both are local-idempotent, so no consent gate.
+brew::start_service()   { brew::_service start   "$1"; }
+brew::restart_service() { brew::_service restart "$1"; }
+
+brew::_service() {
+  local action="$1" formula="$2" family
+  family="$(context::get os.family)"
+  case "$family" in
+    darwin) sudo "$(brew::_bin)" services "$action" "$formula" ;;
+    linux)
+      sudo loginctl enable-linger "$(id -un)"
+      "$(brew::_bin)" services "$action" "$formula"
+      ;;
+    *) lifecycle::fail "brew::_service: unsupported os.family '$family'" ;;
+  esac
+}
+
 # brew::_is_installed KIND NAME — is the named formula/cask already present?
 brew::_is_installed() {
   local kind="$1" name="$2"

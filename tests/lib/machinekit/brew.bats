@@ -163,6 +163,54 @@ setup() {
   [ "$_MK_BREW_FORMULA_CACHED" = "1" ]
 }
 
+# --- brew::start_service / brew::restart_service ---
+
+@test "start_service on darwin starts a system service via sudo brew services" {
+  STUB_OUTPUT="darwin" mktest::stub_function context::get "os.family"
+  STUB_OUTPUT="/opt/homebrew/bin/brew" mktest::stub_function brew::_bin
+  mktest::stub_function sudo
+  brew::start_service postgresql@18
+  mktest::assert_stub_called sudo "/opt/homebrew/bin/brew" "services" "start" "postgresql@18"
+}
+
+@test "start_service on linux runs brew as the user (not sudo) and enables lingering" {
+  STUB_OUTPUT="linux" mktest::stub_function context::get "os.family"
+  STUB_OUTPUT="admin" mktest::stub_function id "-un"
+  STUB_OUTPUT="fake_brew" mktest::stub_function brew::_bin
+  mktest::stub_function sudo
+  mktest::stub_function fake_brew "services" "start" "postgresql@18"
+  brew::start_service postgresql@18
+  mktest::assert_stub_called fake_brew "services" "start" "postgresql@18"
+  mktest::assert_stub_called sudo "loginctl" "enable-linger" "admin"
+  mktest::assert_stub_not_called sudo "fake_brew" "services" "start" "postgresql@18"
+}
+
+@test "restart_service on darwin restarts via sudo brew services" {
+  STUB_OUTPUT="darwin" mktest::stub_function context::get "os.family"
+  STUB_OUTPUT="/opt/homebrew/bin/brew" mktest::stub_function brew::_bin
+  mktest::stub_function sudo
+  brew::restart_service postgresql@18
+  mktest::assert_stub_called sudo "/opt/homebrew/bin/brew" "services" "restart" "postgresql@18"
+}
+
+@test "restart_service on linux runs brew restart as the user" {
+  STUB_OUTPUT="linux" mktest::stub_function context::get "os.family"
+  STUB_OUTPUT="admin" mktest::stub_function id "-un"
+  STUB_OUTPUT="fake_brew" mktest::stub_function brew::_bin
+  mktest::stub_function sudo
+  mktest::stub_function fake_brew "services" "restart" "postgresql@18"
+  brew::restart_service postgresql@18
+  mktest::assert_stub_called fake_brew "services" "restart" "postgresql@18"
+}
+
+@test "_service fails on an unsupported os family" {
+  STUB_OUTPUT="windows" mktest::stub_function context::get "os.family"
+  STUB_EXIT=1 mktest::stub_function lifecycle::fail
+  run brew::start_service postgresql@18
+  [ "$status" -ne 0 ]
+  mktest::assert_stub_called lifecycle::fail
+}
+
 # --- brew::_is_installed ---
 
 @test "_is_installed returns true for a name in the list" {
