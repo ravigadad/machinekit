@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+#
+# scripts/repl — drop into an interactive bash shell with machinekit loaded.
+#
+# Sourcing lib/machinekit.sh directly leaves `set -euo pipefail` active in your
+# shell (the core libs enable it at source time), so a single non-zero return —
+# a mistyped function name, a context call before init — kicks you straight back
+# to your login shell. This launcher sources everything in a throwaway bash and
+# then turns strict mode off, so the session survives errors. It also runs the
+# main-shell context init for you (the step that otherwise fails with "store must
+# be initialized from the main shell").
+#
+# The prompt shows a green check after a successful command and a red cross plus
+# the exit code after a failed one. Leave the REPL with `exit` or Ctrl-D.
+#
+# Usage:
+#   scripts/repl
+
+set -euo pipefail
+
+# Exported so the (quoted) rcfile heredoc can read it at runtime without us
+# having to escape every other `$` in the prompt code.
+export MK_REPL_ROOT
+MK_REPL_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+rcfile="$(mktemp "${TMPDIR:-/tmp}/machinekit-repl.XXXXXX")"
+trap 'rm -f "$rcfile"' EXIT
+
+cat > "$rcfile" <<'RC'
+# Sourced at startup of the interactive REPL shell — this is the main shell.
+source "$MK_REPL_ROOT/lib/machinekit.sh"
+
+# The libs above turn on 'set -euo pipefail'; relax it so a failed command at the
+# prompt doesn't exit this interactive shell.
+set +e +u +o pipefail
+
+# Initialize the context store here, in the main shell (required before any
+# command substitution reads it), then load OS facts and every module function.
+context::init_storage
+system::detect
+modules::source_all
+
+# Dynamic prompt: green check on success, red cross + the exit code on failure.
+# $? must be read on the very first line, before anything else clobbers it.
+__mk_prompt() {
+  local ec=$?
+  local reset='\[\e[0m\]' dim='\[\e[2m\]' green='\[\e[32m\]' red='\[\e[1;31m\]' cyan='\[\e[1;36m\]'
+  local status
+  if [ "$ec" -eq 0 ]; then
+    status="${green}✓${reset}"
+  else
+    status="${red}✗ ${ec}${reset}"
+  fi
+  PS1="${status} ${cyan}mk${reset}${dim}>${reset} "
+}
+PROMPT_COMMAND=__mk_prompt
+
+printf '\n  machinekit REPL — core + modules loaded, context initialized.\n'
+printf '  Strict mode is off; type exit or Ctrl-D to leave.\n\n'
+RC
+
+bash --rcfile "$rcfile" -i || true
