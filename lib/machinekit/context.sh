@@ -44,10 +44,12 @@ context::set() {
   mv "$tmp_store" "$store"
 }
 
-# context::get KEY [--required] [--default VALUE] [--coerce TYPE] [--prompt TEXT]
+# context::get KEY [--required] [--default VALUE] [--coerce TYPE] [--prompt TEXT] [--secret]
 # Resolve KEY through the cascade: store, then MACHINEKIT_ env var. With
 # --required, an unresolved key prompts interactively and then fails; without
-# it, an unresolved key returns 1 silently.
+# it, an unresolved key returns 1 silently. --secret reads the prompt response
+# without echoing it and never persists it to the store — for secrets, since the
+# store is plaintext and handed to gomplate at apply time.
 context::get() {
   local key="$1"; shift
   local required=0
@@ -57,12 +59,14 @@ context::get() {
   local coerce=""
   local prompt_text=""
   local should_prompt=0
+  local is_secret=0
   while [ $# -gt 0 ]; do
     case "$1" in
       --required)       required=1 ;;
       --default)        has_default=1; default="$2"; shift ;;
       --coerce)         coerce="$2"; shift ;;
       --prompt)         should_prompt=1; prompt_text="$2"; shift ;;
+      --secret)         is_secret=1 ;;
       --store-default)  store_default=1 ;;
       *) lifecycle::fail "context::get: unknown option: $1" ;;
     esac
@@ -79,6 +83,7 @@ context::get() {
   [ -n "$prompt_text" ] && _prompt_call+=(--label "$prompt_text")
   [ "$has_default" = 1 ] && _prompt_call+=(--default "$default")
   [ -n "$coerce" ] && _prompt_call+=(--type "$coerce")
+  [ "$is_secret" = 1 ] && _prompt_call+=(--secret)
 
   local val
   if   val=$(context::_from_store "$key"); then :
@@ -243,27 +248,35 @@ context::_prompt_label() {
 context::_prompt() {
   input::is_interactive >/dev/null || return 1
   local key="$1"; shift
-  local label="" has_label=0 has_default=0 default="" type=""
+  local label="" has_label=0 has_default=0 default="" type="" is_secret=0
   while [ $# -gt 0 ]; do
     case "$1" in
       --label)   has_label=1; label="$2"; shift ;;
       --default) has_default=1; default="$2"; shift ;;
       --type)    type="$2"; shift ;;
+      --secret) is_secret=1 ;;
       *) lifecycle::fail "context::_prompt: unknown option: $1" ;;
     esac
     shift
   done
   [ "$has_label" = 0 ] && label="$(context::_prompt_label "$key")"
   printf '%s%s: ' "$label" "$(context::_prompt_hint "$type" "$has_default" "$default")" >&2
+  # --secret: read silently and never write the value to the store. The silent
+  # read swallows the user's newline, so emit one to stderr ourselves.
   local response
-  read -r response <"${MACHINEKIT_TTY:-/dev/tty}"
+  if [ "$is_secret" = 1 ]; then
+    read -rs response <"${MACHINEKIT_TTY:-/dev/tty}"
+    printf '\n' >&2
+  else
+    read -r response <"${MACHINEKIT_TTY:-/dev/tty}"
+  fi
   if [ -z "$response" ]; then
     [ "$has_default" = 1 ] || return 1
-    context::set "$key" "$default"
+    [ "$is_secret" = 1 ] || context::set "$key" "$default"
     printf '%s\n' "$default"
     return 0
   fi
-  context::set "$key" "$response"
+  [ "$is_secret" = 1 ] || context::set "$key" "$response"
   printf '%s\n' "$response"
 }
 

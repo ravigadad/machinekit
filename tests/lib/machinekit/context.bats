@@ -162,6 +162,14 @@ setup() {
   [ "$result" = "from-prompt" ]
 }
 
+@test "get --prompt --secret passes --secret through to _prompt" {
+  STUB_RETURN=1 mktest::stub_function context::_from_store
+  STUB_RETURN=1 mktest::stub_function context::_from_env
+  STUB_OUTPUT="secret-val" mktest::stub_function context::_prompt "test.key" "--label" "Secret" "--secret"
+  result=$(context::get "test.key" --prompt "Secret" --secret)
+  [ "$result" = "secret-val" ]
+}
+
 @test "get --default + --prompt prompts and returns default on empty response" {
   STUB_RETURN=1 mktest::stub_function context::_from_store "test.key"
   STUB_RETURN=1 mktest::stub_function context::_from_env "test.key"
@@ -417,6 +425,19 @@ setup() {
   [ "$output" = "Alice" ]
   [[ "$stderr" == *"Fake name"* ]]
   mktest::assert_stub_called context::set "fake.name" "Alice"
+}
+
+@test "_prompt with --secret returns the value but never writes it to the store" {
+  mktest::stub_function input::is_interactive
+  mktest::stub_function context::_prompt_label "secret.key"
+  mktest::stub_function context::_prompt_hint
+  mktest::stub_function context::set
+  printf 'hunter2\n' > "$BATS_TEST_TMPDIR/tty"
+  export MACHINEKIT_TTY="$BATS_TEST_TMPDIR/tty"
+  run --separate-stderr context::_prompt "secret.key" --label "Password" --secret
+  [ "$status" -eq 0 ]
+  [ "$output" = "hunter2" ]
+  mktest::assert_stub_not_called context::set
 }
 
 @test "_prompt uses a custom label when provided and does not call _prompt_label" {
