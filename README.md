@@ -6,6 +6,7 @@ machinekit takes a fresh machine from "nothing installed" to "working dev enviro
 
 For how it works and the reasoning behind it, see [docs/architecture.md](./docs/architecture.md).
 For what's planned and what's deferred, see [docs/roadmap.md](./docs/roadmap.md).
+For modules that need one-time external setup (an account, a secret, a key to register — e.g. Tailscale), see [docs/modules.md](./docs/modules.md).
 
 ## What it does
 
@@ -160,10 +161,9 @@ machinekit/
 │   ├── machinekit-apply          # apply a blueprint
 │   └── machinekit-generate       # scaffold a fresh blueprint
 ├── lib/                          # execution code (bin/ files are thin orchestrators)
-│   ├── machinekit.sh             # aggregator for lib/machinekit/*
-│   ├── modules.sh                # aggregator for lib/modules/*
-│   ├── machinekit/               # core: helpers, blueprints, brew bootstrap, preflight, hooks, prerequisites
-│   └── modules/                  # built-in modules (see lib/modules/)
+│   ├── machinekit.sh             # aggregator: sources all of lib/machinekit/* eagerly
+│   ├── machinekit/               # core: helpers, blueprints, brew bootstrap, preflight, hooks, module orchestration
+│   └── modules/                  # built-in modules, lazy-sourced via modules::source_all
 │       ├── git/templates/        # module-shipped defaults (dot_gitconfig.tmpl, dot_config/git/ignore.tmpl)
 │       ├── mise/templates/       # module-shipped defaults (dot_config/mise/…, env.zsh.d/mise.zsh)
 │       └── zsh/templates/        # framework zsh dotfiles (dot_zshrc, env.zsh w/ env.zsh.d loop)

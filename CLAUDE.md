@@ -7,6 +7,7 @@ Instructions for Claude Code (or similar LLM coding agents) working in this repo
 - [README.md](./README.md) — what machinekit is and how to use it.
 - [docs/architecture.md](./docs/architecture.md) — why machinekit works the way it does. Read this before making structural changes.
 - [docs/roadmap.md](./docs/roadmap.md) — what's built, what's planned, what's deferred and why.
+- [docs/modules.md](./docs/modules.md) — built-in modules that need one-time external setup (accounts, secrets, keys) before they can be activated.
 
 If a per-user plan doc exists at `~/.claude/plans/machinekit.md`, it contains the maintainer's situational context (current machine state, personal config, in-progress decisions) that doesn't belong in the public repo. Read it when working on this project locally.
 
@@ -46,11 +47,12 @@ Stub infrastructure lives in `tests/helpers/stubbing.sh`. Read it before writing
 
 ## When making documentation changes
 
-The four-document split is intentional:
+The document split is intentional:
 
 - **README.md** — current capabilities, quick start. No "iteration" language, no aspirational features.
 - **docs/architecture.md** — how the framework works and the reasoning behind its structure, with "Status: not yet implemented" flags on parts that aren't done. When a feature lands, flip the flag rather than rewriting. Keep it about the framework itself; personal/product direction (e.g. specific tools the maintainer plans to build modules for) lives in the per-user plan doc, not here.
 - **docs/roadmap.md** — what's done, what's next, why each step.
-- **CLAUDE.md** — this file. Stays thin. Defers content to the three docs above unless there's a reason an LLM specifically needs it inline (token-efficiency, agent-behavior guidance).
+- **docs/modules.md** — per-module *operator setup*: the one-time external steps (accounts, secrets, key registration) a user does before activating a module that needs them. Only modules that need out-of-band setup appear; "if it's not listed, it needs none." Quick-start + upstream links, not a replica of each tool's docs.
+- **CLAUDE.md** — this file. Stays thin. Defers content to the docs above unless there's a reason an LLM specifically needs it inline (token-efficiency, agent-behavior guidance).
 
-Don't let CLAUDE.md re-accumulate content that belongs in the other three.
+Don't let CLAUDE.md re-accumulate content that belongs in the other docs.

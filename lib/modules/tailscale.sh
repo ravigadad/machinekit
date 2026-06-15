@@ -34,7 +34,7 @@ tailscale::preflight() {
   tag=$(tailscale::_tag)
   [ -n "$tag" ] || return 0
   [ -f "$(tailscale::_secret_path)" ] || lifecycle::fail \
-    "tailscale: tagged device (tag:$tag) needs an encrypted secret at $(tailscale::_secret_rel)"
+    "tailscale: tagged device (tag:$tag) needs an encrypted secret at $(tailscale::_secret_rel) — see docs/modules.md (tailscale) to create it."
 }
 
 # The cask token is `tailscale-app` (the GUI app); the formula is `tailscale`

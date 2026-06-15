@@ -59,14 +59,16 @@ blueprints/
 │   │                                # inside the modules themselves
 │   └── hooks/
 │       └── post-apply/              # shell scripts run after dotfiles + Brewfile
-└── machine_types/
-    ├── personal/
-    │   ├── machinekit.toml          # personal-specific config overrides
-    │   ├── home/                    # overlay on top of common/home/
-    │   ├── Brewfile                 # additional packages just for personal
-    │   └── hooks/post-apply/
-    └── server/
-        └── …
+├── machine_types/
+│   ├── personal/
+│   │   ├── machinekit.toml          # personal-specific config overrides
+│   │   ├── home/                    # overlay on top of common/home/
+│   │   ├── Brewfile                 # additional packages just for personal
+│   │   └── hooks/post-apply/
+│   └── server/
+│       └── …
+└── secrets/                         # blueprint-global, outside the cascade
+    └── <service>/<tenancy>.age      # ingredient secrets a module decrypts itself
 ```
 
 The structure is **layered**: `common/` is the baseline applied to every machine, and `machine_types/<type>/` is opt-in per-type overrides. The same shape — `machinekit.toml`, `home/`, `Brewfile`, `hooks/post-apply/` — appears at both levels.
@@ -267,9 +269,15 @@ Eventually, a 1Password CLI (or other secrets-manager) wrapper can fetch the age
 
 > Status: secrets-manager wrapper not yet implemented.
 
-age-encrypted files can be committed to the blueprints repo and are decrypted **during home sync** by the content-transform pipeline — not by a separate post-sync pass over `$HOME`. The age module claims the `.age` extension as a decode-tier transform, so `secret.age` in a home layer is decrypted to its final content at `~/secret` as the file is applied. Decryption happening inside the pipeline (rather than after a verbatim copy) is what keeps reconcile and `--dry-run` operating on plaintext and never leaves ciphertext on disk. With the age module inactive the marker isn't registered and `secret.age` copies over as-is — unreadable but not an error. See [home template system](#home-template-system) for the pipeline and its cross-tier ordering rules.
+There are two distinct channels for age-encrypted blueprint secrets, and the distinction matters:
 
-> Status: implemented. The age module manages the key and supplies the `.age` decode handler; the [home transform pipeline](#home-template-system) runs it.
+- **Encrypted dotfiles** live under a `home/` layer and decrypt **1:1 to a final path in `$HOME`**. They are decrypted **during home sync** by the content-transform pipeline — not by a separate post-sync pass. The age module claims the `.age` extension as a decode-tier transform, so `secret.age` in a home layer is decrypted to its final content at `~/secret` as the file is applied. Decryption happening inside the pipeline (rather than after a verbatim copy) keeps reconcile and `--dry-run` operating on plaintext and never leaves ciphertext on disk. With the age module inactive the marker isn't registered and `secret.age` copies over as-is — unreadable but not an error.
+
+- **Ingredient secrets** live in the blueprint-global **secrets pool**, `secrets/<service>/<tenancy>.age` — a sibling of `common/` and `machine_types/`, deliberately **outside the machine-type cascade** (a secret read directly by a module participates in no layering, so placing it in `common/` would falsely imply a type could override it). `<service>` is machinekit's vocabulary (the module that owns the secret, e.g. `tailscale`); `<tenancy>` is the user's own label (`work`, `personal`, `default`), which natively supports multiple accounts per service per blueprint. These are **not** on the home pipeline; the consuming module calls `age::decrypt` itself and decides what to do with the plaintext — keep it in memory for a one-shot use (e.g. a one-time tailnet join key) or assemble it into a mode-600 file it owns (e.g. a service's env file). What the module does with the plaintext is the module's choice, driven by whether the secret is needed once or on an ongoing basis.
+
+The age private key itself lives on disk at `~/.config/age/key.txt` (mode 600); "off disk" applies to specific decrypted plaintexts a module chooses to keep in memory, not to encryption material in general.
+
+> Status: implemented. The age module manages the key and supplies the `.age` decode handler (the home-pipeline channel) and the `age::decrypt` primitive (the pool channel). The [home transform pipeline](#home-template-system) runs the former; the `tailscale` module uses the latter.
 
 ---
 
@@ -476,6 +484,8 @@ machinekit/                             ← this repo (public)
 **Convention**: `bin/` files are thin orchestrators (flag parsing, mode detection, the apply pipeline as a sequence of namespaced calls). All execution code lives in `lib/`. `lib/<name>.sh` is the aggregator for `lib/<name>/*.sh`; each file's namespace matches its filename (`brew::*` in `brew.sh`, `age::*` in `age.sh`, etc.).
 
 **Module API**: every file in `lib/modules/` exposes `<name>::install` as its main entry point. Modules that need to resolve user inputs before the apply pipeline runs also expose `<name>::preflight`. Modules that need to run after home files are applied expose `<name>::post_apply` — this runs after `home::sync` but before post-apply hooks, which is why `mise::post_apply` runs `mise install` (it needs `~/.config/mise/config.toml` placed by home sync). Modules with inter-module dependencies declare them via `<name>::requires` (returning one dependency name per line); `resolver.sh` sorts the active set into install order. Satisfier modules additionally declare `<name>::provides` (returning the capability name they satisfy); the resolver uses this for conflict detection. Modules that transform file content by extension declare `<name>::file_transforms` (emitting `extension tier handler` lines, `tier` ∈ {`decode`, `content`}); `home::transforms` registers these at preflight and runs the matching handlers during sync — see [home template system](#home-template-system). Modules may also ship a sibling directory `lib/modules/<name>/templates/` holding default dotfiles; `home::staging::build` picks these up automatically. Active modules are driven by `modules = [...]` in `machinekit.toml` (plus the always-active `MK_BASE_MODULES`), resolved at preflight time.
+
+A module that spans several files keeps the extra ones in a same-named subdirectory and sources them itself (e.g. `postgres.sh` sources `postgres/introspect.sh`). `modules::source_all` auto-loads only top-level `lib/modules/*.sh` files plus capability satisfiers in `capabilities/`; subdirectory files are a module's private implementation, reached through its own `source` lines, not discovered as modules.
 
 **Zsh hook pattern**: the `zsh` module ships `~/.config/machinekit/env.zsh`, which ends with a glob-source loop over `~/.config/machinekit/env.zsh.d/*.zsh`. Any module that needs to contribute zsh-level setup drops a single `.zsh` file in its own `templates/dot_config/machinekit/env.zsh.d/` directory — the staging-dir builder merges it in, the home module installs it, and env.zsh sources it on every zsh startup. When a module is inactive, no fragment ends up on disk and nothing is sourced. mise uses this pattern today (`templates/dot_config/machinekit/env.zsh.d/mise.zsh` for `eval "$(mise activate zsh)"`); future modules plug in the same way.
 
