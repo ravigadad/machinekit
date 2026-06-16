@@ -36,6 +36,43 @@
 # version = "17"
 # port = "5433"
 #
+# [module.hindsight_server]
+# # Self-hosted Hindsight memory API, run as a container against the host
+# # postgres (both pulled in automatically as dependencies). List
+# # "hindsight_server" in `modules` only on the machine that should be the
+# # memory server.
+# #
+# # `llm_provider` is required — there is no default; pick the provider whose
+# # key you supply below.
+# llm_provider = "anthropic"
+# # Optional overrides (unset → Hindsight's own default for that setting):
+# # llm_model    = "claude-opus-4-8"
+# # llm_base_url = "https://example.openai.azure.com/..."  # override the provider API base URL (Azure OpenAI, a local endpoint, …)
+# # image     = "ghcr.io/vectorize-io/hindsight:latest"
+# # db_name   = "hindsight"
+# # db_user   = "hindsight"
+# # api_port  = "8888"   # host port for the memory API
+# # ui_port   = "9999"   # host port for the control-plane web UI
+# #
+# # Secrets come from the blueprint pool (secrets/hindsight/*.age), one raw value
+# # per file — not the home pipeline:
+# #   secrets/hindsight/llm_api_key.age     (required — machinekit can't make one)
+# #   secrets/hindsight/tenant_api_key.age  (optional — generated if absent)
+# #   secrets/hindsight/db_password.age     (optional — generated if absent)
+# #   secrets/hindsight/cp_access_key.age   (optional — password gating the web UI;
+# #                                          see below)
+# # machinekit assembles them into a create-once ~/.config/hindsight/hindsight.env
+# # (mode 600): the container's env_file and the record of any generated values.
+# # To regenerate, delete that file and re-apply. When the tenant key is generated
+# # it is announced — save it into secrets/hindsight/tenant_api_key.age and share
+# # it with your other boxes (every hindsight machine must use the same one).
+# #
+# # The control-plane web UI is always password-gated (HINDSIGHT_CP_ACCESS_KEY).
+# # The password resolves to: the cp_access_key.age pool secret if present, else a
+# # password you type at an interactive apply (blank to generate), else a generated
+# # one on a non-interactive run. A generated one is announced so you can retrieve
+# # it from hindsight.env to sign in.
+#
 # [module.tailscale]
 # # Omit `tag` on a user device (laptop): installs the client (GUI app on
 # # macOS); you sign in yourself.
