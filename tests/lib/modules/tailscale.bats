@@ -146,6 +146,17 @@ setup() {
   mktest::assert_stub_called logging::dry_run
 }
 
+# --- tailscale::_run_official_installer ---
+
+@test "_run_official_installer fetches the tailscale installer over curl" {
+  # Capture the real curl invocation with a fake; the empty stdout means nothing
+  # reaches the piped shell.
+  local capture; capture=$(mktemp)
+  curl() { printf '%s' "$*" > "$capture"; }
+  tailscale::_run_official_installer
+  [ "$(cat "$capture")" = "-fsSL https://tailscale.com/install.sh" ]
+}
+
 # --- tailscale::_start_daemon ---
 
 @test "_start_daemon starts the tailscale system daemon via sudo brew services" {

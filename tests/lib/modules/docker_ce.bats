@@ -23,32 +23,37 @@ setup() {
 # --- docker_ce::install ---
 
 @test "install skips the install script when docker is already present" {
-  mktest::stub_function input::command_exists
+  mktest::stub_function input::command_exists docker
   mktest::stub_function docker_ce::_run_install_script
   docker_ce::install
   mktest::assert_stub_not_called docker_ce::_run_install_script
 }
 
-@test "install in dry-run logs a dry_run message" {
-  STUB_RETURN=1 mktest::stub_function input::command_exists
+@test "install in dry-run logs a dry_run message and does not run the install script" {
+  STUB_RETURN=1 mktest::stub_function input::command_exists docker
   mktest::stub_function input::is_dry_run
   mktest::stub_function docker_ce::_run_install_script
   docker_ce::install
   mktest::assert_stub_called logging::dry_run
-}
-
-@test "install in dry-run does not run install script" {
-  STUB_RETURN=1 mktest::stub_function input::command_exists
-  mktest::stub_function input::is_dry_run
-  mktest::stub_function docker_ce::_run_install_script
-  docker_ce::install
   mktest::assert_stub_not_called docker_ce::_run_install_script
 }
 
 @test "install in real mode runs install script" {
-  STUB_RETURN=1 mktest::stub_function input::command_exists
+  STUB_RETURN=1 mktest::stub_function input::command_exists docker
   STUB_RETURN=1 mktest::stub_function input::is_dry_run
   mktest::stub_function docker_ce::_run_install_script
   docker_ce::install
   mktest::assert_stub_called docker_ce::_run_install_script
+}
+
+# --- docker_ce::_run_install_script ---
+
+@test "_run_install_script fetches the docker installer over curl" {
+  # Capture the real curl invocation with a fake; sudo (the piped target) is
+  # stubbed so nothing executes.
+  mktest::stub_function sudo
+  local capture; capture=$(mktemp)
+  curl() { printf '%s' "$*" > "$capture"; }
+  docker_ce::_run_install_script
+  [ "$(cat "$capture")" = "-fsSL https://get.docker.com" ]
 }
