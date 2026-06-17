@@ -10,6 +10,7 @@ setup() {
   unset _MK_MODULES_SOURCED
 
   mktest::stub_function logging::step
+  mktest::stub_function logging::debug
 }
 
 # --- load guard ---
