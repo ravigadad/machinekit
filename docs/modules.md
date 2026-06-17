@@ -82,3 +82,14 @@ No out-of-band account or secret. machinekit installs the platform default — O
 3. **Optional:** `secrets/hindsight/db_password.age` (generated if absent) and `secrets/hindsight/cp_access_key.age` (the control-plane web-UI password; absent → you're prompted at an interactive apply, or one is generated and announced).
 
 machinekit assembles these into a create-once `~/.config/hindsight/hindsight.env` (mode 600). To rotate or repoint, delete that file and re-apply. The full config surface (provider, model, ports, image overrides) is the commented `[module.hindsight_server]` block in [`templates/blueprints/common/machinekit.toml`](../templates/blueprints/common/machinekit.toml); for Hindsight itself, see the [upstream docs](https://github.com/vectorize-io/hindsight).
+
+---
+
+## hindsight_integration — a reachable server and the shared tenant key
+
+`hindsight_integration` wires this machine's coding agents (chosen with `integrations = [...]`) to a Hindsight server. Setup is just connectivity:
+
+1. **Point at the server.** Set either `server_host` (a reachable host — typically its tailnet MagicDNS name) or `server_url` (a full URL, for https, a path, or a hosted Hindsight) in `[module.hindsight_integration]`.
+2. **Share the tenant key.** The same `secrets/hindsight/tenant_api_key.age` the server uses — every box must match (see hindsight_server above). If this machine is provisioned before the server, machinekit generates and announces the key here; carry it to the server too.
+
+Everything else (which banks to auto-recall or expose as tools) is plain config in the commented block in [`templates/blueprints/common/machinekit.toml`](../templates/blueprints/common/machinekit.toml). No accounts to create; an agent's own sign-in (e.g. `claude` on first run) is separate and yours to do.

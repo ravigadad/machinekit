@@ -73,6 +73,38 @@
 # # one on a non-interactive run. A generated one is announced so you can retrieve
 # # it from hindsight.env to sign in.
 #
+# [module.hindsight_integration]
+# # Wires this machine's coding agents to a Hindsight memory server. List
+# # "hindsight_integration" in `modules` on every machine that should recall/
+# # retain, and choose which agents with `integrations` (Hindsight integrates with
+# # many MCP agents; each is set up by its own submodule).
+# #
+# # Point it at the server with EITHER server_host (shorthand: a reachable host,
+# # typically its tailnet MagicDNS name — built into http://<host>:<api_port>) OR
+# # server_url (a full URL used verbatim — for https, a path, or a hosted Hindsight
+# # with no server in your own fleet). One is required; server_url wins if both set.
+# server_host = "memory-server"
+# # server_url = "https://hindsight.example.com"
+# integrations = ["claude_code"]
+# # api_port = "8888"
+# #
+# # Coding agents get a dynamic per-project bank named "<bank_id_prefix>-<repo>"
+# # (auto recall/retain). bank_id_prefix defaults to "coding".
+# # bank_id_prefix = "coding"
+# #
+# # Extra banks beyond the per-project one, by name. A bank in auto_recall is
+# # folded into every session's recall (read-only); a bank in tool_use is exposed
+# # as its own MCP server with read/write tools (a per-session context cost — opt
+# # in deliberately). List a bank in both for read-and-write.
+# # additional_banks.auto_recall = ["shared", "reference"]
+# # additional_banks.tool_use = ["shared"]
+# #
+# # The fleet-shared tenant key comes from the same pool secret the server uses,
+# # secrets/hindsight/tenant_api_key.age (generated if absent — this box may be
+# # the first). machinekit assembles it, with the server URL, into each agent's
+# # config (e.g. ~/.hindsight/claude-code.json, mode 600), create-once. To repoint
+# # at a different server or regenerate, delete the config(s) and re-apply.
+#
 # [module.tailscale]
 # # Omit `tag` on a user device (laptop): installs the client (GUI app on
 # # macOS); you sign in yourself.
