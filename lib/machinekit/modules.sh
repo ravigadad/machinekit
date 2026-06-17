@@ -48,6 +48,7 @@ modules::_call_function_per_module() {
   local mod
   while IFS= read -r mod; do
     declare -F "${mod}::$1" > /dev/null 2>&1 || continue
+    logging::debug "running ${mod}::$1"
     "${mod}::$1"
   done < <(context::get_array "modules.active")
 }
