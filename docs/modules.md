@@ -64,3 +64,21 @@ Reference: Tailscale docs on [tags](https://tailscale.com/kb/1068/tags), [OAuth 
 ## container_manager (orbstack / docker_ce)
 
 No out-of-band account or secret. machinekit installs the platform default — OrbStack on macOS (brew cask), Docker Engine on Linux (the get.docker.com script, which machinekit runs with sudo). On macOS, OrbStack may ask for permissions on first launch; on Linux the daemon runs as root, so `docker` is invoked with sudo (the install script doesn't add you to the `docker` group). Nothing to do before `apply`.
+
+---
+
+## hindsight_server — an LLM provider key, and the shared tenant key
+
+`hindsight_server` runs a self-hosted [Hindsight](https://github.com/vectorize-io/hindsight) memory API as a container against the host postgres (the container runtime and postgres are pulled in automatically). List it in `modules` only on the machine that should be the memory server. Its secrets come from the blueprint pool (`secrets/hindsight/*.age` — one raw value per file, the same channel tailscale uses):
+
+1. **Pick an LLM provider and supply its API key (required — machinekit can't make one).** Set `[module.hindsight_server] llm_provider = "..."` (no default) and encrypt the matching key into the pool:
+
+   ```bash
+   printf '%s' '<llm-api-key>' | age -r <your-age-public-key> -o secrets/hindsight/llm_api_key.age
+   ```
+
+2. **The fleet tenant key — shared by every hindsight box.** If `secrets/hindsight/tenant_api_key.age` is absent, machinekit generates one on first apply and **announces it** (the value, never re-printed): save it into the pool and reuse the *same* file on every other hindsight machine — server and integration hosts must all carry one key. If you already have it, seed it like the LLM key above.
+
+3. **Optional:** `secrets/hindsight/db_password.age` (generated if absent) and `secrets/hindsight/cp_access_key.age` (the control-plane web-UI password; absent → you're prompted at an interactive apply, or one is generated and announced).
+
+machinekit assembles these into a create-once `~/.config/hindsight/hindsight.env` (mode 600). To rotate or repoint, delete that file and re-apply. The full config surface (provider, model, ports, image overrides) is the commented `[module.hindsight_server]` block in [`templates/blueprints/common/machinekit.toml`](../templates/blueprints/common/machinekit.toml); for Hindsight itself, see the [upstream docs](https://github.com/vectorize-io/hindsight).

@@ -461,16 +461,21 @@ machinekit/                             ← this repo (public)
 │   │   ├── hooks.sh                    ← hooks::* (post-apply hook runner; common + machine_type layers)
 │   │   ├── hook-support.sh             ← library blueprint hooks source via $MACHINEKIT_SUPPORT
 │   │   └── postflight.sh               ← postflight::* (apply summary output)
-│   └── modules/                        ← user-facing modules; each exposes ::install
+│   └── modules/                        ← user-facing modules (representative — see lib/modules/ for the full set); each exposes ::install
 │       ├── age.sh                      ← age::preflight + age::install + age::decrypt (the .age decode handler) + age::file_transforms
 │       ├── brewfile.sh                 ← brewfile::install (common + machine_type Brewfile layers)
+│       ├── claude_code.sh              ← claude_code::install (Claude Code CLI via the official installer)
 │       ├── docker_ce.sh                ← docker_ce::provides + docker_ce::install (Linux container runtime)
 │       ├── git.sh                      ← git::preflight + git::install (no-op; ships templates)
 │       ├── git/templates/              ← module-shipped dotfile defaults (dot_gitconfig.tmpl, dot_config/git/ignore.tmpl)
 │       ├── gomplate.sh                 ← gomplate::file_transforms + render + install (base module: the .tmpl handler)
+│       ├── hindsight_server.sh         ← self-hosted Hindsight memory API (container, against host postgres)
+│       ├── hindsight/secrets.sh        ← shared pool-secret resolution for both hindsight modules
 │       ├── mise.sh                     ← mise::requires + mise::provides + mise::install + mise::post_apply
 │       ├── mise/templates/             ← module-shipped dotfile defaults (dot_config/mise/…, env.zsh.d/mise.zsh)
 │       ├── orbstack.sh                 ← orbstack::provides + orbstack::install (macOS container runtime)
+│       ├── postgres.sh                 ← postgres host provisioning; sources postgres/{introspect,access}.sh
+│       ├── tailscale.sh                ← tailscale::install (client + headless tagged-device join)
 │       ├── zsh.sh                      ← zsh::install (installs zsh via brew; module ships templates)
 │       ├── zsh/templates/              ← framework zsh dotfiles (dot_zshrc, env.zsh w/ env.zsh.d loop)
 │       └── capabilities/               ← abstract capability modules; each exposes ::is_capability, ::default_satisfier
