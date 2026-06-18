@@ -105,6 +105,26 @@
 # # config (e.g. ~/.hindsight/claude-code.json, mode 600), create-once. To repoint
 # # at a different server or regenerate, delete the config(s) and re-apply.
 #
+# [module.agents_config_harnesses]
+# # Projects a shared agents-config directory into your coding agents so they all
+# # load the same instructions and skills. The directory (default ~/.config/agents)
+# # holds a top-level AGENTS.md (instructions loaded every session) and a
+# # doctrine/<name>/SKILL.md folder (skills the agent loads when relevant). List
+# # "agents_config_harnesses" in `modules` and pick agents with `harnesses` (each
+# # set up by its own submodule). Optional — omit or leave empty to project nothing.
+# harnesses = ["claude_code"]
+# #
+# # For Claude Code this symlinks ~/.claude/skills → <dir>/doctrine and adds an
+# # `@<dir>/AGENTS.md` import to ~/.claude/CLAUDE.md (both idempotent; it refuses to
+# # overwrite a pre-existing real ~/.claude/skills directory). The directory itself
+# # must already exist — populate it yourself, or sync it onto the machine.
+# #
+# # <dir> is shared config — one source of truth, so there's no second path to
+# # keep in sync. It lives under [module.agents_config_setup].dir and defaults to
+# # ~/.config/agents; set it there to use a different location:
+# # [module.agents_config_setup]
+# # dir = "/path/to/agents"
+#
 # [module.tailscale]
 # # Omit `tag` on a user device (laptop): installs the client (GUI app on
 # # macOS); you sign in yourself.

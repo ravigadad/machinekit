@@ -93,3 +93,16 @@ machinekit assembles these into a create-once `~/.config/hindsight/hindsight.env
 2. **Share the tenant key.** The same `secrets/hindsight/tenant_api_key.age` the server uses — every box must match (see hindsight_server above). If this machine is provisioned before the server, machinekit generates and announces the key here; carry it to the server too.
 
 Everything else (which banks to auto-recall or expose as tools) is plain config in the commented block in [`templates/blueprints/common/machinekit.toml`](../templates/blueprints/common/machinekit.toml). No accounts to create; an agent's own sign-in (e.g. `claude` on first run) is separate and yours to do.
+
+---
+
+## agents_config_harnesses — a populated agents-config directory
+
+`agents_config_harnesses` wires your coding agents to a shared agents-config directory (default `~/.config/agents`) so they all load the same instructions and skills. machinekit creates the projection; **you provide the directory's contents** — populate it yourself, or sync it onto the machine. It holds:
+
+- a top-level `AGENTS.md` — your instructions, loaded every session;
+- `doctrine/<name>/SKILL.md` files — skills the agent loads when the task is relevant.
+
+Then list `agents_config_harnesses` in `modules`, choose agents with `harnesses = ["claude_code"]`, and apply. For Claude Code this symlinks `~/.claude/skills` → `<dir>/doctrine` and adds an `@<dir>/AGENTS.md` import to `~/.claude/CLAUDE.md`.
+
+One caveat worth knowing: if `~/.claude/skills` already exists as a real directory (you keep hand-written skills there), machinekit will **not** overwrite it — it stops with a message. Move those skills into `<dir>/doctrine/` (where they get synced and projected too) and re-apply.
