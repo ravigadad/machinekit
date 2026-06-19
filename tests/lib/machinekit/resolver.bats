@@ -80,6 +80,40 @@ setup() {
   MATCH="circular" mktest::assert_stub_called lifecycle::fail
 }
 
+# --- after edges (soft ordering) ---
+
+@test "resolve orders a module after an active after-target" {
+  alpha::after() { printf 'beta\n'; }
+  result=$(resolver::resolve alpha beta)
+  alpha_line=$(printf '%s\n' "$result" | grep -n '^alpha$' | cut -d: -f1)
+  beta_line=$(printf '%s\n'  "$result" | grep -n '^beta$'  | cut -d: -f1)
+  [ "$beta_line" -lt "$alpha_line" ]
+}
+
+@test "resolve ignores an after edge to an inactive module and never activates it" {
+  alpha::after() { printf 'beta\n'; }
+  result=$(resolver::resolve alpha)
+  [ "$result" = "alpha" ]
+}
+
+@test "resolve orders a module after a transitively-active after-target" {
+  alpha::after()   { printf 'gamma\n'; }
+  beta::requires() { printf 'gamma\n'; }
+  result=$(resolver::resolve alpha beta)
+  gamma_line=$(printf '%s\n' "$result" | grep -n '^gamma$' | cut -d: -f1)
+  alpha_line=$(printf '%s\n' "$result" | grep -n '^alpha$' | cut -d: -f1)
+  [ "$gamma_line" -lt "$alpha_line" ]
+}
+
+@test "resolve detects a cycle formed by an after edge" {
+  alpha::requires() { printf 'beta\n'; }
+  beta::after()     { printf 'alpha\n'; }
+  STUB_EXIT=1 mktest::stub_function lifecycle::fail
+  run resolver::resolve alpha
+  [ "$status" -ne 0 ]
+  MATCH="circular" mktest::assert_stub_called lifecycle::fail
+}
+
 # --- capability expansion ---
 
 @test "resolve pulls in the default satisfier when a capability is listed" {

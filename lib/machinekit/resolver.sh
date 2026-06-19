@@ -1,5 +1,13 @@
 #!/usr/bin/env bash
 # Module dependency resolver — DFS topological sort with cycle detection.
+#
+# Two edge kinds:
+#   ::requires  hard dependency — pulls the target into the active set and orders
+#               it before this module.
+#   ::after     soft ordering edge — orders this module after the target only when
+#               the target is *independently* active; never activates it. Use it
+#               for "run after X when X is also present" without coupling the two
+#               (an ::after to an inactive module is silently ignored).
 [ -n "${_MK_RESOLVER_LOADED:-}" ] && return 0
 _MK_RESOLVER_LOADED=1
 
@@ -7,21 +15,42 @@ _resolver_visited=""
 _resolver_in_progress=""
 _resolver_result=()
 _resolver_requested=()
+_resolver_active=""
+_resolver_apply_after=0
 
 resolver::resolve() {
   modules::source_all
-  _resolver_visited=""
-  _resolver_in_progress=""
-  _resolver_result=()
   _resolver_requested=("$@")
-  local mod
-  for mod in "$@"; do
-    resolver::_visit "$mod"
-  done
+
+  # Pass 1 — the active set (requires only).
+  resolver::_run_pass 0
+  if [ "${#_resolver_result[@]}" -gt 0 ]; then
+    _resolver_active=" ${_resolver_result[*]} "
+  else
+    _resolver_active=" "
+  fi
+
+  # Pass 2 — final order, now applying after edges over that active set.
+  resolver::_run_pass 1
+
   resolver::_check_conflicts
   if [ "${#_resolver_result[@]}" -gt 0 ]; then
     printf '%s\n' "${_resolver_result[@]}"
   fi
+}
+
+# One DFS pass; apply_after gates whether after edges are followed (0 for pass 1,
+# which establishes the active set; 1 for pass 2).
+resolver::_run_pass() {
+  _resolver_apply_after="$1"
+  _resolver_visited=""
+  _resolver_in_progress=""
+  _resolver_result=()
+  [ "${#_resolver_requested[@]}" -gt 0 ] || return 0
+  local mod
+  for mod in "${_resolver_requested[@]}"; do
+    resolver::_visit "$mod"
+  done
 }
 
 resolver::_visit() {
@@ -52,6 +81,18 @@ resolver::_visit() {
       [ -n "$dep" ] || continue
       resolver::_visit "$dep"
     done < <("${mod}::requires")
+  fi
+
+  # after edges, pass 2 only. Gating on the active set is what makes after
+  # ordering-only: an inactive target is skipped, never pulled in.
+  if [ "$_resolver_apply_after" -eq 1 ] && declare -f "${mod}::after" > /dev/null 2>&1; then
+    local after_target
+    while IFS= read -r after_target; do
+      [ -n "$after_target" ] || continue
+      case " $_resolver_active " in
+        *" $after_target "*) resolver::_visit "$after_target" ;;
+      esac
+    done < <("${mod}::after")
   fi
 
   _resolver_in_progress="${_resolver_in_progress/ $mod/}"
