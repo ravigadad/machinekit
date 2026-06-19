@@ -368,7 +368,7 @@ Because transforms run *inside* the sync pipeline — between reading the staged
 
 Everything *around* file application is machinekit's:
 
-- **Source fetching** — machinekit clones (`git clone`) or copies (`cp -r`) blueprints into `~/.local/share/machinekit/blueprints` itself, depending on whether the source resolves to the `git` or `cp` protocol. The cached source is treated as ephemeral and re-fetched on every apply.
+- **Source fetching** — machinekit clones (`git clone`) or copies (`cp -r`) blueprints into `~/.local/share/machinekit/blueprints` itself, depending on whether the source resolves to the `git` or `cp` protocol. The cached source is treated as ephemeral and re-fetched on every apply. The protocol-resolution and fetch machinery (URL or `.git/` dir → git clone with SSH-key fallback and auth/network/not-found error classification; plain dir → copy) lives in a source-agnostic `fetch::` core (`lib/machinekit/fetch.sh`); `blueprints::fetch` is one consumer, and the `agents_config_setup` module is another (seeding the agents-config dir the same way).
 - **Staging-dir composition** — machinekit operates against a *merged* staging dir at `~/.local/share/machinekit/staging`, not the raw blueprint. The staging dir is wiped and rebuilt every run, layered in this order: each active module's `lib/modules/<name>/templates/`, then the blueprint's `common/home/`, then `machine_types/<type>/home/` (when `--machine-type` is set). Same-path files in a later layer overwrite earlier ones, so the blueprint owns final say. Sibling blueprint content (`common/Brewfile`, `common/hooks/`, `common/machinekit.toml`, `machine_types/`) never enters the staging dir. `.mkignore` is scoped to within-home exclusions.
 
 One flag picks the blueprint source; the protocol is sniffed and overridable:
@@ -446,7 +446,8 @@ machinekit/                             ← this repo (public)
 │   │   ├── context.sh                  ← context::* (jq-backed runtime data store: set/get, arrays, json, seed_from_flags)
 │   │   ├── system.sh                   ← system::detect — populates os.family + os.arch into context
 │   │   ├── brew.sh                     ← brew::* (bootstrap, install_formula — low-level brew ops)
-│   │   ├── blueprints.sh               ← blueprints::* (fetch, dir, protocol resolution, clone error classification)
+│   │   ├── fetch.sh                    ← fetch::* (source-agnostic: resolve_protocol, into; git clone w/ SSH fallback + error classification, or cp)
+│   │   ├── blueprints.sh               ← blueprints::* (fetch, dir — orchestrates fetch:: into the cached blueprints location)
 │   │   ├── ssh.sh                      ← ssh::* (key install, generate, interactive discover)
 │   │   ├── config.sh                   ← config::* (parse + merge machinekit.toml via toml2json; stored in context)
 │   │   ├── resolver.sh                 ← resolver::resolve — DFS topological sort over ::requires declarations

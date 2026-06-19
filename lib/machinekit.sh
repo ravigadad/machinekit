@@ -18,6 +18,8 @@ source "$_mk_core_dir/context.sh"
 source "$_mk_core_dir/system.sh"
 # shellcheck source=machinekit/brew.sh
 source "$_mk_core_dir/brew.sh"
+# shellcheck source=machinekit/fetch.sh
+source "$_mk_core_dir/fetch.sh"
 # shellcheck source=machinekit/blueprints.sh
 source "$_mk_core_dir/blueprints.sh"
 # shellcheck source=machinekit/config.sh
