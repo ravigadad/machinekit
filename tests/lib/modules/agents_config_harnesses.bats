@@ -37,6 +37,13 @@ setup() {
   [ -z "$output" ]
 }
 
+# --- after ---
+
+@test "after declares a soft ordering behind agents_config_setup" {
+  run agents_config_harnesses::after
+  [ "$output" = "agents_config_setup" ]
+}
+
 # --- preflight ---
 
 @test "preflight passes for known harnesses" {
@@ -82,7 +89,7 @@ setup() {
 # --- install ---
 
 @test "install in dry-run reports and projects nothing" {
-  STUB_OUTPUT="/agents" mktest::stub_function agents_config_harnesses::_agents_dir
+  STUB_OUTPUT="/agents" mktest::stub_function agents_config_setup::dir
   STUB_OUTPUT=$'foo\nbar' mktest::stub_function agents_config_harnesses::_harnesses
   STUB_RETURN=1 mktest::stub_function agents_config_harnesses::foo::projection_present "/agents"
   STUB_RETURN=1 mktest::stub_function agents_config_harnesses::bar::projection_present "/agents"
@@ -96,7 +103,7 @@ setup() {
 }
 
 @test "install projects each harness that isn't already projected" {
-  STUB_OUTPUT="/agents" mktest::stub_function agents_config_harnesses::_agents_dir
+  STUB_OUTPUT="/agents" mktest::stub_function agents_config_setup::dir
   STUB_OUTPUT=$'foo\nbar' mktest::stub_function agents_config_harnesses::_harnesses
   STUB_RETURN=1 mktest::stub_function agents_config_harnesses::foo::projection_present "/agents"
   STUB_RETURN=1 mktest::stub_function agents_config_harnesses::bar::projection_present "/agents"
@@ -109,7 +116,7 @@ setup() {
 }
 
 @test "install skips harnesses already projected" {
-  STUB_OUTPUT="/agents" mktest::stub_function agents_config_harnesses::_agents_dir
+  STUB_OUTPUT="/agents" mktest::stub_function agents_config_setup::dir
   STUB_OUTPUT=$'foo\nbar' mktest::stub_function agents_config_harnesses::_harnesses
   mktest::stub_function agents_config_harnesses::foo::projection_present "/agents"
   mktest::stub_function agents_config_harnesses::bar::projection_present "/agents"
@@ -122,7 +129,7 @@ setup() {
 }
 
 @test "install is a clean no-op when no harnesses are configured" {
-  STUB_OUTPUT="/agents" mktest::stub_function agents_config_harnesses::_agents_dir
+  STUB_OUTPUT="/agents" mktest::stub_function agents_config_setup::dir
   mktest::stub_function agents_config_harnesses::_harnesses
   STUB_RETURN=1 mktest::stub_function input::is_dry_run
   run agents_config_harnesses::install
@@ -144,7 +151,7 @@ setup() {
   [[ "$output" == *claude_code* ]]
 }
 
-# --- _harnesses / _agents_dir ---
+# --- _harnesses ---
 
 @test "_harnesses reads the configured harnesses list" {
   STUB_OUTPUT=$'foo\nbar' mktest::stub_function config::get_array "module.agents_config_harnesses.harnesses"
@@ -158,10 +165,4 @@ setup() {
   run agents_config_harnesses::_harnesses
   [ "$status" -eq 0 ]
   [ -z "$output" ]
-}
-
-@test "_agents_dir reads the setup module's dir key with the xdg default" {
-  STUB_OUTPUT="/custom/agents" mktest::stub_function config::get "module.agents_config_setup.dir" "--default" "$HOME/.config/agents"
-  run agents_config_harnesses::_agents_dir
-  [ "$output" = "/custom/agents" ]
 }

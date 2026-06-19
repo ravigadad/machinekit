@@ -37,6 +37,13 @@ agents_config_harnesses::requires() {
   return 0
 }
 
+# Soft ordering, not a dependency: if agents_config_setup is also active it seeds
+# the dir, so it must run first — but we never pull it in, since the dir may arrive
+# by other means (synced in) with harnesses used standalone.
+agents_config_harnesses::after() {
+  printf 'agents_config_setup\n'
+}
+
 # Fail before any work on an unknown harness; dispatch each harness's own
 # preflight if it defines one. An empty/missing harnesses list is a clean no-op.
 agents_config_harnesses::preflight() {
@@ -59,7 +66,7 @@ agents_config_harnesses::preflight() {
 agents_config_harnesses::install() {
   logging::step "agents_config_harnesses install"
   local agents_config_dir pending_harnesses=() harness
-  agents_config_dir="$(agents_config_harnesses::_agents_dir)"
+  agents_config_dir="$(agents_config_setup::dir)"
   while IFS= read -r harness; do
     [ -n "$harness" ] || continue
     "agents_config_harnesses::${harness}::projection_present" "$agents_config_dir" \
@@ -93,11 +100,4 @@ agents_config_harnesses::_is_available() {
 # under set -e; an empty list is the right answer there, not a failure.
 agents_config_harnesses::_harnesses() {
   config::get_array "module.agents_config_harnesses.harnesses" || true
-}
-
-# The dir is owned by the sibling agents_config_setup module (which puts it on
-# the machine); projection only reads it. Default is the XDG convention, so this
-# works standalone before agents_config_setup exists.
-agents_config_harnesses::_agents_dir() {
-  config::get "module.agents_config_setup.dir" --default "$HOME/.config/agents"
 }

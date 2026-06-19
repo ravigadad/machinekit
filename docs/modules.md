@@ -96,9 +96,24 @@ Everything else (which banks to auto-recall or expose as tools) is plain config 
 
 ---
 
+## agents_config_setup — a source for the agents-config directory
+
+`agents_config_setup` ensures the shared agents-config directory (default `~/.config/agents`) is on the machine, seeding it from a source when it's absent. It owns the canonical `dir` key that `agents_config_harnesses` reads.
+
+Point it at where your agents config lives with `source` under `[module.agents_config_setup]` — a git URL, a local git repo, or a plain directory to copy (the same source handling as the blueprints fetch; override the auto-detected protocol with `source_protocol = "git"` or `"cp"` if needed):
+
+```toml
+[module.agents_config_setup]
+source = "git@github.com:you/agents.git"
+# dir = "~/.config/agents"          # override only to use a non-default location
+# source_protocol = "git"           # override only if auto-detection guesses wrong
+```
+
+A private git source needs the same SSH access blueprints do — register your key with your host (see the git section above). Seeding only fills an **absent or empty** dir; if the directory already exists and has contents, machinekit leaves it untouched (so syncing it on by other means, or running again, is safe). If the dir is absent and no `source` is set, preflight stops with a message.
+
 ## agents_config_harnesses — a populated agents-config directory
 
-`agents_config_harnesses` wires your coding agents to a shared agents-config directory (default `~/.config/agents`) so they all load the same instructions and skills. machinekit creates the projection; **you provide the directory's contents** — populate it yourself, or sync it onto the machine. It holds:
+`agents_config_harnesses` wires your coding agents to a shared agents-config directory (default `~/.config/agents`) so they all load the same instructions and skills. machinekit creates the projection; **you provide the directory's contents** — let `agents_config_setup` seed it from a source (above), populate it yourself, or sync it onto the machine. It holds:
 
 - a top-level `AGENTS.md` — your instructions, loaded every session;
 - `doctrine/<name>/SKILL.md` files — skills the agent loads when the task is relevant.

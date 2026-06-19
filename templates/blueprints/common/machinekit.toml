@@ -105,6 +105,20 @@
 # # config (e.g. ~/.hindsight/claude-code.json, mode 600), create-once. To repoint
 # # at a different server or regenerate, delete the config(s) and re-apply.
 #
+# [module.agents_config_setup]
+# # Ensures the shared agents-config directory is on this machine, seeding it from
+# # a source when it's absent. Owns the canonical `dir` key (default
+# # ~/.config/agents) that agents_config_harnesses reads — one source of truth, so
+# # there's no second path to keep in sync.
+# #
+# # `source` is where to seed an absent dir from: a git URL, a local git repo, or
+# # a plain directory to copy (same source handling as the blueprints fetch). A
+# # private git source needs SSH access set up, like blueprints. Seeding only fills
+# # an absent/empty dir; an already-populated dir is left untouched.
+# source = "git@github.com:you/agents.git"
+# # dir = "~/.config/agents"        # override only to use a non-default location
+# # source_protocol = "git"         # "git" or "cp"; override only if auto-detection guesses wrong
+#
 # [module.agents_config_harnesses]
 # # Projects a shared agents-config directory into your coding agents so they all
 # # load the same instructions and skills. The directory (default ~/.config/agents)
@@ -119,11 +133,10 @@
 # # overwrite a pre-existing real ~/.claude/skills directory). The directory itself
 # # must already exist — populate it yourself, or sync it onto the machine.
 # #
-# # <dir> is shared config — one source of truth, so there's no second path to
-# # keep in sync. It lives under [module.agents_config_setup].dir and defaults to
-# # ~/.config/agents; set it there to use a different location:
-# # [module.agents_config_setup]
-# # dir = "/path/to/agents"
+# # The directory is the one owned by [module.agents_config_setup] above (its
+# # `dir` key, default ~/.config/agents) — shared config, one source of truth.
+# # agents_config_setup can put the directory on the machine; this module only
+# # reads it. The two are independent — use either alone or both together.
 #
 # [module.tailscale]
 # # Omit `tag` on a user device (laptop): installs the client (GUI app on
