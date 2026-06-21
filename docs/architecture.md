@@ -467,7 +467,7 @@ machinekit/                             ← this repo (public)
 │   │   └── postflight.sh               ← postflight::* (apply summary output)
 │   └── modules/                        ← user-facing modules (representative — see lib/modules/ for the full set); each exposes ::install
 │       ├── age.sh                      ← age::preflight + age::install + age::decrypt (the .age decode handler) + age::file_transforms
-│       ├── agents_config_setup.sh      ← ensures the agents-config dir exists; seeds it from a configured source via fetch::; owns the shared dir key
+│       ├── agents_config_setup.sh      ← ensures the agents-config dir exists; seeds it via fetch::; owns the shared dir key
 │       ├── agents_config_harnesses.sh  ← projects the agents-config dir into coding agents; sources agents_config_harnesses/<harness>.sh variants
 │       ├── brewfile.sh                 ← brewfile::install (common + machine_type Brewfile layers)
 │       ├── claude_code.sh              ← claude_code::install (Claude Code CLI via the official installer)
