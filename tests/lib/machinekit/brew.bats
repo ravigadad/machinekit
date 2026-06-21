@@ -185,12 +185,22 @@ setup() {
 
 # --- brew::start_service / brew::restart_service ---
 
-@test "start_service on darwin starts a system service via sudo brew services" {
+@test "start_service on darwin defaults to a system service via sudo brew services" {
   STUB_OUTPUT="darwin" mktest::stub_function context::get "os.family"
   STUB_OUTPUT="/opt/homebrew/bin/brew" mktest::stub_function brew::_bin
   mktest::stub_function sudo
   brew::start_service postgresql@18
   mktest::assert_stub_called sudo "/opt/homebrew/bin/brew" "services" "start" "postgresql@18"
+}
+
+@test "start_service on darwin with the user scope runs brew services without sudo" {
+  STUB_OUTPUT="darwin" mktest::stub_function context::get "os.family"
+  STUB_OUTPUT="fake_brew" mktest::stub_function brew::_bin
+  mktest::stub_function sudo
+  mktest::stub_function fake_brew "services" "start" "syncthing"
+  brew::start_service syncthing user
+  mktest::assert_stub_called fake_brew "services" "start" "syncthing"
+  mktest::assert_stub_not_called sudo "fake_brew" "services" "start" "syncthing"
 }
 
 @test "start_service on linux runs brew as the user (not sudo) and enables lingering" {

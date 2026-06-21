@@ -79,21 +79,31 @@ brew::_invalidate_installed() {
   esac
 }
 
-# Start/restart a formula's background service so it survives with no interactive
-# session. darwin: `sudo brew services` registers a system LaunchDaemon (a plain
-# user invocation makes a GUI-session agent that never loads headless). linux:
-# brew refuses to run under sudo (it can't fetch the formula API as root), so run
-# brew as the invoking user and enable lingering — which keeps the user's systemd
-# service alive across logout and reboot, the headless equivalent of the mac
-# LaunchDaemon. Both are local-idempotent, so no consent gate.
-brew::start_service()   { brew::_service start   "$1"; }
-brew::restart_service() { brew::_service restart "$1"; }
+# Start/restart a formula's background service. SCOPE (default: system) selects how
+# it runs on darwin:
+#   system — `sudo brew services` registers a root LaunchDaemon that loads with no
+#            GUI session. Right for headless always-on daemons.
+#   user   — a plain `brew services` per-user LaunchAgent. Required for services
+#            that refuse to run as root (e.g. syncthing); it loads only with an
+#            active login (GUI) session, so such a host must auto-login.
+# linux: brew refuses to run under sudo (it can't fetch the formula API as root),
+# so brew runs as the invoking user and lingering keeps the user's systemd service
+# alive across logout and reboot — the headless equivalent. SCOPE doesn't change
+# Linux (its services are always user-level). All local-idempotent, no consent gate.
+brew::start_service()   { brew::_service start   "$1" "${2:-system}"; }
+brew::restart_service() { brew::_service restart "$1" "${2:-system}"; }
 
 brew::_service() {
-  local action="$1" formula="$2" family
+  local action="$1" formula="$2" scope="${3:-system}" family
   family="$(context::get os.family)"
   case "$family" in
-    darwin) sudo "$(brew::_bin)" services "$action" "$formula" ;;
+    darwin)
+      if [ "$scope" = user ]; then
+        "$(brew::_bin)" services "$action" "$formula"
+      else
+        sudo "$(brew::_bin)" services "$action" "$formula"
+      fi
+      ;;
     linux)
       sudo loginctl enable-linger "$(id -un)"
       "$(brew::_bin)" services "$action" "$formula"
