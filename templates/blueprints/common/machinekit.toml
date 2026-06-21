@@ -154,3 +154,39 @@
 # # sibling of common/ and machine_types/, not inside either:
 # #   secrets/tailscale/<tailnet>.age
 # tailnet = "work"
+#
+# [module.syncthing]
+# # Generic peer-to-peer folder sync. `discovery` defaults to "tailnet": the daemon
+# # is hardened off all public/broadcast discovery, so peers need static addresses
+# # (typically tailnet MagicDNS names) on the same tailnet. Set discovery =
+# # "default" to keep Syncthing's own discovery for LAN or relay topologies.
+# discovery = "tailnet"
+# #
+# # Hub-and-spoke. Mark ONE always-on machine `hub = true`: it accepts joiners that
+# # connect (discovering their device IDs) instead of pre-listing them. Every other
+# # machine is a client that lists only the hub. Joining is consent-gated (confirm
+# # interactively, or set MACHINEKIT_SYNCTHING_JOIN=1); until then the daemon idles
+# # with folders local-only. Apply the hub first to read its device ID, give that ID
+# # to the clients, apply them, then re-apply the hub to approve the joiners.
+# #
+# # Folders (both hub and clients): each needs an `id` (stable + identical across
+# # machines for the same folder) and a `path`.
+# [[module.syncthing.folders]]
+# id = "agents"
+# path = "~/.config/agents"
+# # Each folder gets a machinekit-managed .stignore by default, holding
+# # (?d).DS_Store and other junk that should never replicate. Per folder you can:
+# # ignore_patterns = ["*.tmp"]     # your patterns (kept above the defaults)
+# # add_default_ignores = false     # drop machinekit's built-in junk defaults
+# # manage_stignore = false         # leave .stignore entirely to you
+# #
+# # --- ON THE HUB ---
+# hub = true
+# #
+# # --- ON EACH CLIENT (instead of `hub = true`): list only the hub. ---
+# # introducer = true means "learn the other clients through the hub", so you never
+# # list client-to-client peers.
+# # [[module.syncthing.peers]]
+# # device_id = "PUT-THE-HUBS-DEVICE-ID-HERE"
+# # address = "tcp://server:22000"   # the hub's tailnet address, or "dynamic"
+# # introducer = true
