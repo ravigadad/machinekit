@@ -19,16 +19,16 @@
 agents_config_setup::preflight() {
   local dir source override
   dir=$(agents_config_setup::dir)
-  agents_config_setup::_present "$dir" && return 0
-  source=$(agents_config_setup::_source)
-  [ -n "$source" ] || lifecycle::fail \
-    "agents_config_setup: $dir is absent and no source is configured to seed it. Set [module.agents_config_setup].source."
-  # Validate the source/protocol now, cleanly, rather than mid-install: an unknown
-  # source_protocol or a cp/URL mismatch fails here via resolve_protocol's own
-  # lifecycle::fail (called directly, so it isn't swallowed in a $() subshell).
-  override=$(agents_config_setup::_source_protocol)
-  fetch::resolve_protocol "$source" "$override" >/dev/null
-  return 0
+  if ! agents_config_setup::_present "$dir"; then
+    source=$(agents_config_setup::_source)
+    [ -n "$source" ] || lifecycle::fail \
+      "agents_config_setup: $dir is absent and no source is configured to seed it. Set [module.agents_config_setup].source."
+    # Validate the source/protocol now, cleanly, rather than mid-install: an unknown
+    # source_protocol or a cp/URL mismatch fails here via resolve_protocol's own
+    # lifecycle::fail (called directly, so it isn't swallowed in a $() subshell).
+    override=$(agents_config_setup::_source_protocol)
+    fetch::resolve_protocol "$source" "$override" >/dev/null
+  fi
 }
 
 agents_config_setup::install() {
@@ -43,17 +43,15 @@ agents_config_setup::install() {
     else
       logging::debug "agents_config_setup: $dir already present; nothing to seed"
     fi
-    return 0
+  elif input::is_dry_run; then
+    logging::dry_run "would seed the agents config dir ($dir) from $(agents_config_setup::_source)"
+  else
+    source=$(agents_config_setup::_source)
+    override=$(agents_config_setup::_source_protocol)
+    protocol=$(fetch::resolve_protocol "$source" "$override")
+    logging::info "Seeding agents config dir ($dir) from $source"
+    fetch::into "$source" "$dir" "$protocol"
   fi
-  source=$(agents_config_setup::_source)
-  if input::is_dry_run; then
-    logging::dry_run "would seed the agents config dir ($dir) from $source"
-    return 0
-  fi
-  override=$(agents_config_setup::_source_protocol)
-  protocol=$(fetch::resolve_protocol "$source" "$override")
-  logging::info "Seeding agents config dir ($dir) from $source"
-  fetch::into "$source" "$dir" "$protocol"
 }
 
 # The canonical agents config dir — the shared key this module owns. Public so
