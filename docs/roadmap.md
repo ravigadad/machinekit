@@ -134,10 +134,26 @@ The directory structure (`machine_types/<type>/`) ships in iteration 1; this ite
 
 After the module system and bash modernization land, the framework's machinery is complete, and further work is driven by need rather than a planned phase list. Likely areas:
 
-- Additional modules as needs arise. Shipped since the module system landed: `tailscale` (mesh networking, with headless tagged-device support), a `postgres` host-provisioning module, `claude_code` (installs the Claude Code CLI), the Hindsight memory stack — `hindsight_server` (self-hosted memory API as a container) and `hindsight_integration` (wires coding agents to it); and the agents-config pair — `agents_config_setup` (ensures the shared agents-config directory is present, seeding it from a git or local source) and `agents_config_harnesses` (projects that directory — top-level instructions plus on-demand skills — into coding agents); more as needed (prompt themes, password-manager CLIs as a secrets-fetch layer, and so on). The current set lives in [`lib/modules/`](../lib/modules/), with operator setup for the ones that need it in [docs/modules.md](./modules.md).
-- Linux end-to-end validation: VM infrastructure and CI exist; a full apply pipeline walkthrough on Linux hasn't been done.
-- Additional content transforms as needs arise — the [home transform pipeline](#home-transform-pipeline) makes a new one (e.g. decompression) a module declaration rather than new plumbing.
-- Input resolver steps 3–4: `~/.config/machinekit/bootstrap.toml` config file and `op://` secrets manager reference — would make non-interactive setups cleaner.
+### Additional modules as needs arise.
+
+Shipped since the module system landed:
+
+- `tailscale` (mesh networking, with headless tagged-device support)
+- a `postgres` host-provisioning module
+- `claude_code` (installs the Claude Code CLI)
+- the Hindsight memory stack — `hindsight_server` (self-hosted memory API as a container) and `hindsight_integration` (wires coding agents to it)
+- the agents-config pair — `agents_config_setup` (ensures the shared agents-config directory is present, seeding it from a git or local source) and `agents_config_harnesses` (projects that directory — top-level instructions plus on-demand skills — into coding agents)
+- `syncthing` (generic peer-to-peer, tailnet-only folder sync that keeps that directory live across the fleet)
+
+More as needed (prompt themes, password-manager CLIs as a secrets-fetch layer, and so on). The current set lives in [`lib/modules/`](../lib/modules/), with operator setup for the ones that need it in [docs/modules.md](./modules.md).
+
+### Additional content transforms as needs arise
+
+The [home transform pipeline](#home-transform-pipeline) makes a new one (e.g. decompression) a module declaration rather than new plumbing.
+
+### Input resolver steps 3–4
+
+`~/.config/machinekit/bootstrap.toml` config file and `op://` secrets manager reference — would make non-interactive setups cleaner.
 
 The roadmap stops being prescriptive here. The architecture supports incremental addition; what gets added is a function of what the framework actually needs in use.
 

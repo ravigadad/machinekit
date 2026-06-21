@@ -121,3 +121,43 @@ A private git source needs the same SSH access blueprints do — register your k
 Then list `agents_config_harnesses` in `modules`, choose agents with `harnesses = ["claude_code"]`, and apply. For Claude Code this symlinks `~/.claude/skills` → `<dir>/doctrine` and adds an `@<dir>/AGENTS.md` import to `~/.claude/CLAUDE.md`.
 
 One caveat worth knowing: if `~/.claude/skills` already exists as a real directory (you keep hand-written skills there), machinekit will **not** overwrite it — it stops with a message. Move those skills into `<dir>/doctrine/` (where they get synced and projected too) and re-apply.
+
+## syncthing — pairing device IDs across machines
+
+`syncthing` keeps a set of folders replicated peer-to-peer across your machines — it's how the shared agents-config dir stays live across the fleet, though it's generic about what it syncs. Discovery defaults to **tailnet-only** (`discovery = "tailnet"`): machinekit hardens the daemon off the public discovery servers and relies on the static peer addresses you give it (typically tailnet MagicDNS names), so the machines need to be on the same tailnet. Set `discovery = "default"` to keep Syncthing's own discovery (global/LAN/relays) for non-tailnet topologies.
+
+The topology is **hub-and-spoke**: one always-on machine is the hub (`hub = true`); every other machine is a client that points at the hub and learns the rest *through* it. Device IDs are generated on first run, so some ordering is unavoidable — but only the **hub's** ID ever needs copying:
+
+1. **Apply on the hub first.** It announces the hub's device ID. The hub pre-lists no clients.
+2. **Give that hub ID to each client** (`[[module.syncthing.peers]]`, `introducer = true`) and apply. The client connects to the hub and lands in the hub's *pending* list.
+3. **Re-apply on the hub** to approve the joiners. The hub discovers their IDs from the connection (you never transcribe a client ID), adds them, and shares the folders. Adding a machine later is just steps 2–3 for that one machine; the *other* clients update themselves.
+
+Joining is consent-gated at every step — confirm interactively, or set `MACHINEKIT_SYNCTHING_JOIN=1` for an unattended run. Until consent, the daemon installs and idles with its folders local-only. (Syncthing has no "accept any device" — a deliberate approval on the hub is the security floor.)
+
+**How `introducer` actually works:** it's a one-directional flag set on the *client's* entry for the hub, meaning "I trust this peer to introduce *its* devices to me." So each client marks the hub, and the hub — which shares the folder with every approved client — introduces them to one another. The hub itself needs no introducer flag. This is what spares you the N² of pairing every client with every other; you only ever pair clients with the hub.
+
+**Hub** config:
+
+```toml
+[module.syncthing]
+hub = true                    # accept joiners instead of pre-listing them
+[[module.syncthing.folders]]
+id = "agents"                 # stable + identical across machines for the same folder
+path = "~/.config/agents"
+```
+
+**Client** config — just the hub:
+
+```toml
+[module.syncthing]
+[[module.syncthing.folders]]
+id = "agents"
+path = "~/.config/agents"
+
+[[module.syncthing.peers]]
+device_id = "HUB-DEVICE-ID"   # the hub's announced ID (the only ID you copy)
+address = "tcp://server:22000" # the hub's tailnet address (or "dynamic")
+introducer = true             # learn the other clients through the hub
+```
+
+**Ignore patterns.** Each folder gets a machinekit-managed `.stignore` by default — a delimited block holding junk that should never replicate (`(?d).DS_Store` and friends; the `(?d)` marks them deletable so they can't block a directory removal). Per folder you can add your own with `ignore_patterns = [...]` (kept above the defaults, so a `!`-negation wins Syncthing's first-match precedence), drop the built-ins with `add_default_ignores = false`, or hand the file entirely back to yourself with `manage_stignore = false`. machinekit only ever rewrites its own block; everything else in the file is yours, and deleting the block just gets it restored next apply.
