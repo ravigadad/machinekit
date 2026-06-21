@@ -50,24 +50,24 @@ setup() {
 
 @test "_ensure_skills_link creates the symlink when the path is absent" {
   local home_dir; home_dir="$(mktemp -d)"
-  local skills_link_path="$home_dir/.claude/skills" doctrine_dir="$home_dir/agents/doctrine"
-  mkdir -p "$doctrine_dir"
+  local skills_link_path="$home_dir/.claude/skills" skills_dir="$home_dir/agents/skills"
+  mkdir -p "$skills_dir"
   STUB_RETURN=1 mktest::stub_function agents_config_harnesses::claude_code::_skills_link_present "$home_dir/agents"
   STUB_OUTPUT="$skills_link_path" mktest::stub_function agents_config_harnesses::claude_code::_skills_link_path
-  STUB_OUTPUT="$doctrine_dir" mktest::stub_function agents_config_harnesses::claude_code::_doctrine_dir "$home_dir/agents"
+  STUB_OUTPUT="$skills_dir" mktest::stub_function agents_config_harnesses::claude_code::_skills_dir "$home_dir/agents"
   agents_config_harnesses::claude_code::_ensure_skills_link "$home_dir/agents"
   [ -L "$skills_link_path" ]
-  [ "$(readlink "$skills_link_path")" = "$doctrine_dir" ]
+  [ "$(readlink "$skills_link_path")" = "$skills_dir" ]
 }
 
 @test "_ensure_skills_link is a no-op when the correct symlink already exists" {
   local home_dir; home_dir="$(mktemp -d)"
-  local skills_link_path="$home_dir/.claude/skills" doctrine_dir="$home_dir/agents/doctrine"
-  mkdir -p "$doctrine_dir" "$home_dir/.claude"
+  local skills_link_path="$home_dir/.claude/skills" skills_dir="$home_dir/agents/skills"
+  mkdir -p "$skills_dir" "$home_dir/.claude"
   mktest::stub_function ln
   STUB_RETURN=0 mktest::stub_function agents_config_harnesses::claude_code::_skills_link_present "$home_dir/agents"
   STUB_OUTPUT="$skills_link_path" mktest::stub_function agents_config_harnesses::claude_code::_skills_link_path
-  STUB_OUTPUT="$doctrine_dir" mktest::stub_function agents_config_harnesses::claude_code::_doctrine_dir "$home_dir/agents"
+  STUB_OUTPUT="$skills_dir" mktest::stub_function agents_config_harnesses::claude_code::_skills_dir "$home_dir/agents"
   mktest::stub_function lifecycle::fail
   agents_config_harnesses::claude_code::_ensure_skills_link "$home_dir/agents"
   mktest::assert_stub_not_called lifecycle::fail
@@ -76,11 +76,11 @@ setup() {
 
 @test "_ensure_skills_link fails loudly when a real directory occupies the path" {
   local home_dir; home_dir="$(mktemp -d)"
-  local skills_link_path="$home_dir/.claude/skills" doctrine_dir="$home_dir/agents/doctrine"
-  mkdir -p "$skills_link_path" "$doctrine_dir"
+  local skills_link_path="$home_dir/.claude/skills" skills_dir="$home_dir/agents/skills"
+  mkdir -p "$skills_link_path" "$skills_dir"
   STUB_RETURN=1 mktest::stub_function agents_config_harnesses::claude_code::_skills_link_present "$home_dir/agents"
   STUB_OUTPUT="$skills_link_path" mktest::stub_function agents_config_harnesses::claude_code::_skills_link_path
-  STUB_OUTPUT="$doctrine_dir" mktest::stub_function agents_config_harnesses::claude_code::_doctrine_dir "$home_dir/agents"
+  STUB_OUTPUT="$skills_dir" mktest::stub_function agents_config_harnesses::claude_code::_skills_dir "$home_dir/agents"
   STUB_EXIT=1 mktest::stub_function lifecycle::fail
   run agents_config_harnesses::claude_code::_ensure_skills_link "$home_dir/agents"
   [ "$status" -ne 0 ]
@@ -89,12 +89,12 @@ setup() {
 
 @test "_ensure_skills_link fails loudly when the path is a symlink to a different target" {
   local home_dir; home_dir="$(mktemp -d)"
-  local skills_link_path="$home_dir/.claude/skills" doctrine_dir="$home_dir/agents/doctrine"
-  mkdir -p "$doctrine_dir" "$home_dir/.claude" "$home_dir/other"
+  local skills_link_path="$home_dir/.claude/skills" skills_dir="$home_dir/agents/skills"
+  mkdir -p "$skills_dir" "$home_dir/.claude" "$home_dir/other"
   ln -s "$home_dir/other" "$skills_link_path"
   STUB_RETURN=1 mktest::stub_function agents_config_harnesses::claude_code::_skills_link_present "$home_dir/agents"
   STUB_OUTPUT="$skills_link_path" mktest::stub_function agents_config_harnesses::claude_code::_skills_link_path
-  STUB_OUTPUT="$doctrine_dir" mktest::stub_function agents_config_harnesses::claude_code::_doctrine_dir "$home_dir/agents"
+  STUB_OUTPUT="$skills_dir" mktest::stub_function agents_config_harnesses::claude_code::_skills_dir "$home_dir/agents"
   STUB_EXIT=1 mktest::stub_function lifecycle::fail
   run agents_config_harnesses::claude_code::_ensure_skills_link "$home_dir/agents"
   [ "$status" -ne 0 ]
@@ -140,17 +140,17 @@ setup() {
 
 @test "_skills_link_present is true for the correct symlink" {
   local home_dir; home_dir="$(mktemp -d)"
-  local skills_link_path="$home_dir/skills" doctrine_dir="$home_dir/agents/doctrine"
-  mkdir -p "$doctrine_dir"; ln -s "$doctrine_dir" "$skills_link_path"
+  local skills_link_path="$home_dir/skills" skills_dir="$home_dir/agents/skills"
+  mkdir -p "$skills_dir"; ln -s "$skills_dir" "$skills_link_path"
   STUB_OUTPUT="$skills_link_path" mktest::stub_function agents_config_harnesses::claude_code::_skills_link_path
-  STUB_OUTPUT="$doctrine_dir" mktest::stub_function agents_config_harnesses::claude_code::_doctrine_dir "/agents"
+  STUB_OUTPUT="$skills_dir" mktest::stub_function agents_config_harnesses::claude_code::_skills_dir "/agents"
   agents_config_harnesses::claude_code::_skills_link_present "/agents"
 }
 
 @test "_skills_link_present is false when the link is absent" {
   local home_dir; home_dir="$(mktemp -d)"
   STUB_OUTPUT="$home_dir/skills" mktest::stub_function agents_config_harnesses::claude_code::_skills_link_path
-  STUB_OUTPUT="$home_dir/agents/doctrine" mktest::stub_function agents_config_harnesses::claude_code::_doctrine_dir "/agents"
+  STUB_OUTPUT="$home_dir/agents/skills" mktest::stub_function agents_config_harnesses::claude_code::_skills_dir "/agents"
   run ! agents_config_harnesses::claude_code::_skills_link_present "/agents"
 }
 
@@ -159,7 +159,7 @@ setup() {
   local skills_link_path="$home_dir/skills"
   mkdir -p "$home_dir/other"; ln -s "$home_dir/other" "$skills_link_path"
   STUB_OUTPUT="$skills_link_path" mktest::stub_function agents_config_harnesses::claude_code::_skills_link_path
-  STUB_OUTPUT="$home_dir/agents/doctrine" mktest::stub_function agents_config_harnesses::claude_code::_doctrine_dir "/agents"
+  STUB_OUTPUT="$home_dir/agents/skills" mktest::stub_function agents_config_harnesses::claude_code::_skills_dir "/agents"
   run ! agents_config_harnesses::claude_code::_skills_link_present "/agents"
 }
 
@@ -167,7 +167,7 @@ setup() {
   local home_dir; home_dir="$(mktemp -d)"
   mkdir -p "$home_dir/skills"
   STUB_OUTPUT="$home_dir/skills" mktest::stub_function agents_config_harnesses::claude_code::_skills_link_path
-  STUB_OUTPUT="$home_dir/agents/doctrine" mktest::stub_function agents_config_harnesses::claude_code::_doctrine_dir "/agents"
+  STUB_OUTPUT="$home_dir/agents/skills" mktest::stub_function agents_config_harnesses::claude_code::_skills_dir "/agents"
   run ! agents_config_harnesses::claude_code::_skills_link_present "/agents"
 }
 
@@ -206,9 +206,9 @@ setup() {
   [ "$output" = "$HOME/.claude/CLAUDE.md" ]
 }
 
-@test "_doctrine_dir is the doctrine subdir of the agents config dir" {
-  run agents_config_harnesses::claude_code::_doctrine_dir "/x/agents"
-  [ "$output" = "/x/agents/doctrine" ]
+@test "_skills_dir is the skills subdir of the agents config dir" {
+  run agents_config_harnesses::claude_code::_skills_dir "/x/agents"
+  [ "$output" = "/x/agents/skills" ]
 }
 
 @test "_agents_md_import_line is an @import of AGENTS.md" {

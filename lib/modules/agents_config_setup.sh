@@ -5,7 +5,7 @@
 # core — the same machinery blueprints uses, reading source + an optional
 # protocol override from [module.agents_config_setup] instead of CLI/env.
 #
-# Owns the canonical `dir` key (default ~/.config/agents); the sibling
+# Owns the canonical `dir` key; the sibling
 # agents_config_harnesses reads the same key to know what to project. No
 # dependency between them — same agents_config_ category, like
 # hindsight_server/hindsight_integration.
@@ -59,7 +59,7 @@ agents_config_setup::install() {
 # duplicating the key and default. A pure config read with a default, so a caller
 # resolves it whether or not this module is activated.
 agents_config_setup::dir() {
-  config::get "module.agents_config_setup.dir" --default "$HOME/.config/agents"
+  config::get "module.agents_config_setup.dir" --default "$HOME/.agents"
 }
 
 # Where to seed the dir from when it's absent (URL or local path). Empty unless

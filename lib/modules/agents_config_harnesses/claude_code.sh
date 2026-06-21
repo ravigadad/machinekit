@@ -7,10 +7,10 @@
 #   projection_present  — whether both bindings are already in place
 #
 # Two set-once bindings (validated by spike): a directory symlink
-# ~/.claude/skills → DIR/doctrine (doctrine surfaces as load-when-relevant
-# skills) and an `@DIR/AGENTS.md` import in ~/.claude/CLAUDE.md (the top-level
-# instructions load every session). Both stay live as the synced dir changes —
-# no re-run needed.
+# ~/.claude/skills → DIR/skills (the skills surface as load-when-relevant,
+# description-gated) and an `@DIR/AGENTS.md` import in ~/.claude/CLAUDE.md (the
+# top-level instructions load every session). Both stay live as the synced dir
+# changes — no re-run needed.
 
 # Claude Code must be installed for the projection to matter; the resolver
 # installs claude_code before this harness projects.
@@ -33,19 +33,19 @@ agents_config_harnesses::claude_code::project() {
   agents_config_harnesses::claude_code::_ensure_agents_md_import "$agents_config_dir"
 }
 
-# Own ~/.claude/skills as a symlink to the doctrine dir. No-op if already
+# Own ~/.claude/skills as a symlink to the skills dir. No-op if already
 # correct; refuse to clobber a real directory or a different target — surface it
-# so the user can migrate those skills into the synced doctrine dir themselves.
+# so the user can migrate those skills into the synced skills dir themselves.
 agents_config_harnesses::claude_code::_ensure_skills_link() {
-  local agents_config_dir="$1" skills_link_path doctrine_dir
+  local agents_config_dir="$1" skills_link_path skills_dir
   skills_link_path="$(agents_config_harnesses::claude_code::_skills_link_path)"
-  doctrine_dir="$(agents_config_harnesses::claude_code::_doctrine_dir "$agents_config_dir")"
+  skills_dir="$(agents_config_harnesses::claude_code::_skills_dir "$agents_config_dir")"
   agents_config_harnesses::claude_code::_skills_link_present "$agents_config_dir" && return 0
   if [ -e "$skills_link_path" ] || [ -L "$skills_link_path" ]; then
-    lifecycle::fail "agents_config_harnesses::claude_code: $skills_link_path exists and is not the expected symlink to $doctrine_dir — move or remove it (migrate any skills into $doctrine_dir), then re-apply."
+    lifecycle::fail "agents_config_harnesses::claude_code: $skills_link_path exists and is not the expected symlink to $skills_dir — move or remove it (migrate any skills into $skills_dir), then re-apply."
   fi
   mkdir -p "$(dirname "$skills_link_path")"
-  ln -s "$doctrine_dir" "$skills_link_path"
+  ln -s "$skills_dir" "$skills_link_path"
 }
 
 # Ensure ~/.claude/CLAUDE.md imports the AGENTS.md instructions file. Append
@@ -61,11 +61,11 @@ agents_config_harnesses::claude_code::_ensure_agents_md_import() {
 }
 
 agents_config_harnesses::claude_code::_skills_link_present() {
-  local agents_config_dir="$1" skills_link_path doctrine_dir
+  local agents_config_dir="$1" skills_link_path skills_dir
   skills_link_path="$(agents_config_harnesses::claude_code::_skills_link_path)"
-  doctrine_dir="$(agents_config_harnesses::claude_code::_doctrine_dir "$agents_config_dir")"
+  skills_dir="$(agents_config_harnesses::claude_code::_skills_dir "$agents_config_dir")"
   [ -L "$skills_link_path" ] || return 1
-  [ "$(readlink "$skills_link_path")" = "$doctrine_dir" ]
+  [ "$(readlink "$skills_link_path")" = "$skills_dir" ]
 }
 
 agents_config_harnesses::claude_code::_agents_md_import_present() {
@@ -84,9 +84,9 @@ agents_config_harnesses::claude_code::_claude_md_path() {
   printf '%s/.claude/CLAUDE.md\n' "$HOME"
 }
 
-agents_config_harnesses::claude_code::_doctrine_dir() {
+agents_config_harnesses::claude_code::_skills_dir() {
   local agents_config_dir="$1"
-  printf '%s/doctrine\n' "$agents_config_dir"
+  printf '%s/skills\n' "$agents_config_dir"
 }
 
 agents_config_harnesses::claude_code::_agents_md_import_line() {

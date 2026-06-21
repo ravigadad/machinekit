@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # agents_config_harnesses — projects the canonical agents config dir
-# (~/.config/agents, owned by agents_config_setup) into each coding harness so
-# the agent loads it: AGENTS.md instructions always-on, doctrine as
-# load-when-relevant skills.
+# (owned by agents_config_setup, read through its `dir` accessor) into each
+# coding harness so the agent loads it: AGENTS.md instructions always-on, skills
+# as load-when-relevant.
 # Each harness's projection lives in a submodule (agents_config_harnesses/<harness>.sh)
 # sharing one contract; the user picks which with the `harnesses` array.
 #

@@ -120,8 +120,8 @@ setup() {
 
 # --- config accessors (dir, _source, _source_protocol) ---
 
-@test "dir reads the dir key with the xdg default" {
-  STUB_OUTPUT="/custom/agents" mktest::stub_function config::get "module.agents_config_setup.dir" "--default" "$HOME/.config/agents"
+@test "dir reads the dir key, defaulting to ~/.agents" {
+  STUB_OUTPUT="/custom/agents" mktest::stub_function config::get "module.agents_config_setup.dir" "--default" "$HOME/.agents"
   run agents_config_setup::dir
   [ "$output" = "/custom/agents" ]
 }

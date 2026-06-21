@@ -121,7 +121,7 @@ setup() {
 # --- _validate_folders / _validate_peers (real jq) ---
 
 @test "_validate_folders passes a well-formed list" {
-  run syncthing::_validate_folders '[{"id":"agents","path":"~/.config/agents"}]'
+  run syncthing::_validate_folders '[{"id":"agents","path":"~/.agents"}]'
   [ "$status" -eq 0 ]
 }
 

@@ -108,7 +108,7 @@
 # [module.agents_config_setup]
 # # Ensures the shared agents-config directory is on this machine, seeding it from
 # # a source when it's absent. Owns the canonical `dir` key (default
-# # ~/.config/agents) that agents_config_harnesses reads — one source of truth, so
+# # ~/.agents) that agents_config_harnesses reads — one source of truth, so
 # # there's no second path to keep in sync.
 # #
 # # `source` is where to seed an absent dir from: a git URL, a local git repo, or
@@ -116,25 +116,25 @@
 # # private git source needs SSH access set up, like blueprints. Seeding only fills
 # # an absent/empty dir; an already-populated dir is left untouched.
 # source = "git@github.com:you/agents.git"
-# # dir = "~/.config/agents"        # override only to use a non-default location
+# # dir = "~/.agents"        # override only to use a non-default location
 # # source_protocol = "git"         # "git" or "cp"; override only if auto-detection guesses wrong
 #
 # [module.agents_config_harnesses]
 # # Projects a shared agents-config directory into your coding agents so they all
-# # load the same instructions and skills. The directory (default ~/.config/agents)
+# # load the same instructions and skills. The directory (default ~/.agents)
 # # holds a top-level AGENTS.md (instructions loaded every session) and a
-# # doctrine/<name>/SKILL.md folder (skills the agent loads when relevant). List
+# # skills/<name>/SKILL.md folder (skills the agent loads when relevant). List
 # # "agents_config_harnesses" in `modules` and pick agents with `harnesses` (each
 # # set up by its own submodule). Optional — omit or leave empty to project nothing.
 # harnesses = ["claude_code"]
 # #
-# # For Claude Code this symlinks ~/.claude/skills → <dir>/doctrine and adds an
+# # For Claude Code this symlinks ~/.claude/skills → <dir>/skills and adds an
 # # `@<dir>/AGENTS.md` import to ~/.claude/CLAUDE.md (both idempotent; it refuses to
 # # overwrite a pre-existing real ~/.claude/skills directory). The directory itself
 # # must already exist — populate it yourself, or sync it onto the machine.
 # #
 # # The directory is the one owned by [module.agents_config_setup] above (its
-# # `dir` key, default ~/.config/agents) — shared config, one source of truth.
+# # `dir` key, default ~/.agents) — shared config, one source of truth.
 # # agents_config_setup can put the directory on the machine; this module only
 # # reads it. The two are independent — use either alone or both together.
 #
@@ -173,7 +173,7 @@
 # # machines for the same folder) and a `path`.
 # [[module.syncthing.folders]]
 # id = "agents"
-# path = "~/.config/agents"
+# path = "~/.agents"
 # # Each folder gets a machinekit-managed .stignore by default, holding
 # # (?d).DS_Store and other junk that should never replicate. Per folder you can:
 # # ignore_patterns = ["*.tmp"]     # your patterns (kept above the defaults)
@@ -212,7 +212,7 @@
 # # (Syncthing's version buffer), which git would otherwise commit. So pairing the
 # # syncthing folder above with this one just works; you don't list .stversions/.
 # [[module.git_backup.folders]]
-# path = "~/.config/agents"
+# path = "~/.agents"
 # remote = "git@github.com:you/agents.git"
 # # ssh_key = "agents"             # override the module default for this folder
 # # ignore_patterns = ["build/"]   # your patterns (kept above the defaults)
