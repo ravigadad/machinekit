@@ -449,6 +449,7 @@ machinekit/                             ← this repo (public)
 │   │   ├── system.sh                   ← system::detect — populates os.family + os.arch into context
 │   │   ├── brew.sh                     ← brew::* (bootstrap, install_formula — low-level brew ops)
 │   │   ├── fetch.sh                    ← fetch::* (source-agnostic: resolve_protocol, into; git clone w/ SSH fallback + error classification, or cp)
+│   │   ├── managed_block.sh            ← managed_block::ensure (maintain a delimited machinekit-owned block in a file; shared by syncthing/git_backup ignore files)
 │   │   ├── blueprints.sh               ← blueprints::* (fetch, dir — orchestrates fetch:: into the cached blueprints location)
 │   │   ├── ssh.sh                      ← ssh::* (key install, generate, interactive discover)
 │   │   ├── config.sh                   ← config::* (parse + merge machinekit.toml via toml2json; stored in context)

@@ -20,6 +20,8 @@ source "$_mk_core_dir/system.sh"
 source "$_mk_core_dir/brew.sh"
 # shellcheck source=machinekit/fetch.sh
 source "$_mk_core_dir/fetch.sh"
+# shellcheck source=machinekit/managed_block.sh
+source "$_mk_core_dir/managed_block.sh"
 # shellcheck source=machinekit/blueprints.sh
 source "$_mk_core_dir/blueprints.sh"
 # shellcheck source=machinekit/config.sh
