@@ -144,6 +144,7 @@ Shipped since the module system landed:
 - the Hindsight memory stack — `hindsight_server` (self-hosted memory API as a container) and `hindsight_integration` (wires coding agents to it)
 - the agents-config pair — `agents_config_setup` (ensures the shared agents-config directory is present, seeding it from a git or local source) and `agents_config_harnesses` (projects that directory — top-level instructions plus on-demand skills — into coding agents)
 - `syncthing` (generic peer-to-peer, tailnet-only folder sync that keeps that directory live across the fleet)
+- `git_backup` (generic, single-writer push-only-with-abort backup of configured folders to git remotes, one manifest-driven service)
 
 More as needed (prompt themes, password-manager CLIs as a secrets-fetch layer, and so on). The current set lives in [`lib/modules/`](../lib/modules/), with operator setup for the ones that need it in [docs/modules.md](./modules.md).
 

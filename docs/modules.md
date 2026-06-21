@@ -161,3 +161,37 @@ introducer = true             # learn the other clients through the hub
 ```
 
 **Ignore patterns.** Each folder gets a machinekit-managed `.stignore` by default — a delimited block holding junk that should never replicate (`(?d).DS_Store` and friends; the `(?d)` marks them deletable so they can't block a directory removal). Per folder you can add your own with `ignore_patterns = [...]` (kept above the defaults, so a `!`-negation wins Syncthing's first-match precedence), drop the built-ins with `add_default_ignores = false`, or hand the file entirely back to yourself with `manage_stignore = false`. machinekit only ever rewrites its own block; everything else in the file is yours, and deleting the block just gets it restored next apply.
+
+## git_backup — an SSH key for the folders you back up
+
+`git_backup` periodically pushes one or more working dirs to git remotes, so a live, replicated dir gets durable history (Syncthing, for example, propagates deletions, so it isn't itself a backup). It's generic — it backs up whatever folders you list and knows nothing about what's in them. The agents-config dir is the typical case, but any git-pushable folder works.
+
+Each folder is **single-writer**: back a given folder up from exactly one machine — usually the always-on server — or the machines race its one downstream branch. One service runs on that machine and pushes every configured folder on the interval; a folder whose push hits an unexpected divergence rebases, and if that conflicts it aborts and notifies, leaving both sides untouched.
+
+List the folders under `[module.git_backup]`:
+
+```toml
+[module.git_backup]
+ssh_key = "agents"             # module-level default key name (optional; see below)
+# interval = 300               # seconds between backup runs
+# notify = "/path/to/notify-hook"  # run with a message on trouble; default: logger/journald
+
+[[module.git_backup.folders]]
+path = "~/.config/agents"
+remote = "git@github.com:you/agents.git"
+# ssh_key = "agents"           # per-folder override of the module default
+
+[[module.git_backup.folders]]
+path = "~/notes"
+remote = "git@github.com:you/notes.git"
+```
+
+**The push key.** A folder pushes over whatever SSH key you name. `ssh_key` is the name of an age-encrypted key in the blueprint pool — set it module-wide and/or override it per folder. machinekit decrypts it on the server (never the home pipeline) to a private key file the push uses:
+
+```
+secrets/git_backup/ssh_keys/<name>.age   # an SSH private key authorized to push to that folder's remote
+```
+
+Any key with write access works — a GitHub deploy key, your own key, whatever. Generate one (`ssh-keygen -t ed25519 -f <name> -N ""`), authorize its public half on the remote, then age-encrypt the private half into the pool path above. **Omit `ssh_key` entirely** to push over ambient SSH (an agent or an on-disk default key) — then no secret is needed. When any `ssh_key` is named, preflight requires its secret and pulls in the `age` module automatically.
+
+**Ignore patterns.** Each folder gets a machinekit-managed `.gitignore` by default, so the backup repo never carries junk — `.DS_Store` and, notably, `.stversions/` (Syncthing's version buffer), which git would otherwise commit. So pairing a `syncthing` folder with a `git_backup` folder for the same path just works; you don't list `.stversions/` yourself. The same three knobs apply per folder: `ignore_patterns = [...]` (your patterns, above the defaults), `add_default_ignores = false`, and `manage_gitignore = false` (leave the file to you). machinekit rewrites only its own delimited block; as with any `.gitignore` it affects only untracked files, so anything already committed needs a manual `git rm --cached`. The `.gitignore` is written only if the folder already exists — git_backup never creates a folder another module is meant to seed.

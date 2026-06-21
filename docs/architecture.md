@@ -474,6 +474,7 @@ machinekit/                             ← this repo (public)
 │       ├── docker_ce.sh                ← docker_ce::provides + docker_ce::install (Linux container runtime)
 │       ├── git.sh                      ← git::preflight + git::install (no-op; ships templates)
 │       ├── git/templates/              ← module-shipped dotfile defaults (dot_gitconfig.tmpl, dot_config/git/ignore.tmpl)
+│       ├── git_backup.sh               ← git_backup::install (periodic push-only-with-abort backup of configured folders; one manifest-driven service); ships git_backup/push.sh
 │       ├── gomplate.sh                 ← gomplate::file_transforms + render + install (base module: the .tmpl handler)
 │       ├── hindsight_integration.sh    ← wires coding agents to a Hindsight server; sources hindsight_integration/<agent>.sh variants
 │       ├── hindsight_server.sh         ← self-hosted Hindsight memory API (container, against host postgres)

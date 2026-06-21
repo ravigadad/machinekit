@@ -190,3 +190,31 @@
 # # device_id = "PUT-THE-HUBS-DEVICE-ID-HERE"
 # # address = "tcp://server:22000"   # the hub's tailnet address, or "dynamic"
 # # introducer = true
+#
+# [module.git_backup]
+# # Periodically pushes one or more working dirs to git remotes, giving a live,
+# # replicated dir (e.g. one Syncthing keeps in sync, which propagates deletions
+# # and so isn't itself a backup) durable history. Generic — it backs up whatever
+# # folders you list and knows nothing about what's in them. One service runs for
+# # all folders. Each folder is single-writer: back a given folder up from EXACTLY
+# # ONE machine (usually the always-on server), or the machines race its branch.
+# #
+# # `ssh_key` (module default; per-folder override below) names an age-encrypted
+# # key in the pool at secrets/git_backup/ssh_keys/<name>.age — any key with push
+# # access (a deploy key, your own key). machinekit decrypts it and pushes with it,
+# # pulling in the age module automatically. Omit it to push over ambient SSH.
+# ssh_key = "agents"
+# # interval = 300                  # seconds between backup runs
+# # notify = "/path/to/notify-hook" # run with a message on trouble; default: logger/journald
+# #
+# # Each folder needs a `path` and a `remote`. It also gets a machinekit-managed
+# # .gitignore by default, holding .DS_Store and — importantly — .stversions/
+# # (Syncthing's version buffer), which git would otherwise commit. So pairing the
+# # syncthing folder above with this one just works; you don't list .stversions/.
+# [[module.git_backup.folders]]
+# path = "~/.config/agents"
+# remote = "git@github.com:you/agents.git"
+# # ssh_key = "agents"             # override the module default for this folder
+# # ignore_patterns = ["build/"]   # your patterns (kept above the defaults)
+# # add_default_ignores = false    # drop machinekit's built-in junk defaults
+# # manage_gitignore = false       # leave .gitignore entirely to you
