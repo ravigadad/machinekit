@@ -19,7 +19,10 @@ age::preflight() {
 
   if [ -n "$existing_key_file" ]; then
     [ -f "$existing_key_file" ] || lifecycle::fail "age key not found at: $existing_key_file"
-    [ -f "$key_path" ] && age::_confirm_overwrite "$key_path" "--existing-age-key-file"
+    # Only confirm a real overwrite; an identical key already in place is an idempotent re-apply.
+    if [ -f "$key_path" ] && ! cmp -s "$existing_key_file" "$key_path"; then
+      age::_confirm_overwrite "$key_path" "--existing-age-key-file"
+    fi
     logging::info "age key: will install from $existing_key_file"
   elif [ -f "$key_path" ]; then
     generate=$(context::get "age.key_generate" --coerce boolean --default false --store-default)

@@ -23,7 +23,7 @@ setup() {
   MATCH="will install" mktest::assert_stub_called logging::info
 }
 
-@test "preflight calls _confirm_overwrite and logs copy plan when existing key file conflicts with destination" {
+@test "preflight calls _confirm_overwrite and logs copy plan when the provided key differs from the destination" {
   local keyfile="$BATS_TEST_TMPDIR/provided-key.txt"
   printf 'fake key\n' > "$keyfile"
   mkdir -p "$(dirname "$AGE_KEY_PATH")"
@@ -34,6 +34,20 @@ setup() {
   mktest::stub_function logging::info
   age::preflight
   mktest::assert_stub_called age::_confirm_overwrite "$AGE_KEY_PATH" "--existing-age-key-file"
+  MATCH="will install" mktest::assert_stub_called logging::info
+}
+
+@test "preflight skips _confirm_overwrite when the provided key is identical to the destination" {
+  local keyfile="$BATS_TEST_TMPDIR/provided-key.txt"
+  printf 'same key\n' > "$keyfile"
+  mkdir -p "$(dirname "$AGE_KEY_PATH")"
+  printf 'same key\n' > "$AGE_KEY_PATH"
+  STUB_OUTPUT="$AGE_KEY_PATH" mktest::stub_function config::get "module.age.key_path" "--default" "$AGE_KEY_PATH" "--store-default"
+  STUB_OUTPUT="$keyfile" mktest::stub_function context::get "existing_age_key_file"
+  mktest::stub_function age::_confirm_overwrite
+  mktest::stub_function logging::info
+  age::preflight
+  mktest::assert_stub_not_called age::_confirm_overwrite
   MATCH="will install" mktest::assert_stub_called logging::info
 }
 
