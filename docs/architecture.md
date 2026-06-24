@@ -145,6 +145,8 @@ gomplate is the motivating example. Template rendering is core, so the `.tmpl` c
 
 ### Execution modes
 
+machinekit always runs **locally, on the target machine itself**, in the invoking user's own login session — `install.sh` is `curl … | bash` *on that machine* and simply `exec`s `bin/machinekit-apply` locally. Nothing SSHes out to provision a remote; there is no separate control node. (A remote-apply-over-SSH mode is possible but not built.) A corollary for debugging: a failure that only appears when a machine is driven *remotely over SSH for testing* — a non-login `Background` session, a missing session `$HOME`, launchd-domain differences — is an artifact of that remote harness, not a production bug. Reproduce against a real local run before treating it as one.
+
 Bootstrap supports two modes, detected automatically and overridable by flag:
 
 1. **Interactive** — the default when stdin is a TTY. Inputs are resolved CLI flag → env var → interactive prompt for whatever is missing. Suits a fresh-laptop walkthrough and power users alike: provide what you already know, get prompted for the rest.

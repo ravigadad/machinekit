@@ -37,14 +37,6 @@ These are non-obvious from reading the code alone:
 - Logging goes to stderr; only intentional script output goes to stdout.
 - Comments explain *why*, not *what*. No multi-paragraph docstrings.
 
-## Testing
-
-Tests live in `tests/lib/`, mirroring the `lib/` directory structure (e.g. `tests/lib/machinekit/brew.bats` covers `lib/machinekit/brew.sh`). Run with `bats tests/`.
-
-Stub infrastructure lives in `tests/helpers/stubbing.sh`. Read it before writing stubs — it defines `mktest::stub_function` (allow-style: sets up the fake), `mktest::assert_stub_called` / `mktest::assert_stub_not_called` (expect-style: asserts invocation). STUB_OUTPUT, STUB_RETURN, and positional-arg matching are covered there.
-
-**Before writing or reviewing any test, load `~/.claude/memory/feedback_testing_principles.md`** (global memory). It covers behavior vs mechanism, the AND pattern, the integrated anti-pattern, stubs-as-wiring, parameterized-output stubs as self-asserting, logging-as-mechanism, guard-code coverage, setup source discipline, exit-function limitations, source-time extraction, and testability seams. The project auto-memory index (loaded by the harness) also has a machinekit-specific companion file with bats/stub implementation details — read both.
-
 ## When making documentation changes
 
 The document split is intentional:
