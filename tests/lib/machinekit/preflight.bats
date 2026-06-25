@@ -73,6 +73,7 @@ setup() {
 @test "resolve_active_modules resolves the base set even when none are requested" {
   MK_BASE_MODULES=(bm1 bm2)
   STUB_OUTPUT="" mktest::stub_function config::get_array "modules"
+  STUB_OUTPUT="" mktest::stub_function config::get_array "additional_modules"
   STUB_OUTPUT=$'bm1\nbm2\ndep' mktest::stub_function resolver::resolve bm1 bm2
   mktest::stub_function context::set_array "modules.active" bm1 bm2 dep
   preflight::resolve_active_modules
@@ -82,8 +83,37 @@ setup() {
 @test "resolve_active_modules resolves the base set unioned with the requested modules" {
   MK_BASE_MODULES=(bm1 bm2)
   STUB_OUTPUT=$'foo\nbar' mktest::stub_function config::get_array "modules"
+  STUB_OUTPUT="" mktest::stub_function config::get_array "additional_modules"
   STUB_OUTPUT=$'bm1\nbm2\nfoo\nbar\nbaz' mktest::stub_function resolver::resolve bm1 bm2 foo bar
   mktest::stub_function context::set_array "modules.active" bm1 bm2 foo bar baz
   preflight::resolve_active_modules
   mktest::assert_stub_called context::set_array "modules.active" bm1 bm2 foo bar baz
+}
+
+# additional_modules extends the requested set rather than replacing it: a machine
+# type sets it to add a few modules on top of common's, which the config merge would
+# otherwise have it replace wholesale. Both keys feed the resolver, common's first.
+@test "resolve_active_modules appends additional_modules onto the requested set" {
+  MK_BASE_MODULES=(bm1 bm2)
+  STUB_OUTPUT=$'foo\nbar' mktest::stub_function config::get_array "modules"
+  STUB_OUTPUT=$'extra1\nextra2' mktest::stub_function config::get_array "additional_modules"
+  STUB_OUTPUT=$'bm1\nbm2\nfoo\nbar\nextra1\nextra2\nbaz' \
+    mktest::stub_function resolver::resolve bm1 bm2 foo bar extra1 extra2
+  mktest::stub_function context::set_array "modules.active" bm1 bm2 foo bar extra1 extra2 baz
+  preflight::resolve_active_modules
+  mktest::assert_stub_called context::set_array "modules.active" bm1 bm2 foo bar extra1 extra2 baz
+}
+
+# The two keys are read independently, so additional_modules contributes even when
+# no `modules` list is inherited — it is not a sub-clause of `modules` being set. An
+# absent key makes config::get_array return non-zero (STUB_RETURN), which must not
+# suppress the second read.
+@test "resolve_active_modules reads additional_modules even with no modules list" {
+  MK_BASE_MODULES=(bm1 bm2)
+  STUB_RETURN=1 mktest::stub_function config::get_array "modules"
+  STUB_OUTPUT=$'extra1\nextra2' mktest::stub_function config::get_array "additional_modules"
+  STUB_OUTPUT=$'bm1\nbm2\nextra1\nextra2' mktest::stub_function resolver::resolve bm1 bm2 extra1 extra2
+  mktest::stub_function context::set_array "modules.active" bm1 bm2 extra1 extra2
+  preflight::resolve_active_modules
+  mktest::assert_stub_called context::set_array "modules.active" bm1 bm2 extra1 extra2
 }

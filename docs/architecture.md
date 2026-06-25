@@ -80,7 +80,7 @@ At apply time, with `--machine-type <type>`:
 1. **home** — module template dirs layer first; then `common/home/`; then `machine_types/<type>/home/`. machinekit applies the merged result.
 2. **Brewfile** — `common/Brewfile` runs first; then `machine_types/<type>/Brewfile` (additive).
 3. **hooks/post-apply/** — `common/`'s hooks run first; then the type's hooks.
-4. **machinekit.toml** — `common/machinekit.toml` is loaded; values in `machine_types/<type>/machinekit.toml` override on key conflict.
+4. **machinekit.toml** — `common/machinekit.toml` is loaded; values in `machine_types/<type>/machinekit.toml` override on key conflict — so a type's `modules` array replaces common's wholesale, with `additional_modules` as the extend-don't-replace alternative (its entries are appended to the inherited set).
 
 Without `--machine-type`, only the `common/` layer applies. There is no special "default" machine type; absence of the flag means "no type-specific layering."
 

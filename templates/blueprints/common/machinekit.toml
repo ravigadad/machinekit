@@ -2,7 +2,9 @@
 # Per-machine-type overrides go in machine_types/<type>/machinekit.toml.
 
 # Uncomment and edit to activate modules. Order doesn't matter — dependencies
-# resolve automatically.
+# resolve automatically. A machine_types/<type>/machinekit.toml that sets its own
+# `modules` replaces this list; to add modules on top of it instead, set
+# `additional_modules` there.
 #
 # modules = [
 #   "git",

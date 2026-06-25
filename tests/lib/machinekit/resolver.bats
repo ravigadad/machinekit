@@ -60,6 +60,17 @@ setup() {
   [ "$count" -eq 1 ]
 }
 
+# A module named twice in the requested set collapses to one — the case
+# additional_modules makes likely (a module in common's `modules` and again in a
+# type's `additional_modules`). The second visit must not re-add it or re-walk its
+# dependencies.
+@test "resolve deduplicates a module listed twice in the requested set" {
+  alpha::requires() { printf 'beta\n'; }
+  result=$(resolver::resolve alpha alpha)
+  [ "$(printf '%s\n' "$result" | grep -c '^alpha$')" -eq 1 ]
+  [ "$(printf '%s\n' "$result" | grep -c '^beta$')" -eq 1 ]
+}
+
 @test "resolve includes all requested modules in output" {
   result=$(resolver::resolve alpha beta)
   printf '%s\n' "$result" | grep -q '^alpha$'
