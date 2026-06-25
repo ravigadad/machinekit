@@ -11,6 +11,8 @@ setup() {
   MANIFEST="$BATS_TEST_TMPDIR/manifest.tsv"
   NOTIFY_LOG="$BATS_TEST_TMPDIR/notify.log"
   NOTIFY="$BATS_TEST_TMPDIR/notify.sh"
+  ARGV_LOG="$BATS_TEST_TMPDIR/git.argv"
+  SSH_LOG="$BATS_TEST_TMPDIR/git.ssh"
   cat > "$NOTIFY" <<EOF
 #!/usr/bin/env bash
 printf '%s\n' "\$1" >> "$NOTIFY_LOG"
@@ -30,6 +32,32 @@ run_manifest() {
 run_backup() {
   printf '%s\t%s\t%s\n' "$WORK" "$ORIGIN" "" > "$MANIFEST"
   run_manifest
+}
+
+# Back up WORK → ORIGIN with the given ssh_key column ("" for none), under a git
+# that records both its argv and the GIT_SSH_COMMAND it inherits, then forwards to
+# real git so the backup still completes. One run thus exposes both how the script
+# invokes git (the baked identity in ARGV_LOG) and the ssh command it exports for
+# the folder (host-key policy / key in SSH_LOG). The remote is a local path, so git
+# never actually invokes ssh — but the script exports the command for every git
+# call, so SSH_LOG captures exactly what an ssh push would have used.
+#
+# ARGV accumulates every call one per line (the invocations differ, and the per-line
+# record is what lets a test assert the identity rides every one); the ssh command is
+# constant for the folder, so it overwrites to the one value in effect — exact-
+# matchable, and left empty when no key sets it.
+run_recorded_backup() {
+  local ssh_key="$1" fakegit="$BATS_TEST_TMPDIR/fakegit"
+  cat > "$fakegit" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "$ARGV_LOG"
+printf '%s' "\${GIT_SSH_COMMAND:-}" > "$SSH_LOG"
+exec git "\$@"
+EOF
+  chmod +x "$fakegit"
+  printf '%s\t%s\t%s\n' "$WORK" "$ORIGIN" "$ssh_key" > "$MANIFEST"
+  run env MK_GIT_BACKUP_MANIFEST="$MANIFEST" MK_GIT_BACKUP_NOTIFY="$NOTIFY" \
+    MK_GIT_BACKUP_GIT="$fakegit" bash "$SCRIPT"
 }
 
 # Working dir already a repo wired to origin, with one pushed base commit.
@@ -61,24 +89,29 @@ origin_has_file() {
 
 # --- push::git (the git binary the whole script funnels through) ---
 
-@test "routes git through MK_GIT_BACKUP_GIT with the baked machinekit identity" {
+@test "with no key: bakes the machinekit identity into git and leaves ssh at its default" {
   seed_work
   printf 'change\n' > "$WORK/change.txt"
-  # A wrapper that records its argv, then forwards to the real git so the backup
-  # still completes. If the script ignored MK_GIT_BACKUP_GIT, the log never appears.
-  local fakegit="$BATS_TEST_TMPDIR/fakegit"
-  cat > "$fakegit" <<EOF
-#!/usr/bin/env bash
-printf '%s\n' "\$*" >> "$BATS_TEST_TMPDIR/git.argv"
-exec git "\$@"
-EOF
-  chmod +x "$fakegit"
-  printf '%s\t%s\t%s\n' "$WORK" "$ORIGIN" "" > "$MANIFEST"
-  run env MK_GIT_BACKUP_MANIFEST="$MANIFEST" MK_GIT_BACKUP_NOTIFY="$NOTIFY" \
-    MK_GIT_BACKUP_GIT="$fakegit" bash "$SCRIPT"
+  run_recorded_backup ""
   [ "$status" -eq 0 ]
-  [ -f "$BATS_TEST_TMPDIR/git.argv" ]
-  grep -q -- '-c user.name=machinekit -c user.email=machinekit@localhost' "$BATS_TEST_TMPDIR/git.argv"
+  run ! grep -qvE -- '-c user.name=machinekit -c user.email=machinekit@localhost' "$ARGV_LOG"
+  # No key → the script never sets GIT_SSH_COMMAND, so nothing is recorded and the
+  # log stays empty; git uses its default ssh.
+  [ ! -s "$SSH_LOG" ]
+}
+
+@test "with a key: keeps the baked identity and drives git over the key with accept-new" {
+  seed_work
+  printf 'change\n' > "$WORK/change.txt"
+  local key="$BATS_TEST_TMPDIR/id_backup"
+  run_recorded_backup "$key"
+  [ "$status" -eq 0 ]
+  # Same baked identity as the no-key case — it's independent of the ssh key.
+  run ! grep -qvE -- '-c user.name=machinekit -c user.email=machinekit@localhost' "$ARGV_LOG"
+  # Plus a GIT_SSH_COMMAND pinning the key and trusting an unknown host on first
+  # contact (the daemon has no TTY to answer StrictHostKeyChecking=ask). Exact, so a
+  # stray extra option would fail rather than slip past a substring match.
+  [ "$(cat "$SSH_LOG")" = "ssh -i $key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new" ]
 }
 
 # --- first push (initializes a non-repo dir) ---

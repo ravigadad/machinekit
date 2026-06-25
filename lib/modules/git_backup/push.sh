@@ -105,7 +105,9 @@ push::push() {
 push::backup_folder() {
   local path="$1" remote="$2" ssh_key="$3"
   cd "$path" 2>/dev/null || push::fail "git_backup: dir not found: $path"
-  [ -n "$ssh_key" ] && export GIT_SSH_COMMAND="ssh -i $ssh_key -o IdentitiesOnly=yes"
+  # accept-new auto-trusts an unknown host key on first contact (the daemon has no
+  # TTY to answer StrictHostKeyChecking=ask) while still refusing a changed key.
+  [ -n "$ssh_key" ] && export GIT_SSH_COMMAND="ssh -i $ssh_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
   push::ensure_repo "$remote"
   push::commit_local
   push::push
