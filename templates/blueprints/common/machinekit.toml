@@ -127,13 +127,17 @@
 # # holds a top-level AGENTS.md (instructions loaded every session) and a
 # # skills/<name>/SKILL.md folder (skills the agent loads when relevant). List
 # # "agents_config_harnesses" in `modules` and pick agents with `harnesses` (each
-# # set up by its own submodule). Optional — omit or leave empty to project nothing.
-# harnesses = ["claude_code"]
+# # set up by its own submodule). Available: claude_code, codex, opencode. Optional —
+# # omit or leave empty to project nothing.
+# harnesses = ["claude_code", "codex", "opencode"]
 # #
 # # For Claude Code this symlinks ~/.claude/skills → <dir>/skills and adds an
-# # `@<dir>/AGENTS.md` import to ~/.claude/CLAUDE.md (both idempotent; it refuses to
-# # overwrite a pre-existing real ~/.claude/skills directory). The directory itself
-# # must already exist — populate it yourself, or sync it onto the machine.
+# # `@<dir>/AGENTS.md` import to ~/.claude/CLAUDE.md. Codex and opencode read skills
+# # from <dir> natively, so for them it is just a symlink of their global AGENTS.md
+# # (~/.codex/AGENTS.md, ~/.config/opencode/AGENTS.md) to <dir>/AGENTS.md. Every
+# # binding is idempotent and refuses to overwrite a pre-existing real file in its
+# # place. The directory itself must already exist — populate it yourself, or sync it
+# # onto the machine.
 # #
 # # The directory is the one owned by [module.agents_config_setup] above (its
 # # `dir` key, default ~/.agents) — shared config, one source of truth.

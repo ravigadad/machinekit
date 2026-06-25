@@ -166,3 +166,81 @@ setup() {
   [ "$status" -eq 0 ]
   [ -z "$output" ]
 }
+
+# --- _agents_md_source ---
+# Shared by the file-symlink harness submodules (codex, opencode): the AGENTS.md
+# they each point their global instructions file at.
+
+@test "_agents_md_source is the AGENTS.md within the agents config dir" {
+  run agents_config_harnesses::_agents_md_source /agents
+  [ "$output" = "/agents/AGENTS.md" ]
+}
+
+# --- _ensure_agents_md_link ---
+
+@test "_ensure_agents_md_link creates the symlink when the path is absent" {
+  local home_dir; home_dir="$(mktemp -d)"
+  local link_path="$home_dir/.codex/AGENTS.md" source="$home_dir/agents/AGENTS.md"
+  STUB_RETURN=1 mktest::stub_function agents_config_harnesses::_agents_md_link_present "$link_path" "/agents"
+  STUB_OUTPUT="$source" mktest::stub_function agents_config_harnesses::_agents_md_source "/agents"
+  agents_config_harnesses::_ensure_agents_md_link "$link_path" "/agents"
+  [ -L "$link_path" ]
+  [ "$(readlink "$link_path")" = "$source" ]
+}
+
+@test "_ensure_agents_md_link is a no-op when the correct symlink already exists" {
+  mktest::stub_function ln
+  mktest::stub_function lifecycle::fail
+  mktest::stub_function agents_config_harnesses::_agents_md_link_present "/fake/.codex/AGENTS.md" "/agents"
+  agents_config_harnesses::_ensure_agents_md_link "/fake/.codex/AGENTS.md" "/agents"
+  mktest::assert_stub_not_called ln
+  mktest::assert_stub_not_called lifecycle::fail
+}
+
+@test "_ensure_agents_md_link fails loudly when a real file occupies the path" {
+  local home_dir; home_dir="$(mktemp -d)"
+  local link_path="$home_dir/.codex/AGENTS.md"
+  mkdir -p "$home_dir/.codex"; printf 'mine\n' > "$link_path"
+  STUB_RETURN=1 mktest::stub_function agents_config_harnesses::_agents_md_link_present "$link_path" "/agents"
+  STUB_OUTPUT="/agents/AGENTS.md" mktest::stub_function agents_config_harnesses::_agents_md_source "/agents"
+  STUB_EXIT=1 mktest::stub_function lifecycle::fail
+  run agents_config_harnesses::_ensure_agents_md_link "$link_path" "/agents"
+  [ "$status" -ne 0 ]
+  mktest::assert_stub_called lifecycle::fail
+}
+
+@test "_ensure_agents_md_link fails loudly when the path is a symlink to a different target" {
+  local home_dir; home_dir="$(mktemp -d)"
+  local link_path="$home_dir/.codex/AGENTS.md"
+  mkdir -p "$home_dir/.codex" "$home_dir/other"; ln -s "$home_dir/other/AGENTS.md" "$link_path"
+  STUB_RETURN=1 mktest::stub_function agents_config_harnesses::_agents_md_link_present "$link_path" "/agents"
+  STUB_OUTPUT="/agents/AGENTS.md" mktest::stub_function agents_config_harnesses::_agents_md_source "/agents"
+  STUB_EXIT=1 mktest::stub_function lifecycle::fail
+  run agents_config_harnesses::_ensure_agents_md_link "$link_path" "/agents"
+  [ "$status" -ne 0 ]
+  mktest::assert_stub_called lifecycle::fail
+}
+
+# --- _agents_md_link_present ---
+
+@test "_agents_md_link_present is true for the correct symlink" {
+  local home_dir; home_dir="$(mktemp -d)"
+  local link_path="$home_dir/.codex/AGENTS.md" source="$home_dir/agents/AGENTS.md"
+  mkdir -p "$home_dir/agents" "$home_dir/.codex"; ln -s "$source" "$link_path"
+  STUB_OUTPUT="$source" mktest::stub_function agents_config_harnesses::_agents_md_source "/agents"
+  agents_config_harnesses::_agents_md_link_present "$link_path" "/agents"
+}
+
+@test "_agents_md_link_present is false when the link is absent" {
+  local home_dir; home_dir="$(mktemp -d)"
+  STUB_OUTPUT="$home_dir/agents/AGENTS.md" mktest::stub_function agents_config_harnesses::_agents_md_source "/agents"
+  run ! agents_config_harnesses::_agents_md_link_present "$home_dir/.codex/AGENTS.md" "/agents"
+}
+
+@test "_agents_md_link_present is false when the symlink points elsewhere" {
+  local home_dir; home_dir="$(mktemp -d)"
+  local link_path="$home_dir/.codex/AGENTS.md"
+  mkdir -p "$home_dir/.codex" "$home_dir/other"; ln -s "$home_dir/other/AGENTS.md" "$link_path"
+  STUB_OUTPUT="$home_dir/agents/AGENTS.md" mktest::stub_function agents_config_harnesses::_agents_md_source "/agents"
+  run ! agents_config_harnesses::_agents_md_link_present "$link_path" "/agents"
+}

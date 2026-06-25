@@ -101,3 +101,34 @@ agents_config_harnesses::_is_available() {
 agents_config_harnesses::_harnesses() {
   config::get_array "module.agents_config_harnesses.harnesses" || true
 }
+
+# Shared projection mechanics for harnesses whose only binding is a symlinked
+# global AGENTS.md (codex, opencode). Each such submodule supplies its own link
+# path and delegates project/projection_present to these. (claude_code needs a
+# directory symlink plus an import line, so it keeps its own logic.)
+
+# The instructions file a harness points its global AGENTS.md at.
+agents_config_harnesses::_agents_md_source() {
+  printf '%s/AGENTS.md\n' "$1"
+}
+
+# Own LINK_PATH as a symlink to the dir's AGENTS.md. No-op if already correct;
+# refuse to clobber a real file or a symlink to a different target — surface it so
+# the user can reconcile it themselves rather than lose their content.
+agents_config_harnesses::_ensure_agents_md_link() {
+  local link_path="$1" agents_config_dir="$2" source
+  agents_config_harnesses::_agents_md_link_present "$link_path" "$agents_config_dir" && return 0
+  source="$(agents_config_harnesses::_agents_md_source "$agents_config_dir")"
+  if [ -e "$link_path" ] || [ -L "$link_path" ]; then
+    lifecycle::fail "agents_config_harnesses: $link_path exists and is not the expected symlink to $source — move or remove it, then re-apply."
+  fi
+  mkdir -p "$(dirname "$link_path")"
+  ln -s "$source" "$link_path"
+}
+
+agents_config_harnesses::_agents_md_link_present() {
+  local link_path="$1" agents_config_dir="$2" source
+  source="$(agents_config_harnesses::_agents_md_source "$agents_config_dir")"
+  [ -L "$link_path" ] || return 1
+  [ "$(readlink "$link_path")" = "$source" ]
+}

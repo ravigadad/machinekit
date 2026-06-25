@@ -118,9 +118,14 @@ A private git source needs the same SSH access blueprints do — register your k
 - a top-level `AGENTS.md` — your instructions, loaded every session;
 - `skills/<name>/SKILL.md` files — skills the agent loads when the task is relevant.
 
-Then list `agents_config_harnesses` in `modules`, choose agents with `harnesses = ["claude_code"]`, and apply. For Claude Code this symlinks `~/.claude/skills` → `<dir>/skills` and adds an `@<dir>/AGENTS.md` import to `~/.claude/CLAUDE.md`.
+Then list `agents_config_harnesses` in `modules`, choose agents with `harnesses` (e.g. `["claude_code", "codex", "opencode"]`), and apply. The available harnesses are **claude_code**, **codex**, and **opencode**:
 
-One caveat worth knowing: if `~/.claude/skills` already exists as a real directory (you keep hand-written skills there), machinekit will **not** overwrite it — it stops with a message. Move those skills into `<dir>/skills/` (where they get synced and projected too) and re-apply.
+- **claude_code** symlinks `~/.claude/skills` → `<dir>/skills` and adds an `@<dir>/AGENTS.md` import to `~/.claude/CLAUDE.md`.
+- **codex** and **opencode** read skills from the shared dir natively, so the projection is just a symlink of their global `AGENTS.md` (`~/.codex/AGENTS.md`, `~/.config/opencode/AGENTS.md`) to the dir's.
+
+(Cursor has no global instructions file to project to — its global rules live in the settings UI — so it isn't a harness here; its skills are still read from the shared dir natively.)
+
+One caveat worth knowing: any of these projections refuses to clobber a pre-existing real file in its place (a hand-kept `~/.claude/skills` directory, or a real `AGENTS.md` you already wrote) — it stops with a message rather than overwrite. Move that content into `<dir>` (where it gets synced and projected too) and re-apply.
 
 ## syncthing — pairing device IDs across machines
 
