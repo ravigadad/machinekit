@@ -67,25 +67,31 @@ bin/machinekit apply --dry-run --blueprints-source file://$HOME/code/my-blueprin
 bin/machinekit apply --blueprints-source file://$HOME/code/my-blueprints
 ```
 
-To use the same blueprints on another machine, push your blueprints repo to GitHub and run the one-liner installer:
+To use the same blueprints on another machine, push your blueprints repo to GitHub. First install machinekit:
 
 ```bash
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/ravigadad/machinekit/main/install.sh)" -- \
-  --blueprints-source https://github.com/<owner>/my-blueprints
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/ravigadad/machinekit/main/install.sh)"
 ```
 
-This clones machinekit to `~/.local/share/machinekit/framework` and hands off to `machinekit apply` with any flags you pass. On subsequent runs it updates the clone first. Override the location with `MACHINEKIT_FRAMEWORK_DIR=/your/path`.
+This clones machinekit to `~/.local/share/machinekit/framework` (override with `MACHINEKIT_FRAMEWORK_DIR=/your/path`) and ensures a modern bash, then prints how to run it. On subsequent runs it updates the clone first. It does **not** apply anything — installing the tool and applying a blueprint are separate steps.
+
+Then apply your blueprints (the installer prints the exact path; add `bin/` to your `PATH` to shorten it):
+
+```bash
+MK=~/.local/share/machinekit/framework/bin/machinekit
+"$MK" apply --blueprints-source https://github.com/<owner>/my-blueprints
+```
 
 If your blueprints repo is private (SSH URL), machinekit handles SSH key setup. Pass flags upfront (required for non-interactive / automation):
 
 ```bash
 # Install an existing key (USB drive, AirDrop, NAS mount, etc.)
-/bin/bash -c "$(curl -fsSL .../install.sh)" -- \
+"$MK" apply \
   --existing-ssh-key-file /Volumes/USB/id_ed25519 \
   --blueprints-source git@github.com:<owner>/my-blueprints
 
 # Generate a fresh key — machinekit prints it and pauses so you can add it to GitHub/GitLab/etc.
-/bin/bash -c "$(curl -fsSL .../install.sh)" -- \
+"$MK" apply \
   --generate-ssh-key \
   --blueprints-source git@github.com:<owner>/my-blueprints
 ```
@@ -157,10 +163,11 @@ Run `bin/machinekit apply --help` for the full flag list.
 ```
 machinekit/
 ├── bin/
-│   ├── machinekit                # user-facing dispatcher
+│   └── machinekit                # the one public entry: dispatcher that resolves a modern bash and runs the impl
+├── libexec/                      # subcommand impls (not on PATH), run under the resolved bash
 │   ├── machinekit-apply          # apply a blueprint
 │   └── machinekit-generate       # scaffold a fresh blueprint
-├── lib/                          # execution code (bin/ files are thin orchestrators)
+├── lib/                          # execution code (bin/ is a thin dispatcher)
 │   ├── machinekit.sh             # aggregator: sources all of lib/machinekit/* eagerly
 │   ├── machinekit/               # core: helpers, blueprints, brew bootstrap, preflight, hooks, module orchestration
 │   └── modules/                  # built-in modules, lazy-sourced via modules::source_all

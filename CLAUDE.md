@@ -25,7 +25,7 @@ These are non-obvious from reading the code alone:
 
 5. **No `brew bundle dump`.** Brewfiles are crafted by hand; each entry is intentional. See architecture for rationale.
 
-6. **Bash scripts target macOS-shipped bash (3.2-compatible) on first run.** Until Homebrew installs newer bash, the entry script runs under `/bin/bash`. Avoid bash 4+ features (`mapfile`, `declare -A`, `${var,,}`) in `bin/machinekit-apply` and anything sourced before brew is on PATH.
+6. **The pure-3.2 bootstrap island stays 3.2-safe; everything else may use bash 5.3.** `bin/machinekit` (the only public entry) resolves a bash that meets the 5.3 floor — installing Homebrew's bash when the running one is too old — and execs the `libexec/` impl under it. So only the island runs under stock `/bin/bash` and must avoid bash 4+ features (`mapfile`, `declare -A`, `${var,,}`): `bin/machinekit`, `install.sh`, `lib/common/bash_floor.sh`, `lib/common/brew_core.sh`, `lib/bootstrap/bash.sh`, `lib/bootstrap/brew.sh`, and each `libexec/` impl's guard prologue (the lines down to `bash_floor::guard`). The `libexec/` impl bodies and everything in `lib/machinekit/` and `lib/modules/` run under 5.3 and may use modern bash. (The broad cleanup of existing 3.2 workarounds is a separate later pass.)
 
 ## Code style for this repo
 

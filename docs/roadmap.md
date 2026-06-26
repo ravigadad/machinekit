@@ -50,7 +50,7 @@ Architecture is described in [architecture.md](./architecture.md); this document
 - oh-my-zsh, starship, or any other prompt theme
 - Editor configs (`.editorconfig`, IDE settings) — repo-level concerns, not machine-level
 
-- `install.sh` — thin curl-pipe-bash shim that clones machinekit to `~/.local/share/machinekit/framework` then execs `bin/machinekit-apply`. **Implemented.**
+- `install.sh` — thin curl-pipe-bash shim that clones machinekit to `~/.local/share/machinekit/framework` and ensures a modern bash, leaving the tool ready to run. It does not apply a blueprint (a separate step). **Implemented.**
 - VM-based E2E tests — `tests/vm/` with Tart VM support (Ubuntu and macOS Sequoia images); `scripts/test-vm` wrapper; `.github/workflows/` for BATS and shellcheck CI. **Implemented** (VMs not in CI due to image size; run locally).
 
 ---
@@ -114,19 +114,24 @@ The directory structure (`machine_types/<type>/`) ships in iteration 1; this ite
 
 ## Iteration 4 — Bash 5.3+ bootstrap and modernization
 
-**Status: planned (after the module system).**
+**Status: bootstrap shipped; the modernization sweep is planned.**
 
-**Value**: eliminates the bash 3.2 compatibility constraint from all lib files, unlocking modern bash features (`${ cmd; }` current-shell command substitution, `local -n` namerefs, associative arrays, etc.) and simplifying several internal patterns that currently work around 3.2 limitations.
+**Value**: eliminates the bash 3.2 compatibility constraint from all lib and impl files, unlocking modern bash features (`${ cmd; }` current-shell command substitution, `local -n` namerefs, associative arrays, etc.) and simplifying several internal patterns that currently work around 3.2 limitations.
 
-**Deliverables:**
+**Bootstrap (shipped).** `bin/machinekit` is the one public entry and the only file that must stay pure-3.2: for a real subcommand it resolves a bash meeting the 5.3 floor — installing Homebrew's bash when the running one is too old — and execs the impl under it. The impls live in `libexec/` (off `PATH`) and are free to use modern bash; each opens with a 3.2-safe guard so a direct invocation under an old bash fails cleanly instead of throwing a syntax error.
 
-- `lib/machinekit/brew_core.sh` — pure, bash 3.2-compat brew primitives (`brew::_setup_path`, `brew::_run_installer`) with no lib dependencies. Sourced by both `brew.sh` and the bootstrap script.
-- `lib/machinekit/bootstrap_bash.sh` — bash 3.2-compat entry script sourced at the top of bin files before any other lib. Checks bash version; if < 5.3, installs brew (if needed) and `brew install bash`, then re-execs the current script under the new shell. Uses `brew_core.sh` for shared logic.
+- `lib/common/bash_floor.sh` — the single source of the floor (5.3): `bash_floor::meets` predicate + `bash_floor::guard`. Pure-3.2.
+- `lib/common/brew_core.sh` — the opinion-free Homebrew primitives shared by both brew layers: `brew_core::setup_path` and `brew_core::run_official_installer` (interactivity passed in). Pure-3.2.
+- `lib/bootstrap/bash.sh` — `bootstrap::bash::ensure_modern_bash`: returns the running bash if it meets the floor, else installs Homebrew's bash and returns its path (failing if even that falls short). Pure-3.2.
+- `lib/bootstrap/brew.sh` — `bootstrap::brew::*`: the island's Homebrew orchestration (ensure Homebrew, install bash, locate it) with its own minimal log/fail/interactive helpers, built on `lib/common/brew_core.sh`. Pure-3.2.
+- `lib/machinekit/brew.sh` now sources `lib/common/brew_core.sh` too — same `setup_path` and installer, with its `logging::`/`input::` orchestration on top (no duplication).
+
+**Modernization sweep (planned).** With the floor in place, simplify the 3.2 workarounds:
 - Refactor `context.sh` to use `${ cmd; }` current-shell command substitution, replacing the `_init_storage` two-call pattern and subshell guard.
 - Remove the `MACHINEKIT_SUBSHELL_DEPTH` testability seam (no longer needed).
-- Any other lib code that worked around bash 3.2 can be simplified.
+- Collapse the parallel indexed transform-registry arrays into associative arrays; use `${var,,}`/`mapfile` where they simplify the code.
 
-**Why later**: the bash 3.2 constraint is a friction tax, not a blocker. All functionality can be built under 3.2; modernizing the shell is a quality-of-life pass best done once the feature surface is stable.
+**Why the sweep is later**: the bash 3.2 constraint was a friction tax, not a blocker. With the bootstrap shipped, new code already uses modern bash and old workarounds get cleaned up opportunistically as files are touched; a dedicated sweep mops up the rest once the feature surface is stable.
 
 ---
 
