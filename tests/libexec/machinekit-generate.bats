@@ -1,12 +1,12 @@
 #!/usr/bin/env bats
-# Tests for bin/machinekit-generate
+# Tests for libexec/machinekit-generate
 
 load "${BATS_TEST_DIRNAME}/../test_helper"
 
 setup() {
   set --  # prevent the top-level flag parser from consuming bats's internal $@
-  # shellcheck source=../../bin/machinekit-generate
-  source "$MACHINEKIT_DIR/bin/machinekit-generate"
+  # shellcheck source=../../libexec/machinekit-generate
+  source "$MACHINEKIT_DIR/libexec/machinekit-generate"
 
   mktest::stub_function logging::step
   mktest::stub_function logging::success
@@ -87,18 +87,24 @@ setup() {
 # --- CLI behavior (subprocess) ---
 
 @test "--help exits 0 and prints usage" {
-  run "$MACHINEKIT_DIR/bin/machinekit-generate" --help
+  run "$MACHINEKIT_DIR/libexec/machinekit-generate" --help
   [ "$status" -eq 0 ]
   [[ "$output" == *"Usage: machinekit generate"* ]]
 }
 
 @test "--version prints the version and exits 0" {
-  run "$MACHINEKIT_DIR/bin/machinekit-generate" --version
+  run "$MACHINEKIT_DIR/libexec/machinekit-generate" --version
   [ "$status" -eq 0 ]
   [ "$output" = "$(cat "$MACHINEKIT_DIR/VERSION")" ]
 }
 
 @test "unknown flag exits 1" {
-  run "$MACHINEKIT_DIR/bin/machinekit-generate" --no-such-flag
+  run "$MACHINEKIT_DIR/libexec/machinekit-generate" --no-such-flag
   [ "$status" -eq 1 ]
+}
+
+@test "run directly under a bash below the floor fails cleanly" {
+  run /bin/bash "$MACHINEKIT_DIR/libexec/machinekit-generate" --help
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"bash >= 5.3 required"* ]]
 }

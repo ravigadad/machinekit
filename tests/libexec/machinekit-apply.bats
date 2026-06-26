@@ -1,12 +1,12 @@
 #!/usr/bin/env bats
-# Tests for bin/machinekit-apply
+# Tests for libexec/machinekit-apply
 
 load "${BATS_TEST_DIRNAME}/../test_helper"
 
 setup() {
   set --  # prevent the top-level flag parser from consuming bats's internal $@
-  # shellcheck source=../../bin/machinekit-apply
-  source "$MACHINEKIT_DIR/bin/machinekit-apply"
+  # shellcheck source=../../libexec/machinekit-apply
+  source "$MACHINEKIT_DIR/libexec/machinekit-apply"
 
   # Stub the entire pipeline — the contract of main() IS the wiring, not the
   # internals of each step.
@@ -69,18 +69,24 @@ setup() {
 # --- CLI behavior (subprocess) ---
 
 @test "--help exits 0 and prints usage" {
-  run "$MACHINEKIT_DIR/bin/machinekit-apply" --help
+  run "$MACHINEKIT_DIR/libexec/machinekit-apply" --help
   [ "$status" -eq 0 ]
   [[ "$output" == *"Usage: machinekit apply"* ]]
 }
 
 @test "--version prints the version and exits 0" {
-  run "$MACHINEKIT_DIR/bin/machinekit-apply" --version
+  run "$MACHINEKIT_DIR/libexec/machinekit-apply" --version
   [ "$status" -eq 0 ]
   [ "$output" = "$(cat "$MACHINEKIT_DIR/VERSION")" ]
 }
 
 @test "unknown flag exits 1" {
-  run "$MACHINEKIT_DIR/bin/machinekit-apply" --no-such-flag
+  run "$MACHINEKIT_DIR/libexec/machinekit-apply" --no-such-flag
   [ "$status" -eq 1 ]
+}
+
+@test "run directly under a bash below the floor fails cleanly" {
+  run /bin/bash "$MACHINEKIT_DIR/libexec/machinekit-apply" --help
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"bash >= 5.3 required"* ]]
 }

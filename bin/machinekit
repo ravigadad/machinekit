@@ -1,5 +1,11 @@
 #!/usr/bin/env bash
-# machinekit — top-level dispatcher. Routes <subcommand> to bin/machinekit-<subcommand>.
+# machinekit — top-level dispatcher and the one public entry point. Routes
+# <subcommand> to libexec/machinekit-<subcommand>.
+#
+# This is the sole pure-3.2 entry: for the real subcommands it resolves a bash that
+# meets the version floor (installing Homebrew's bash if the running one is too old)
+# and execs the impl under it, so the libexec impls are free to use modern bash.
+# Keep this file 3.2-safe forever.
 
 set -euo pipefail
 
@@ -23,7 +29,10 @@ subcommand="${1:-}"
 case "$subcommand" in
   apply|generate)
     shift
-    exec "$MACHINEKIT_DIR/bin/machinekit-$subcommand" "$@"
+    # shellcheck source=../lib/bootstrap/bash.sh
+    source "$MACHINEKIT_DIR/lib/bootstrap/bash.sh"
+    modern_bash="$(bootstrap::bash::ensure_modern_bash)"
+    exec "$modern_bash" "$MACHINEKIT_DIR/libexec/machinekit-$subcommand" "$@"
     ;;
   -h|--help|help)
     usage; exit 0

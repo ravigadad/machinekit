@@ -1,12 +1,19 @@
 #!/usr/bin/env bash
-# machinekit generate — scaffold a fresh blueprints directory from the template.
+# machinekit generate (impl) — scaffold a fresh blueprints directory from the
+# template. Invoked by `machinekit generate` under a bash that meets the version
+# floor (bin/machinekit resolves one); not a public entry point. The guard below
+# makes a direct invocation under an old bash fail cleanly.
 #
 # Copies the template into <path>. You customize and test locally before
 # optionally publishing to a git host — machinekit doesn't touch git history.
 
+MACHINEKIT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=../lib/common/bash_floor.sh
+source "$MACHINEKIT_DIR/lib/common/bash_floor.sh"
+bash_floor::guard
+
 set -euo pipefail
 
-MACHINEKIT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=../lib/machinekit/logging.sh
 source "$MACHINEKIT_DIR/lib/machinekit/logging.sh"
 # shellcheck source=../lib/machinekit/lifecycle.sh

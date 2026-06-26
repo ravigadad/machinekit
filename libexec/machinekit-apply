@@ -1,9 +1,16 @@
 #!/usr/bin/env bash
-# machinekit apply — apply a blueprint to this machine.
+# machinekit apply (impl) — apply a blueprint to this machine. Invoked by
+# `machinekit apply` under a bash that meets the version floor (bin/machinekit
+# resolves one); not a public entry point. The guard below makes a direct
+# invocation under an old bash fail cleanly instead of throwing a syntax error.
+
+MACHINEKIT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=../lib/common/bash_floor.sh
+source "$MACHINEKIT_DIR/lib/common/bash_floor.sh"
+bash_floor::guard
 
 set -euo pipefail
 
-MACHINEKIT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=../lib/machinekit.sh
 source "$MACHINEKIT_DIR/lib/machinekit.sh"
 
