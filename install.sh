@@ -1,11 +1,16 @@
 #!/bin/bash
-# Bootstrap machinekit on a fresh machine.
+# Install machinekit on a fresh machine: fetch the framework and ensure its
+# prerequisites, leaving the tool ready to run. It does NOT apply a blueprint —
+# installing machinekit and applying a blueprint are separate steps, and a
+# first-time installer usually has no blueprint yet.
 #
 # Usage (brew-style one-liner):
-#   /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/ravigadad/machinekit/main/install.sh)" -- [flags]
+#   /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/ravigadad/machinekit/main/install.sh)"
 #
-# All flags are passed through to machinekit apply — run with --help to see them.
 # Override the framework location: MACHINEKIT_FRAMEWORK_DIR=/your/path
+#
+# Runs under stock /bin/bash, so keep this file 3.2-safe (part of the bootstrap
+# island — see lib/common/bash_floor.sh).
 
 set -euo pipefail
 
@@ -21,4 +26,13 @@ else
   git clone "$MACHINEKIT_REPO" "$MACHINEKIT_DIR"
 fi
 
-exec "$MACHINEKIT_DIR/bin/machinekit-apply" "$@"
+# Ensure a bash that meets the version floor exists, installing Homebrew's bash if
+# the system one is too old. machinekit resolves this on every run too, but doing it
+# at install time means the first run isn't surprised by a mid-apply install.
+# shellcheck source=lib/bootstrap/bash.sh
+source "$MACHINEKIT_DIR/lib/bootstrap/bash.sh"
+bootstrap::bash::ensure_modern_bash >/dev/null
+
+printf 'machinekit: installed to %s\n' "$MACHINEKIT_DIR" >&2
+printf 'machinekit: run %s/bin/machinekit apply --help to get started, or add %s/bin to your PATH.\n' \
+  "$MACHINEKIT_DIR" "$MACHINEKIT_DIR" >&2
