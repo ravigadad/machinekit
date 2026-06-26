@@ -4,6 +4,12 @@
 [ -n "${_MK_BREW_LOADED:-}" ] && return 0
 _MK_BREW_LOADED=1
 
+# The path setup and the official-installer invocation are shared with the pure-3.2
+# bootstrap island; both live in lib/common/brew_core.sh (opinion-free). This module
+# adds the logging::/input::-aware orchestration on top.
+# shellcheck source=../common/brew_core.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../common" && pwd)/brew_core.sh"
+
 # One installed-list cache per kind (formula|cask).
 _MK_BREW_FORMULA_CACHE=""
 _MK_BREW_FORMULA_CACHED=0
@@ -12,7 +18,7 @@ _MK_BREW_CASK_CACHED=0
 
 brew::bootstrap() {
   logging::step "Homebrew"
-  brew::_setup_path
+  brew_core::setup_path
   if input::command_exists brew; then
     logging::success "Homebrew already installed at $(command -v brew)"
     return 0
@@ -121,13 +127,6 @@ brew::_is_installed() {
   grep -qxF "$name" <<< "$(brew::_installed "$kind")"
 }
 
-brew::_setup_path() {
-  if   [ -x /opt/homebrew/bin/brew ];              then eval "$(/opt/homebrew/bin/brew shellenv)"
-  elif [ -x /usr/local/bin/brew ];                 then eval "$(/usr/local/bin/brew shellenv)"
-  elif [ -x /home/linuxbrew/.linuxbrew/bin/brew ]; then eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
-  fi
-}
-
 # Absolute path to the brew binary. Callers running brew under sudo need this:
 # sudo's secure_path drops the Homebrew prefix, so a bare `brew` won't resolve.
 brew::_bin() {
@@ -136,14 +135,12 @@ brew::_bin() {
 
 brew::_install_homebrew() {
   logging::info "Installing Homebrew..."
-  if ! input::is_interactive >/dev/null; then
-    NONINTERACTIVE=1 /bin/bash -c \
-      "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+  if input::is_interactive >/dev/null; then
+    brew_core::run_official_installer ""
   else
-    /bin/bash -c \
-      "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+    brew_core::run_official_installer 1
   fi
-  brew::_setup_path
+  brew_core::setup_path
   input::command_exists brew || lifecycle::fail "Homebrew installed but 'brew' not found on any standard prefix."
   logging::success "Homebrew installed."
 }

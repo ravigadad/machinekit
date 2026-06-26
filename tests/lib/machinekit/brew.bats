@@ -32,7 +32,7 @@ setup() {
 # --- brew::bootstrap ---
 
 @test "bootstrap does not install when brew is already on PATH" {
-  mktest::stub_function brew::_setup_path
+  mktest::stub_function brew_core::setup_path
   mktest::stub_function input::command_exists "brew"
   mktest::stub_function brew::_install_homebrew
   brew::bootstrap
@@ -40,7 +40,7 @@ setup() {
 }
 
 @test "bootstrap installs when brew is not on PATH" {
-  mktest::stub_function brew::_setup_path
+  mktest::stub_function brew_core::setup_path
   STUB_RETURN=1 mktest::stub_function input::command_exists "brew"
   mktest::stub_function brew::_install_homebrew
   brew::bootstrap
@@ -263,12 +263,6 @@ setup() {
   brew::_is_installed cask "tailscale"
 }
 
-# --- brew::_setup_path ---
-
-@test "_setup_path does not fail when brew is absent from standard prefixes" {
-  brew::_setup_path
-}
-
 # --- brew::_bin ---
 
 @test "_bin resolves the brew binary so sudo can find it" {
@@ -279,34 +273,28 @@ setup() {
 
 # --- brew::_install_homebrew ---
 
-@test "_install_homebrew runs the installer with NONINTERACTIVE=1 when not interactive" {
-  # shellcheck disable=SC2016
-  STUB_OUTPUT='echo brew_curled:$NONINTERACTIVE' mktest::stub_function curl "-fsSL" "https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh"
+@test "_install_homebrew runs the official installer non-interactively when not interactive" {
   STUB_RETURN=1 mktest::stub_function input::is_interactive
-  mktest::stub_function brew::_setup_path
+  mktest::stub_function brew_core::run_official_installer 1
+  mktest::stub_function brew_core::setup_path
   mktest::stub_function input::command_exists "brew"
-  run --separate-stderr brew::_install_homebrew
-  [ "$status" -eq 0 ]
-  [ "$output" = "brew_curled:1" ]
-  mktest::assert_stub_called brew::_setup_path
+  brew::_install_homebrew
+  mktest::assert_stub_called brew_core::run_official_installer 1
 }
 
-@test "_install_homebrew runs the installer without NONINTERACTIVE when interactive" {
-  # shellcheck disable=SC2016
-  STUB_OUTPUT='echo brew_curled:$NONINTERACTIVE' mktest::stub_function curl "-fsSL" "https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh"
+@test "_install_homebrew runs the official installer interactively when interactive" {
   mktest::stub_function input::is_interactive
-  mktest::stub_function brew::_setup_path
+  mktest::stub_function brew_core::run_official_installer ""
+  mktest::stub_function brew_core::setup_path
   mktest::stub_function input::command_exists "brew"
-  run --separate-stderr brew::_install_homebrew
-  [ "$status" -eq 0 ]
-  [ "$output" = "brew_curled:" ]
-  mktest::assert_stub_called brew::_setup_path
+  brew::_install_homebrew
+  mktest::assert_stub_called brew_core::run_official_installer ""
 }
 
 @test "_install_homebrew fails when brew is not found after installing" {
-  mktest::stub_function curl "-fsSL" "https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh"
   mktest::stub_function input::is_interactive
-  mktest::stub_function brew::_setup_path
+  mktest::stub_function brew_core::run_official_installer ""
+  mktest::stub_function brew_core::setup_path
   STUB_RETURN=1 mktest::stub_function input::command_exists "brew"
   STUB_EXIT=1 mktest::stub_function lifecycle::fail
   run ! brew::_install_homebrew
