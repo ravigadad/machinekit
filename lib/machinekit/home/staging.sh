@@ -55,7 +55,7 @@ home::staging::_prepare_dir() {
     _MK_HOME_STAGING_DIR=$(mktemp -d)
     lifecycle::register_cleanup home::staging::cleanup
   else
-    _MK_HOME_STAGING_DIR="$HOME/.local/share/machinekit/staging"
+    _MK_HOME_STAGING_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/machinekit/staging"
     rm -rf -- "$_MK_HOME_STAGING_DIR"
     mkdir -p "$_MK_HOME_STAGING_DIR"
   fi

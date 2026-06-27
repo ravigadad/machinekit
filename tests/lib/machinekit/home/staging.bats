@@ -117,15 +117,26 @@ setup() {
   mktest::assert_stub_called lifecycle::register_cleanup "home::staging::cleanup"
 }
 
-@test "_prepare_dir in real mode creates a persistent dir under HOME and does not register cleanup" {
+@test "_prepare_dir in real mode creates a persistent dir under the default data dir and does not register cleanup" {
   export HOME="$BATS_TEST_TMPDIR/home"
   mkdir -p "$HOME"
+  unset XDG_DATA_HOME
   STUB_RETURN=1 mktest::stub_function input::is_dry_run
   mktest::stub_function lifecycle::register_cleanup
   home::staging::_prepare_dir
   [ "$_MK_HOME_STAGING_DIR" = "$HOME/.local/share/machinekit/staging" ]
   [ -d "$_MK_HOME_STAGING_DIR" ]
   mktest::assert_stub_not_called lifecycle::register_cleanup
+}
+
+@test "_prepare_dir in real mode honors XDG_DATA_HOME for the staging dir" {
+  export HOME="$BATS_TEST_TMPDIR/home"
+  export XDG_DATA_HOME="$BATS_TEST_TMPDIR/xdg-data"
+  STUB_RETURN=1 mktest::stub_function input::is_dry_run
+  mktest::stub_function lifecycle::register_cleanup
+  home::staging::_prepare_dir
+  [ "$_MK_HOME_STAGING_DIR" = "$XDG_DATA_HOME/machinekit/staging" ]
+  [ -d "$_MK_HOME_STAGING_DIR" ]
 }
 
 # --- home::staging::_layer_dir ---

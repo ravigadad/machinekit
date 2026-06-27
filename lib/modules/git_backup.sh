@@ -372,9 +372,9 @@ git_backup::_key_path() {
 }
 
 git_backup::_manifest_path() {
-  printf '%s\n' "$HOME/.local/share/machinekit/git_backup/manifest.tsv"
+  printf '%s\n' "${XDG_DATA_HOME:-$HOME/.local/share}/machinekit/git_backup/manifest.tsv"
 }
 
 git_backup::_push_script_path() {
-  printf '%s\n' "$HOME/.local/share/machinekit/git_backup/push.sh"
+  printf '%s\n' "${XDG_DATA_HOME:-$HOME/.local/share}/machinekit/git_backup/push.sh"
 }

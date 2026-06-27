@@ -13,7 +13,7 @@
 _MK_BLUEPRINTS_LOADED=1
 
 # Permanent destination — exported so hooks can reference it.
-export MACHINEKIT_BLUEPRINTS_DIR="$HOME/.local/share/machinekit/blueprints"
+export MACHINEKIT_BLUEPRINTS_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/machinekit/blueprints"
 
 # Holds the active destination path during a fetch session (temp until finalized).
 _MK_BLUEPRINTS_DIR=""

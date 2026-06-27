@@ -17,7 +17,7 @@
 set -euo pipefail
 
 MACHINEKIT_REPO="https://github.com/ravigadad/machinekit.git"
-MACHINEKIT_DIR="${MACHINEKIT_FRAMEWORK_DIR:-$HOME/.local/share/machinekit/framework}"
+MACHINEKIT_DIR="${MACHINEKIT_FRAMEWORK_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/machinekit/framework}"
 
 if [ -d "$MACHINEKIT_DIR/.git" ]; then
   printf 'machinekit: updating %s\n' "$MACHINEKIT_DIR" >&2

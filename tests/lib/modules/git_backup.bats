@@ -491,12 +491,30 @@ setup() {
   [ "$output" = "/fake/home/.xdg/machinekit/git_backup/ssh_keys/agents" ]
 }
 
-@test "_manifest_path locates the manifest under the machinekit data dir" {
+@test "_manifest_path locates the manifest under the default data dir" {
+  HOME=/fake/home
+  unset XDG_DATA_HOME
   run git_backup::_manifest_path
-  [ "$output" = "$HOME/.local/share/machinekit/git_backup/manifest.tsv" ]
+  [ "$output" = "/fake/home/.local/share/machinekit/git_backup/manifest.tsv" ]
 }
 
-@test "_push_script_path locates the installed push script under the data dir" {
+@test "_manifest_path honors XDG_DATA_HOME" {
+  HOME=/fake/home
+  XDG_DATA_HOME=/fake/home/.xdg-data
+  run git_backup::_manifest_path
+  [ "$output" = "/fake/home/.xdg-data/machinekit/git_backup/manifest.tsv" ]
+}
+
+@test "_push_script_path locates the installed push script under the default data dir" {
+  HOME=/fake/home
+  unset XDG_DATA_HOME
   run git_backup::_push_script_path
-  [ "$output" = "$HOME/.local/share/machinekit/git_backup/push.sh" ]
+  [ "$output" = "/fake/home/.local/share/machinekit/git_backup/push.sh" ]
+}
+
+@test "_push_script_path honors XDG_DATA_HOME" {
+  HOME=/fake/home
+  XDG_DATA_HOME=/fake/home/.xdg-data
+  run git_backup::_push_script_path
+  [ "$output" = "/fake/home/.xdg-data/machinekit/git_backup/push.sh" ]
 }
