@@ -477,9 +477,18 @@ setup() {
   [ "$output" = "/bp/secrets/git_backup/ssh_keys/agents.age" ]
 }
 
-@test "_key_path locates the decrypted key under the machinekit config dir" {
+@test "_key_path locates the decrypted key under the default config dir" {
+  HOME=/fake/home
+  unset XDG_CONFIG_HOME
   run git_backup::_key_path "agents"
-  [ "$output" = "$HOME/.config/machinekit/git_backup/ssh_keys/agents" ]
+  [ "$output" = "/fake/home/.config/machinekit/git_backup/ssh_keys/agents" ]
+}
+
+@test "_key_path honors XDG_CONFIG_HOME for the machinekit config dir" {
+  HOME=/fake/home
+  XDG_CONFIG_HOME=/fake/home/.xdg
+  run git_backup::_key_path "agents"
+  [ "$output" = "/fake/home/.xdg/machinekit/git_backup/ssh_keys/agents" ]
 }
 
 @test "_manifest_path locates the manifest under the machinekit data dir" {

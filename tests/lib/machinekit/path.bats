@@ -102,10 +102,18 @@ setup() {
   [ "$output" = "/fake/home/.zshrc" ]
 }
 
-@test "_rc_file for fish is config.fish" {
+@test "_rc_file for fish is config.fish under the default config dir" {
   HOME=/fake/home
+  unset XDG_CONFIG_HOME
   run path::_rc_file fish
   [ "$output" = "/fake/home/.config/fish/config.fish" ]
+}
+
+@test "_rc_file for fish honors XDG_CONFIG_HOME (fish reads it)" {
+  HOME=/fake/home
+  XDG_CONFIG_HOME=/fake/home/.xdg
+  run path::_rc_file fish
+  [ "$output" = "/fake/home/.xdg/fish/config.fish" ]
 }
 
 @test "_rc_file for bash defaults to ~/.bashrc when none exist" {

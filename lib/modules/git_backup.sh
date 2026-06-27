@@ -368,7 +368,7 @@ git_backup::_secret_path() {
 }
 
 git_backup::_key_path() {
-  printf '%s\n' "$HOME/.config/machinekit/git_backup/ssh_keys/$1"
+  printf '%s\n' "${XDG_CONFIG_HOME:-$HOME/.config}/machinekit/git_backup/ssh_keys/$1"
 }
 
 git_backup::_manifest_path() {

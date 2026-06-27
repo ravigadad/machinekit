@@ -62,7 +62,7 @@ path::_rc_file() {
   local shell_name="$1"
   case "$shell_name" in
     zsh)  printf '%s\n' "$HOME/.zshrc" ;;
-    fish) printf '%s\n' "$HOME/.config/fish/config.fish" ;;
+    fish) printf '%s\n' "${XDG_CONFIG_HOME:-$HOME/.config}/fish/config.fish" ;;
     bash)
       local candidate
       for candidate in "$HOME/.bashrc" "$HOME/.bash_profile" "$HOME/.profile"; do

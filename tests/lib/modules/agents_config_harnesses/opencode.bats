@@ -18,10 +18,18 @@ setup() {
 
 # --- _agents_md_link_path ---
 
-@test "_agents_md_link_path is opencode's global AGENTS.md under HOME" {
+@test "_agents_md_link_path is opencode's global AGENTS.md under the default config dir" {
   HOME=/fake/home
+  unset XDG_CONFIG_HOME
   run agents_config_harnesses::opencode::_agents_md_link_path
   [ "$output" = "/fake/home/.config/opencode/AGENTS.md" ]
+}
+
+@test "_agents_md_link_path honors XDG_CONFIG_HOME (opencode reads it)" {
+  HOME=/fake/home
+  XDG_CONFIG_HOME=/fake/home/.xdg
+  run agents_config_harnesses::opencode::_agents_md_link_path
+  [ "$output" = "/fake/home/.xdg/opencode/AGENTS.md" ]
 }
 
 # --- project ---
