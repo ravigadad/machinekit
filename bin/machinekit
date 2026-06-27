@@ -9,7 +9,19 @@
 
 set -euo pipefail
 
-MACHINEKIT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Resolve this script's real path through any PATH symlink (e.g.
+# ~/.local/bin/machinekit) before deriving the framework dir — readlink without
+# -f for macOS portability, looping to follow a chain of links.
+machinekit_source="${BASH_SOURCE[0]}"
+while [ -L "$machinekit_source" ]; do
+  machinekit_link_dir="$(cd -P "$(dirname "$machinekit_source")" && pwd)"
+  machinekit_source="$(readlink "$machinekit_source")"
+  case "$machinekit_source" in
+    /*) ;;
+    *)  machinekit_source="$machinekit_link_dir/$machinekit_source" ;;
+  esac
+done
+MACHINEKIT_DIR="$(cd -P "$(dirname "$machinekit_source")/.." && pwd)"
 
 usage() {
   cat <<'EOF'

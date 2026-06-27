@@ -52,6 +52,13 @@ require_modern_bash() {
   [ "$status" -eq 1 ]
 }
 
+@test "resolves the framework dir when invoked through a PATH symlink" {
+  ln -s "$MACHINEKIT_DIR/bin/machinekit" "$BATS_TEST_TMPDIR/machinekit"
+  run "$BATS_TEST_TMPDIR/machinekit" --version
+  [ "$status" -eq 0 ]
+  [ "$output" = "$(cat "$MACHINEKIT_DIR/VERSION")" ]
+}
+
 @test "apply --help dispatches to machinekit-apply and exits 0" {
   require_modern_bash
   MACHINEKIT_BASH="$BASH" run "$MACHINEKIT_DIR/bin/machinekit" apply --help
