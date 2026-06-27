@@ -23,22 +23,25 @@ home::dry_run::show_diff() {
 
 home::dry_run::_render_to_outdir() {
   local src="$1" staging="$2" out_dir="$3"
-  local src_rel dest_rel out_path
+  local src_rel dest_path dest_key out_path
 
   src_rel="${src#"$staging"/}"
   home::_decode_path "$src_rel"
 
-  home::transforms::resolve "$_MK_HOME_DEST_REL"
-  dest_rel="$_MK_HOME_TRANSFORM_DEST"
+  home::transforms::resolve "$_MK_HOME_DEST_PATH"
+  dest_path="$_MK_HOME_TRANSFORM_DEST"
+  dest_key="$(home::_dest_key "$dest_path")"
 
-  [ "$dest_rel" = ".mkignore" ] && return 0
+  [ "$dest_key" = ".mkignore" ] && return 0
 
   local ignore_file="$staging/.mkignore"
-  if [ -f "$ignore_file" ] && grep -qxF "$dest_rel" "$ignore_file" 2>/dev/null; then
+  if [ -f "$ignore_file" ] && grep -qxF "$dest_key" "$ignore_file" 2>/dev/null; then
     return 0
   fi
 
-  out_path="$out_dir/$dest_rel"
+  # Mirror the absolute destination under the preview dir (leading slash
+  # stripped); _generate_diff re-roots back to the real path by re-adding it.
+  out_path="$out_dir/${dest_path#/}"
   mkdir -p "$(dirname "$out_path")"
 
   home::transforms::execute "$src"
@@ -74,7 +77,9 @@ home::dry_run::_generate_diff() {
   local out_path rel_path dest_path
   while IFS= read -r out_path; do
     rel_path="${out_path#"$tmp_out"/}"
-    dest_path="$HOME/$rel_path"
+    # The preview mirrors the absolute destination with the leading slash
+    # stripped; re-add it to recover the real path.
+    dest_path="/$rel_path"
     if [ ! -f "$dest_path" ]; then
       git diff --no-index --color=always /dev/null "$out_path" 2>/dev/null || true
     elif ! diff -q "$out_path" "$dest_path" >/dev/null 2>&1; then
@@ -96,7 +101,9 @@ home::dry_run::_show_plain_diff() {
   local has_changes=0 out_path rel_path dest_path
   while IFS= read -r out_path; do
     rel_path="${out_path#"$tmp_out"/}"
-    dest_path="$HOME/$rel_path"
+    # The preview mirrors the absolute destination with the leading slash
+    # stripped; re-add it to recover the real path.
+    dest_path="/$rel_path"
     if [ ! -f "$dest_path" ]; then
       git diff --no-index --no-color /dev/null "$out_path" 2>/dev/null || true
       has_changes=1

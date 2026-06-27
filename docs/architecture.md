@@ -73,7 +73,7 @@ blueprints/
 
 The structure is **layered**: `common/` is the baseline applied to every machine, and `machine_types/<type>/` is opt-in per-type overrides. The same shape — `machinekit.toml`, `home/`, `Brewfile`, `hooks/post-apply/` — appears at both levels.
 
-Modules can ship their own default dotfile templates (e.g. the git module ships `dot_gitconfig.tmpl`, the mise module ships `dot_config/mise/config.toml`). At apply time, machinekit composes a single staging dir by layering: each active module's bundled templates first, then `common/home/` on top, then `machine_types/<type>/home/` on top of that. A user overrides a module's default by placing a file at the same relative path in their blueprint's home directory. See [home template system](#home-template-system) for details.
+Modules can ship their own default dotfile templates (e.g. the git module ships `dot_gitconfig.tmpl`, the mise module ships `xdg_config/mise/config.toml`). At apply time, machinekit composes a single staging dir by layering: each active module's bundled templates first, then `common/home/` on top, then `machine_types/<type>/home/` on top of that. A user overrides a module's default by placing a file at the same relative path in their blueprint's home directory. See [home template system](#home-template-system) for details.
 
 At apply time, with `--machine-type <type>`:
 
@@ -331,10 +331,11 @@ machinekit walks a merged staging dir and applies each file to `$HOME`. A staged
 
 These axes commute (renaming a file doesn't change how its bytes are transformed; decrypting it doesn't change where it lands), which is why machinekit resolves them independently.
 
-**Addressing (prefixes)** — each path component is decoded from the staging naming convention:
+**Addressing (prefixes)** — each path component is decoded from the staging naming convention into an absolute destination (normally under `$HOME`):
 
 - `dot_` prefix → leading `.` (e.g. `dot_zshrc` → `.zshrc`)
 - `private_` prefix → mode 600 on the file, mode 700 on the parent directory (e.g. `private_dot_ssh/private_config` → `~/.ssh/config` at 600, `~/.ssh/` at 700)
+- `xdg_config` as the *root* component → re-roots the rest at `${XDG_CONFIG_HOME:-$HOME/.config}` instead of `$HOME` (e.g. `xdg_config/mise/config.toml` → `~/.config/mise/config.toml` by default, or `$XDG_CONFIG_HOME/mise/config.toml` when that's set — even outside `$HOME`). The literal `dot_config` still maps to `~/.config` verbatim; use `xdg_config` for any tool that honors `XDG_CONFIG_HOME`.
 
 **Content representation (suffix markers)** — a trailing extension can name a content-pipeline stage. Each marker is registered by a module as `extension → (tier, handler)`:
 
@@ -484,14 +485,14 @@ machinekit/                             ← this repo (public)
 │       ├── claude_code.sh              ← claude_code::install (Claude Code CLI via the official installer)
 │       ├── docker_ce.sh                ← docker_ce::provides + docker_ce::install (Linux container runtime)
 │       ├── git.sh                      ← git::preflight + git::install (no-op; ships templates)
-│       ├── git/templates/              ← module-shipped dotfile defaults (dot_gitconfig.tmpl, dot_config/git/ignore.tmpl)
+│       ├── git/templates/              ← module-shipped dotfile defaults (dot_gitconfig.tmpl, xdg_config/git/ignore.tmpl)
 │       ├── git_backup.sh               ← git_backup::install (periodic push-only-with-abort backup of configured folders; one manifest-driven service); ships git_backup/push.sh
 │       ├── gomplate.sh                 ← gomplate::file_transforms + render + install (base module: the .tmpl handler)
 │       ├── hindsight_integration.sh    ← wires coding agents to a Hindsight server; sources hindsight_integration/<agent>.sh variants
 │       ├── hindsight_server.sh         ← self-hosted Hindsight memory API (container, against host postgres)
 │       ├── hindsight/secrets.sh        ← shared pool-secret resolution for both hindsight modules
 │       ├── mise.sh                     ← mise::requires + mise::provides + mise::install + mise::post_apply
-│       ├── mise/templates/             ← module-shipped dotfile defaults (dot_config/mise/…, env.zsh.d/mise.zsh)
+│       ├── mise/templates/             ← module-shipped dotfile defaults (xdg_config/mise/…, env.zsh.d/mise.zsh)
 │       ├── orbstack.sh                 ← orbstack::provides + orbstack::install (macOS container runtime)
 │       ├── postgres.sh                 ← postgres host provisioning; sources postgres/{introspect,access}.sh
 │       ├── syncthing.sh                ← syncthing::install (generic peer-to-peer folder sync; consent-gated mesh join; tailnet-only)
@@ -514,7 +515,7 @@ A module that spans several files keeps the extra ones in a same-named subdirect
 
 A richer use of the same mechanism is a **variant family**: a parent module whose subdirectory holds interchangeable variants behind a shared contract. `hindsight_integration` is the example — it sources `hindsight_integration/<agent>.sh` (one per coding agent), each defining the same contract (`requires`, `install`, `write_config`, `config_present`), and derives the available set from which submodules define `write_config`. The parent owns the shared concerns (resolving the fleet secret once, the create-once policy) and passes resolved values into each submodule's `write_config`; the submodules stay deliberately thin, owning only their agent's specifics. Adding an agent is dropping in one submodule — the parent doesn't change. `agents_config_harnesses` is a second variant family on the same pattern — it sources `agents_config_harnesses/<harness>.sh` (each defining `requires`/`project`/`projection_present`) and derives the available set from which submodules define `project`.
 
-**Zsh hook pattern**: the `zsh` module ships `~/.config/machinekit/env.zsh`, which ends with a glob-source loop over `~/.config/machinekit/env.zsh.d/*.zsh`. Any module that needs to contribute zsh-level setup drops a single `.zsh` file in its own `templates/dot_config/machinekit/env.zsh.d/` directory — the staging-dir builder merges it in, the home module installs it, and env.zsh sources it on every zsh startup. When a module is inactive, no fragment ends up on disk and nothing is sourced. mise uses this pattern today (`templates/dot_config/machinekit/env.zsh.d/mise.zsh` for `eval "$(mise activate zsh)"`); future modules plug in the same way.
+**Zsh hook pattern**: the `zsh` module ships `env.zsh` into machinekit's config dir (`${XDG_CONFIG_HOME:-$HOME/.config}/machinekit/env.zsh`), which ends with a glob-source loop over the sibling `env.zsh.d/*.zsh`. Any module that needs to contribute zsh-level setup drops a single `.zsh` file in its own `templates/xdg_config/machinekit/env.zsh.d/` directory — the staging-dir builder merges it in, the home module installs it, and env.zsh sources it on every zsh startup. When a module is inactive, no fragment ends up on disk and nothing is sourced. mise uses this pattern today (`templates/xdg_config/machinekit/env.zsh.d/mise.zsh` for `eval "$(mise activate zsh)"`); future modules plug in the same way.
 
 Blueprints repo (private, per user) lives as a sibling on disk and mirrors the template structure with real values:
 

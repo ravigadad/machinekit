@@ -11,8 +11,10 @@ setup() {
   source "$MACHINEKIT_DIR/lib/machinekit/home.sh"
   unset _MK_HOME_LOADED
   unset MACHINEKIT_CONFLICT_BEHAVIOR
+  # Isolate decode from any ambient XDG override; the xdg_config tests set it.
+  unset XDG_CONFIG_HOME
   _MK_HOME_STAGING_DIR=""
-  _MK_HOME_DEST_REL=""
+  _MK_HOME_DEST_PATH=""
   _MK_HOME_IS_PRIVATE=0
 
   # Logging collaborators — allow-only; they are mechanism, not contract.
@@ -55,15 +57,15 @@ setup() {
 
 # --- home::will_exist ---
 
-@test "will_exist is true when the file already exists under HOME (sync never removes)" {
+@test "will_exist is true when the absolute destination already exists (sync never removes)" {
   export HOME="$BATS_TEST_TMPDIR/home"
   mkdir -p "$HOME/.config"
   : > "$HOME/.config/already_there"
   # Literal existence short-circuits before any staging lookup.
-  home::will_exist ".config/already_there"
+  home::will_exist "$HOME/.config/already_there"
 }
 
-@test "will_exist is true when a staged file maps to the queried destination" {
+@test "will_exist is true when a staged file maps to the queried absolute destination" {
   export HOME="$BATS_TEST_TMPDIR/home"
   mkdir -p "$HOME"
   local staging="$BATS_TEST_TMPDIR/staging"
@@ -73,9 +75,9 @@ setup() {
   # Fake, deterministic mapping derived from the input — so a match can only
   # happen if will_exist actually runs the staged file through decode → resolve.
   # The mappings are obviously not the real addressing/transform rules.
-  home::_decode_path()       { _MK_HOME_DEST_REL="decoded:$1"; }
-  home::transforms::resolve() { _MK_HOME_TRANSFORM_DEST="resolved:$1"; }
-  home::will_exist "resolved:decoded:staged_file"
+  home::_decode_path()       { _MK_HOME_DEST_PATH="$HOME/.decoded/$1"; }
+  home::transforms::resolve() { _MK_HOME_TRANSFORM_DEST="${1}.resolved"; }
+  home::will_exist "$HOME/.decoded/staged_file.resolved"
 }
 
 @test "will_exist is false when no staged file maps to the queried destination" {
@@ -85,10 +87,10 @@ setup() {
   mkdir -p "$staging"
   : > "$staging/staged_file"
   STUB_OUTPUT="$staging" mktest::stub_function home::staging::dir
-  home::_decode_path()       { _MK_HOME_DEST_REL="decoded:$1"; }
-  home::transforms::resolve() { _MK_HOME_TRANSFORM_DEST="resolved:$1"; }
-  # staged_file maps to resolved:decoded:staged_file, not the queried path.
-  run ! home::will_exist "not_the_staged_file"
+  home::_decode_path()       { _MK_HOME_DEST_PATH="$HOME/.decoded/$1"; }
+  home::transforms::resolve() { _MK_HOME_TRANSFORM_DEST="${1}.resolved"; }
+  # staged_file maps to $HOME/.decoded/staged_file.resolved, not the query.
+  run ! home::will_exist "$HOME/.not_the_staged_file"
 }
 
 @test "will_exist is false when the queried destination is mkignored" {
@@ -98,12 +100,13 @@ setup() {
   mkdir -p "$staging"
   : > "$staging/staged_file"
   STUB_OUTPUT="$staging" mktest::stub_function home::staging::dir
-  home::_decode_path()       { _MK_HOME_DEST_REL="decoded:$1"; }
-  home::transforms::resolve() { _MK_HOME_TRANSFORM_DEST="resolved:$1"; }
-  # The staged file *would* map to the query, but mkignore suppresses it — so
-  # dropping the mkignore check would flip this into a (wrong) match.
-  printf 'resolved:decoded:staged_file\n' > "$staging/.mkignore"
-  run ! home::will_exist "resolved:decoded:staged_file"
+  home::_decode_path()       { _MK_HOME_DEST_PATH="$HOME/.decoded/$1"; }
+  home::transforms::resolve() { _MK_HOME_TRANSFORM_DEST="${1}.resolved"; }
+  # The staged file *would* map to the query, but mkignore (keyed by the
+  # $HOME-relative path) suppresses it — so dropping the mkignore check would
+  # flip this into a (wrong) match.
+  printf '.decoded/staged_file.resolved\n' > "$staging/.mkignore"
+  run ! home::will_exist "$HOME/.decoded/staged_file.resolved"
 }
 
 # --- home::_apply ---
@@ -123,17 +126,21 @@ setup() {
 # --- home::_apply_file ---
 
 @test "_apply_file skips .mkignore itself, without executing or reconciling" {
+  export HOME="$BATS_TEST_TMPDIR/home"
+  mkdir -p "$HOME"
   mktest::stub_function home::_decode_path
   mktest::stub_function home::transforms::resolve
   mktest::stub_function home::transforms::execute
   mktest::stub_function home::_reconcile_file
-  _MK_HOME_TRANSFORM_DEST=".mkignore"
+  _MK_HOME_TRANSFORM_DEST="$HOME/.mkignore"
   home::_apply_file "/staging/.mkignore" "/staging"
   mktest::assert_stub_not_called home::transforms::execute
   mktest::assert_stub_not_called home::_reconcile_file
 }
 
 @test "_apply_file skips a file listed in .mkignore, without executing or reconciling" {
+  export HOME="$BATS_TEST_TMPDIR/home"
+  mkdir -p "$HOME"
   mktest::stub_function home::_decode_path
   mktest::stub_function home::transforms::resolve
   mktest::stub_function home::transforms::execute
@@ -141,7 +148,7 @@ setup() {
   local staging="$BATS_TEST_TMPDIR/staging"
   mkdir -p "$staging"
   printf '.zshrc.local\n' > "$staging/.mkignore"
-  _MK_HOME_TRANSFORM_DEST=".zshrc.local"
+  _MK_HOME_TRANSFORM_DEST="$HOME/.zshrc.local"
   home::_apply_file "$staging/dot_zshrc.local" "$staging"
   mktest::assert_stub_not_called home::transforms::execute
   mktest::assert_stub_not_called home::_reconcile_file
@@ -157,12 +164,12 @@ setup() {
   mkdir -p "$staging"
   export HOME="$BATS_TEST_TMPDIR/home"
   mkdir -p "$HOME"
-  _MK_HOME_DEST_REL=".gitconfig.tmpl"
-  _MK_HOME_TRANSFORM_DEST=".gitconfig"
+  _MK_HOME_DEST_PATH="$HOME/.gitconfig.tmpl"
+  _MK_HOME_TRANSFORM_DEST="$HOME/.gitconfig"
   _MK_HOME_TRANSFORM_CONTENT="$BATS_TEST_TMPDIR/rendered"
   home::_apply_file "$staging/dot_gitconfig.tmpl" "$staging"
   mktest::assert_stub_called home::_decode_path "dot_gitconfig.tmpl"
-  mktest::assert_stub_called home::transforms::resolve ".gitconfig.tmpl"
+  mktest::assert_stub_called home::transforms::resolve "$HOME/.gitconfig.tmpl"
   mktest::assert_stub_called home::transforms::execute "$staging/dot_gitconfig.tmpl"
   mktest::assert_stub_called home::_reconcile_file "$BATS_TEST_TMPDIR/rendered" "$HOME/.gitconfig" ".gitconfig" "0"
 }
@@ -178,7 +185,7 @@ setup() {
   export HOME="$BATS_TEST_TMPDIR/home"
   mkdir -p "$HOME"
   _MK_HOME_IS_PRIVATE=1
-  _MK_HOME_TRANSFORM_DEST=".ssh/config"
+  _MK_HOME_TRANSFORM_DEST="$HOME/.ssh/config"
   _MK_HOME_TRANSFORM_CONTENT="$BATS_TEST_TMPDIR/rendered"
   home::_apply_file "$staging/private_dot_ssh/private_config" "$staging"
   mktest::assert_stub_called home::_reconcile_file "$BATS_TEST_TMPDIR/rendered" "$HOME/.ssh/config" ".ssh/config" "1"
@@ -187,40 +194,89 @@ setup() {
 
 # --- home::_decode_path ---
 
-@test "_decode_path passes a plain filename through unchanged" {
+@test "_decode_path roots a plain filename at HOME" {
+  export HOME=/fake/home
   home::_decode_path "env.zsh"
-  [ "$_MK_HOME_DEST_REL" = "env.zsh" ]
+  [ "$_MK_HOME_DEST_PATH" = "/fake/home/env.zsh" ]
   [ "$_MK_HOME_IS_PRIVATE" = "0" ]
 }
 
 @test "_decode_path converts dot_ prefix to a leading dot" {
+  export HOME=/fake/home
   home::_decode_path "dot_zshrc"
-  [ "$_MK_HOME_DEST_REL" = ".zshrc" ]
+  [ "$_MK_HOME_DEST_PATH" = "/fake/home/.zshrc" ]
   [ "$_MK_HOME_IS_PRIVATE" = "0" ]
 }
 
 @test "_decode_path strips private_ prefix and sets is_private" {
+  export HOME=/fake/home
   home::_decode_path "private_config"
-  [ "$_MK_HOME_DEST_REL" = "config" ]
+  [ "$_MK_HOME_DEST_PATH" = "/fake/home/config" ]
   [ "$_MK_HOME_IS_PRIVATE" = "1" ]
 }
 
 @test "_decode_path handles combined private_dot_ prefix" {
+  export HOME=/fake/home
   home::_decode_path "private_dot_ssh"
-  [ "$_MK_HOME_DEST_REL" = ".ssh" ]
+  [ "$_MK_HOME_DEST_PATH" = "/fake/home/.ssh" ]
   [ "$_MK_HOME_IS_PRIVATE" = "1" ]
 }
 
 @test "_decode_path decodes a nested path with all conventions" {
+  export HOME=/fake/home
   home::_decode_path "private_dot_ssh/private_config"
-  [ "$_MK_HOME_DEST_REL" = ".ssh/config" ]
+  [ "$_MK_HOME_DEST_PATH" = "/fake/home/.ssh/config" ]
   [ "$_MK_HOME_IS_PRIVATE" = "1" ]
 }
 
 @test "_decode_path decodes a deep path preserving intermediate directories" {
+  export HOME=/fake/home
   home::_decode_path "dot_config/machinekit/env.zsh.d/mise.zsh"
-  [ "$_MK_HOME_DEST_REL" = ".config/machinekit/env.zsh.d/mise.zsh" ]
+  [ "$_MK_HOME_DEST_PATH" = "/fake/home/.config/machinekit/env.zsh.d/mise.zsh" ]
   [ "$_MK_HOME_IS_PRIVATE" = "0" ]
+}
+
+@test "_decode_path roots xdg_config at the default config dir when XDG is unset" {
+  export HOME=/fake/home
+  unset XDG_CONFIG_HOME
+  home::_decode_path "xdg_config/machinekit/env.zsh"
+  [ "$_MK_HOME_DEST_PATH" = "/fake/home/.config/machinekit/env.zsh" ]
+}
+
+@test "_decode_path roots xdg_config at XDG_CONFIG_HOME when set under HOME" {
+  export HOME=/fake/home
+  export XDG_CONFIG_HOME=/fake/home/.dotfiles/config
+  home::_decode_path "xdg_config/machinekit/env.zsh"
+  [ "$_MK_HOME_DEST_PATH" = "/fake/home/.dotfiles/config/machinekit/env.zsh" ]
+}
+
+@test "_decode_path roots xdg_config at XDG_CONFIG_HOME even outside HOME" {
+  export HOME=/fake/home
+  export XDG_CONFIG_HOME=/srv/config
+  home::_decode_path "xdg_config/machinekit/env.zsh"
+  [ "$_MK_HOME_DEST_PATH" = "/srv/config/machinekit/env.zsh" ]
+}
+
+@test "_decode_path still decodes private_/dot_ prefixes after an xdg_config root" {
+  export HOME=/fake/home
+  export XDG_CONFIG_HOME=/srv/config
+  home::_decode_path "xdg_config/private_dot_secret"
+  [ "$_MK_HOME_DEST_PATH" = "/srv/config/.secret" ]
+  [ "$_MK_HOME_IS_PRIVATE" = "1" ]
+}
+
+# --- home::_dest_key ---
+
+@test "_dest_key is the HOME-relative path when the destination is under HOME" {
+  export HOME=/fake/home
+  run home::_dest_key "/fake/home/.config/machinekit/env.zsh"
+  [ "$output" = ".config/machinekit/env.zsh" ]
+}
+
+@test "_dest_key is the absolute path when the destination is outside HOME" {
+  export HOME=/fake/home
+  run home::_dest_key "/srv/config/machinekit/env.zsh"
+  [ "$output" = "/srv/config/machinekit/env.zsh" ]
 }
 
 # --- home::_apply_parent_perms ---

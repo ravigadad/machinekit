@@ -9,7 +9,7 @@ setup() {
   unset _MK_HOME_STAGING_LOADED
   unset MACHINEKIT_CONFLICT_BEHAVIOR
   _MK_HOME_STAGING_DIR=""
-  _MK_HOME_DEST_REL=""
+  _MK_HOME_DEST_PATH=""
   _MK_HOME_IS_PRIVATE=0
 
   # Logging collaborators — allow-only; they are mechanism, not contract.

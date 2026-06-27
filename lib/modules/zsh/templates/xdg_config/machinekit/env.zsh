@@ -1,4 +1,4 @@
-# ~/.config/machinekit/env.zsh — managed by machinekit.
+# machinekit's env.zsh (under ${XDG_CONFIG_HOME:-$HOME/.config}/machinekit) — managed by machinekit.
 # To override or extend, use ~/.zshrc.local (not managed by machinekit).
 
 # Homebrew puts this in ~/.zprofile (login shells only), so non-login shells
@@ -21,9 +21,11 @@ setopt SHARE_HISTORY HIST_IGNORE_DUPS HIST_IGNORE_ALL_DUPS HIST_REDUCE_BLANKS
 autoload -Uz compinit && compinit
 
 # Module-contributed shell fragments.
-if [ -d "${HOME}/.config/machinekit/env.zsh.d" ]; then
-  for _mk_env_fragment in "${HOME}/.config/machinekit/env.zsh.d/"*.zsh; do
+_mk_env_fragment_dir="${XDG_CONFIG_HOME:-$HOME/.config}/machinekit/env.zsh.d"
+if [ -d "$_mk_env_fragment_dir" ]; then
+  for _mk_env_fragment in "$_mk_env_fragment_dir/"*.zsh; do
     [ -f "$_mk_env_fragment" ] && source "$_mk_env_fragment"
   done
   unset _mk_env_fragment
 fi
+unset _mk_env_fragment_dir

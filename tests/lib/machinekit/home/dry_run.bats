@@ -9,7 +9,7 @@ setup() {
   unset _MK_HOME_DRY_RUN_LOADED
   unset MACHINEKIT_CONFLICT_BEHAVIOR
   _MK_HOME_STAGING_DIR=""
-  _MK_HOME_DEST_REL=""
+  _MK_HOME_DEST_PATH=""
   _MK_HOME_IS_PRIVATE=0
 
   # Logging collaborators — allow-only; they are mechanism, not contract.
@@ -49,28 +49,32 @@ setup() {
 
 # --- home::_render_to_outdir ---
 
-@test "_render_to_outdir resolves, executes, and writes the content to the out_dir" {
+@test "_render_to_outdir resolves, executes, and mirrors the absolute dest under out_dir" {
+  export HOME="$BATS_TEST_TMPDIR/home"
+  mkdir -p "$HOME"
   mktest::stub_function home::_decode_path
   mktest::stub_function home::transforms::resolve
   mktest::stub_function home::transforms::execute
-  _MK_HOME_DEST_REL=".zshrc.tmpl"
-  _MK_HOME_TRANSFORM_DEST=".zshrc"
+  _MK_HOME_DEST_PATH="$HOME/.zshrc.tmpl"
+  _MK_HOME_TRANSFORM_DEST="$HOME/.zshrc"
   local content="$BATS_TEST_TMPDIR/rendered"
   printf 'rendered\n' > "$content"
   _MK_HOME_TRANSFORM_CONTENT="$content"
   local staging="$BATS_TEST_TMPDIR/staging" out_dir="$BATS_TEST_TMPDIR/out"
   mkdir -p "$staging" "$out_dir"
   home::dry_run::_render_to_outdir "$staging/dot_zshrc.tmpl" "$staging" "$out_dir"
-  mktest::assert_stub_called home::transforms::resolve ".zshrc.tmpl"
+  mktest::assert_stub_called home::transforms::resolve "$HOME/.zshrc.tmpl"
   mktest::assert_stub_called home::transforms::execute "$staging/dot_zshrc.tmpl"
-  [ "$(cat "$out_dir/.zshrc")" = "rendered" ]
+  [ "$(cat "$out_dir/${HOME#/}/.zshrc")" = "rendered" ]
 }
 
 @test "_render_to_outdir skips .mkignore itself, without executing" {
+  export HOME="$BATS_TEST_TMPDIR/home"
+  mkdir -p "$HOME"
   mktest::stub_function home::_decode_path
   mktest::stub_function home::transforms::resolve
   mktest::stub_function home::transforms::execute
-  _MK_HOME_TRANSFORM_DEST=".mkignore"
+  _MK_HOME_TRANSFORM_DEST="$HOME/.mkignore"
   local staging="$BATS_TEST_TMPDIR/staging" out_dir="$BATS_TEST_TMPDIR/out"
   mkdir -p "$staging" "$out_dir"
   home::dry_run::_render_to_outdir "$staging/.mkignore" "$staging" "$out_dir"
@@ -78,10 +82,12 @@ setup() {
 }
 
 @test "_render_to_outdir skips a file listed in .mkignore, without executing" {
+  export HOME="$BATS_TEST_TMPDIR/home"
+  mkdir -p "$HOME"
   mktest::stub_function home::_decode_path
   mktest::stub_function home::transforms::resolve
   mktest::stub_function home::transforms::execute
-  _MK_HOME_TRANSFORM_DEST=".zshrc.local"
+  _MK_HOME_TRANSFORM_DEST="$HOME/.zshrc.local"
   local staging="$BATS_TEST_TMPDIR/staging" out_dir="$BATS_TEST_TMPDIR/out"
   mkdir -p "$staging" "$out_dir"
   printf '.zshrc.local\n' > "$staging/.mkignore"
@@ -126,34 +132,39 @@ setup() {
 
 @test "_generate_diff returns git diff output for a new file not present in HOME" {
   local staged="$BATS_TEST_TMPDIR/staged"
-  mkdir -p "$staged"
-  printf 'new content\n' > "$staged/newfile"
   export HOME="$BATS_TEST_TMPDIR/home"
   mkdir -p "$HOME"
-  STUB_OUTPUT="diff output" mktest::stub_function git "diff" "--no-index" "--color=always" "/dev/null" "$staged/newfile"
+  # The preview mirrors the absolute destination ($HOME/newfile) with the
+  # leading slash stripped — that is how _render_to_outdir laid it down.
+  local preview="$staged/${HOME#/}"
+  mkdir -p "$preview"
+  printf 'new content\n' > "$preview/newfile"
+  STUB_OUTPUT="diff output" mktest::stub_function git "diff" "--no-index" "--color=always" "/dev/null" "$preview/newfile"
   result=$(home::dry_run::_generate_diff "$staged")
   [ "$result" = "diff output" ]
 }
 
 @test "_generate_diff returns git diff output for a file that differs from HOME" {
   local staged="$BATS_TEST_TMPDIR/staged"
-  mkdir -p "$staged"
-  printf 'new\n' > "$staged/file"
   export HOME="$BATS_TEST_TMPDIR/home"
   mkdir -p "$HOME"
   printf 'old\n' > "$HOME/file"
-  STUB_OUTPUT="diff output" mktest::stub_function git "diff" "--no-index" "--color=always" "$HOME/file" "$staged/file"
+  local preview="$staged/${HOME#/}"
+  mkdir -p "$preview"
+  printf 'new\n' > "$preview/file"
+  STUB_OUTPUT="diff output" mktest::stub_function git "diff" "--no-index" "--color=always" "$HOME/file" "$preview/file"
   result=$(home::dry_run::_generate_diff "$staged")
   [ "$result" = "diff output" ]
 }
 
 @test "_generate_diff produces no output when files are unchanged" {
   local staged="$BATS_TEST_TMPDIR/staged"
-  mkdir -p "$staged"
-  printf 'same\n' > "$staged/file"
   export HOME="$BATS_TEST_TMPDIR/home"
   mkdir -p "$HOME"
   printf 'same\n' > "$HOME/file"
+  local preview="$staged/${HOME#/}"
+  mkdir -p "$preview"
+  printf 'same\n' > "$preview/file"
   mktest::stub_function git
   result=$(home::dry_run::_generate_diff "$staged")
   [ -z "$result" ]
@@ -183,23 +194,25 @@ setup() {
 
 @test "_show_plain_diff outputs git diff content for changed files" {
   local staged="$BATS_TEST_TMPDIR/staged"
-  mkdir -p "$staged"
-  printf 'new\n' > "$staged/file"
   export HOME="$BATS_TEST_TMPDIR/home"
   mkdir -p "$HOME"
   printf 'old\n' > "$HOME/file"
-  STUB_OUTPUT="diff output" mktest::stub_function git "diff" "--no-index" "--no-color" "$HOME/file" "$staged/file"
+  local preview="$staged/${HOME#/}"
+  mkdir -p "$preview"
+  printf 'new\n' > "$preview/file"
+  STUB_OUTPUT="diff output" mktest::stub_function git "diff" "--no-index" "--no-color" "$HOME/file" "$preview/file"
   result=$(home::dry_run::_show_plain_diff "$staged")
   [ "$result" = "diff output" ]
 }
 
 @test "_show_plain_diff outputs git diff content for new files not present in HOME" {
   local staged="$BATS_TEST_TMPDIR/staged"
-  mkdir -p "$staged"
-  printf 'content\n' > "$staged/newfile"
   export HOME="$BATS_TEST_TMPDIR/home"
   mkdir -p "$HOME"
-  STUB_OUTPUT="diff output" mktest::stub_function git "diff" "--no-index" "--no-color" "/dev/null" "$staged/newfile"
+  local preview="$staged/${HOME#/}"
+  mkdir -p "$preview"
+  printf 'content\n' > "$preview/newfile"
+  STUB_OUTPUT="diff output" mktest::stub_function git "diff" "--no-index" "--no-color" "/dev/null" "$preview/newfile"
   result=$(home::dry_run::_show_plain_diff "$staged")
   [ "$result" = "diff output" ]
 }
