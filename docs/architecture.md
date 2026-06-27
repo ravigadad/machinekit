@@ -145,7 +145,7 @@ gomplate is the motivating example. Template rendering is core, so the `.tmpl` c
 
 ### Execution modes
 
-machinekit always runs **locally, on the target machine itself**, in the invoking user's own login session — `install.sh` is `curl … | bash` *on that machine* (it fetches the framework and ensures its prerequisites, nothing more), and `machinekit apply`, run locally afterward, does the provisioning. Nothing SSHes out to provision a remote; there is no separate control node. (A remote-apply-over-SSH mode is possible but not built.) A corollary for debugging: a failure that only appears when a machine is driven *remotely over SSH for testing* — a non-login `Background` session, a missing session `$HOME`, launchd-domain differences — is an artifact of that remote harness, not a production bug. Reproduce against a real local run before treating it as one.
+machinekit always runs **locally, on the target machine itself**, in the invoking user's own login session — `install.sh` is `curl … | bash` *on that machine* (it fetches the framework, ensures its prerequisites, and links the `machinekit` command onto PATH — nothing more), and `machinekit apply`, run locally afterward, does the provisioning. Nothing SSHes out to provision a remote; there is no separate control node. (A remote-apply-over-SSH mode is possible but not built.) A corollary for debugging: a failure that only appears when a machine is driven *remotely over SSH for testing* — a non-login `Background` session, a missing session `$HOME`, launchd-domain differences — is an artifact of that remote harness, not a production bug. Reproduce against a real local run before treating it as one.
 
 Bootstrap supports two modes, detected automatically and overridable by flag:
 
@@ -438,15 +438,16 @@ machinekit/                             ← this repo (public)
 │   └── roadmap.md
 ├── bin/
 │   └── machinekit                      ← the one public entry: pure-3.2 dispatcher that resolves a >=5.3 bash and execs the libexec impl under it
-├── libexec/                            ← subcommand impls, not on PATH; run under the resolved modern bash (git-core style)
+├── libexec/                            ← internal impls, not on PATH; run under the resolved modern bash (git-core style)
 │   ├── machinekit-apply                ← apply a blueprint
-│   └── machinekit-generate             ← scaffold a fresh blueprint
+│   ├── machinekit-generate             ← scaffold a fresh blueprint
+│   └── machinekit-ensure-on-path       ← installer-invoked: link the command into ~/.local/bin + onto PATH (not a subcommand)
 ├── lib/                                ← all execution code lives here
 │   ├── common/                         ← pure-3.2 primitives shared across layers (sourced by the bootstrap and by lib/machinekit/)
 │   │   ├── bash_floor.sh               ← single source of the bash version floor (5.3): bash_floor::meets + ::guard
 │   │   └── brew_core.sh                ← opinion-free shared Homebrew primitives: brew_core::setup_path + ::run_official_installer
 │   ├── bootstrap/                      ← the pure-3.2 bootstrap island (sourced by bin/machinekit before any modern lib)
-│   │   ├── bash.sh                     ← bootstrap::bash::ensure_modern_bash — resolve a >=floor bash: a MACHINEKIT_BASH override, else the running one, else a freshly installed brew bash
+│   │   ├── bash.sh                     ← bootstrap::bash::ensure_modern_bash — resolve a >=floor bash: a MACHINEKIT_BASH override, else the running one, else an existing or freshly installed brew bash
 │   │   └── brew.sh                     ← bootstrap::brew::* — ensure Homebrew / install bash, with island-local log/fail/interactive
 │   ├── machinekit.sh                   ← single aggregator: sources lib/machinekit/* eagerly
 │   ├── machinekit/                     ← core machinekit code
@@ -459,6 +460,7 @@ machinekit/                             ← this repo (public)
 │   │   ├── brew.sh                     ← brew::* (bootstrap, install_formula — low-level brew ops)
 │   │   ├── fetch.sh                    ← fetch::* (source-agnostic: resolve_protocol, into; git clone w/ SSH fallback + error classification, or cp)
 │   │   ├── managed_block.sh            ← managed_block::ensure (maintain a delimited machinekit-owned block in a file; shared by syncthing/git_backup ignore files)
+│   │   ├── path.sh                     ← path::ensure_on_path (link the command into ~/.local/bin + add it to the shell rc's PATH; managed_block-backed)
 │   │   ├── blueprints.sh               ← blueprints::* (fetch, dir — orchestrates fetch:: into the cached blueprints location)
 │   │   ├── ssh.sh                      ← ssh::* (key install, generate, interactive discover)
 │   │   ├── config.sh                   ← config::* (parse + merge machinekit.toml via toml2json; stored in context)

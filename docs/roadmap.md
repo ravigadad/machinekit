@@ -50,7 +50,7 @@ Architecture is described in [architecture.md](./architecture.md); this document
 - oh-my-zsh, starship, or any other prompt theme
 - Editor configs (`.editorconfig`, IDE settings) — repo-level concerns, not machine-level
 
-- `install.sh` — thin curl-pipe-bash shim that clones machinekit to `~/.local/share/machinekit/framework` and ensures a modern bash, leaving the tool ready to run. It does not apply a blueprint (a separate step). **Implemented.**
+- `install.sh` — thin curl-pipe-bash shim that clones machinekit to `~/.local/share/machinekit/framework`, ensures a modern bash, and links the `machinekit` command into `~/.local/bin` on the user's PATH (via `libexec/machinekit-ensure-on-path`; `--no-modify-path` opts out of the shell-rc edit), leaving the tool ready to run. It does not apply a blueprint (a separate step). **Implemented.**
 - VM-based E2E tests — `tests/vm/` with Tart VM support (Ubuntu and macOS Sequoia images); `scripts/test-vm` wrapper; `.github/workflows/` for BATS and shellcheck CI. **Implemented** (VMs not in CI due to image size; run locally).
 
 ---
@@ -122,7 +122,7 @@ The directory structure (`machine_types/<type>/`) ships in iteration 1; this ite
 
 - `lib/common/bash_floor.sh` — the single source of the floor (5.3): `bash_floor::meets` predicate + `bash_floor::guard`. Pure-3.2.
 - `lib/common/brew_core.sh` — the opinion-free Homebrew primitives shared by both brew layers: `brew_core::setup_path` and `brew_core::run_official_installer` (interactivity passed in). Pure-3.2.
-- `lib/bootstrap/bash.sh` — `bootstrap::bash::ensure_modern_bash`: returns the running bash if it meets the floor, else installs Homebrew's bash and returns its path (failing if even that falls short). Pure-3.2.
+- `lib/bootstrap/bash.sh` — `bootstrap::bash::ensure_modern_bash`: returns the running bash if it meets the floor, else reuses an already-installed Homebrew bash that meets it (reinstalling only when absent or too old) and returns its path (failing if even that falls short). Pure-3.2.
 - `lib/bootstrap/brew.sh` — `bootstrap::brew::*`: the island's Homebrew orchestration (ensure Homebrew, install bash, locate it) with its own minimal log/fail/interactive helpers, built on `lib/common/brew_core.sh`. Pure-3.2.
 - `lib/machinekit/brew.sh` now sources `lib/common/brew_core.sh` too — same `setup_path` and installer, with its `logging::`/`input::` orchestration on top (no duplication).
 
