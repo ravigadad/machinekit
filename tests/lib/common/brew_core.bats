@@ -11,7 +11,7 @@ setup() {
 
 # --- brew_core::setup_path ---
 
-@test "setup_path does not fail when brew is absent from standard prefixes" {
+@test "setup_path runs without error whether or not brew is present" {
   brew_core::setup_path
 }
 

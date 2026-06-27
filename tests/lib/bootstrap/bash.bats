@@ -22,24 +22,26 @@ setup() {
 
 # --- bootstrap::bash::_current_meets_floor ---
 
-@test "_current_meets_floor agrees with bash_floor::meets on the running version" {
-  if bash_floor::meets "${BASH_VERSINFO[0]}" "${BASH_VERSINFO[1]}"; then
-    bootstrap::bash::_current_meets_floor
-  else
-    run ! bootstrap::bash::_current_meets_floor
-  fi
+@test "_current_meets_floor delegates the running version to the floor check" {
+  mktest::stub_function bash_floor::meets "${BASH_VERSINFO[0]}" "${BASH_VERSINFO[1]}"
+  bootstrap::bash::_current_meets_floor
+  mktest::assert_stub_called bash_floor::meets "${BASH_VERSINFO[0]}" "${BASH_VERSINFO[1]}"
 }
 
 # --- bootstrap::bash::_binary_meets_floor ---
 
-@test "_binary_meets_floor is true when the binary reports at or above the floor" {
+@test "_binary_meets_floor checks the binary's reported version against the floor" {
   STUB_OUTPUT="5 3" mktest::stub_function bootstrap::bash::_version_of "/fake/bash"
+  mktest::stub_function bash_floor::meets "5" "3"
   bootstrap::bash::_binary_meets_floor /fake/bash
+  mktest::assert_stub_called bash_floor::meets "5" "3"
 }
 
-@test "_binary_meets_floor is false when the binary reports below the floor" {
-  STUB_OUTPUT="5 1" mktest::stub_function bootstrap::bash::_version_of "/fake/bash"
-  run ! bootstrap::bash::_binary_meets_floor /fake/bash
+@test "_binary_meets_floor treats an unreadable version as below the floor" {
+  STUB_OUTPUT="" mktest::stub_function bootstrap::bash::_version_of "/fake/bash"
+  mktest::stub_function bash_floor::meets "0" "0"
+  bootstrap::bash::_binary_meets_floor /fake/bash
+  mktest::assert_stub_called bash_floor::meets "0" "0"
 }
 
 # --- bootstrap::bash::ensure_modern_bash ---
@@ -85,6 +87,21 @@ setup() {
   [ "$output" = "/opt/test-brew/bin/bash" ]
   mktest::assert_stub_called bootstrap::brew::ensure
   mktest::assert_stub_called bootstrap::brew::install_bash
+}
+
+@test "ensure_modern_bash reuses an already-installed brew bash without reinstalling" {
+  local existing_brew_bash="$BATS_TEST_TMPDIR/bash"
+  printf '#!/bin/sh\n' >"$existing_brew_bash"
+  chmod +x "$existing_brew_bash"
+  STUB_RETURN=1 mktest::stub_function bootstrap::bash::_current_meets_floor
+  mktest::stub_function bootstrap::brew::ensure
+  mktest::stub_function bootstrap::brew::install_bash
+  STUB_OUTPUT="$existing_brew_bash" mktest::stub_function bootstrap::brew::bash_path
+  mktest::stub_function bootstrap::bash::_binary_meets_floor "$existing_brew_bash"
+  run bootstrap::bash::ensure_modern_bash
+  [ "$status" -eq 0 ]
+  [ "$output" = "$existing_brew_bash" ]
+  mktest::assert_stub_not_called bootstrap::brew::install_bash
 }
 
 @test "ensure_modern_bash fails when even the installed bash is below the floor" {

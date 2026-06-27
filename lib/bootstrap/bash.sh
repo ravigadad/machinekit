@@ -53,10 +53,14 @@ bootstrap::bash::ensure_modern_bash() {
     return 0
   fi
   bootstrap::brew::ensure
-  bootstrap::brew::install_bash
   local brew_bash
   brew_bash="$(bootstrap::brew::bash_path)"
-  bootstrap::bash::_binary_meets_floor "$brew_bash" \
-    || bootstrap::brew::_fail "installed bash at $brew_bash is below the required ${BASH_FLOOR_MAJOR}.${BASH_FLOOR_MINOR}."
+  # Reuse an already-installed brew bash that meets the floor; reinstalling on
+  # every dispatch is a slow, chatty no-op. Only install when it's absent or old.
+  if [ ! -x "$brew_bash" ] || ! bootstrap::bash::_binary_meets_floor "$brew_bash"; then
+    bootstrap::brew::install_bash
+    bootstrap::bash::_binary_meets_floor "$brew_bash" \
+      || bootstrap::brew::_fail "installed bash at $brew_bash is below the required ${BASH_FLOOR_MAJOR}.${BASH_FLOOR_MINOR}."
+  fi
   printf '%s\n' "$brew_bash"
 }
