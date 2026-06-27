@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# machinekit-ensure-on-path (impl) — link the public `machinekit` entry into
+# ~/.local/bin and add that directory to the shell's PATH, so machinekit is
+# callable by name after install. Invoked by install.sh under a bash that meets
+# the version floor (install.sh resolves one); not a public subcommand. The guard
+# below makes a direct call under an old bash fail cleanly.
+
+MACHINEKIT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=../lib/common/bash_floor.sh
+source "$MACHINEKIT_DIR/lib/common/bash_floor.sh"
+bash_floor::guard
+
+set -euo pipefail
+
+# shellcheck source=../lib/machinekit/logging.sh
+source "$MACHINEKIT_DIR/lib/machinekit/logging.sh"
+# shellcheck source=../lib/machinekit/lifecycle.sh
+source "$MACHINEKIT_DIR/lib/machinekit/lifecycle.sh"
+# shellcheck source=../lib/machinekit/managed_block.sh
+source "$MACHINEKIT_DIR/lib/machinekit/managed_block.sh"
+# shellcheck source=../lib/machinekit/path.sh
+source "$MACHINEKIT_DIR/lib/machinekit/path.sh"
+
+usage() {
+  cat <<'EOF'
+Usage: machinekit-ensure-on-path [--no-modify-path]
+
+Link the machinekit command into ~/.local/bin and add that directory to your
+shell's PATH, so machinekit is callable by name. Run by the installer; safe to
+re-run.
+
+Options:
+  --no-modify-path   Link the command but don't edit your shell rc; print how to
+                     add ~/.local/bin to PATH yourself.
+  -h, --help         Show this message and exit.
+EOF
+}
+
+main() {
+  local modify_path=1
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --no-modify-path) modify_path=0; shift ;;
+      -h|--help)        usage; exit 0 ;;
+      --)               shift; break ;;
+      -*)               lifecycle::fail "Unknown flag: $1 (try --help)" ;;
+      *)                lifecycle::fail "Unexpected argument: $1" ;;
+    esac
+  done
+  path::ensure_on_path "$modify_path"
+}
+
+[ "${BASH_SOURCE[0]}" != "$0" ] || main "$@"

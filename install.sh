@@ -1,13 +1,15 @@
 #!/bin/bash
-# Install machinekit on a fresh machine: fetch the framework and ensure its
-# prerequisites, leaving the tool ready to run. It does NOT apply a blueprint —
-# installing machinekit and applying a blueprint are separate steps, and a
-# first-time installer usually has no blueprint yet.
+# Install machinekit on a fresh machine: fetch the framework, ensure its
+# prerequisites, and put the `machinekit` command on your PATH — leaving the tool
+# ready to run. It does NOT apply a blueprint; installing machinekit and applying
+# a blueprint are separate steps, and a first-time installer usually has no
+# blueprint yet.
 #
 # Usage (brew-style one-liner):
-#   /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/ravigadad/machinekit/main/install.sh)"
+#   /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/ravigadad/machinekit/main/install.sh)" -- [--no-modify-path]
 #
-# Override the framework location: MACHINEKIT_FRAMEWORK_DIR=/your/path
+# --no-modify-path links the command into ~/.local/bin but leaves your shell rc
+# alone. Override the framework location: MACHINEKIT_FRAMEWORK_DIR=/your/path
 #
 # Runs under stock /bin/bash, so keep this file 3.2-safe (part of the bootstrap
 # island — see lib/common/bash_floor.sh).
@@ -31,8 +33,11 @@ fi
 # at install time means the first run isn't surprised by a mid-apply install.
 # shellcheck source=lib/bootstrap/bash.sh
 source "$MACHINEKIT_DIR/lib/bootstrap/bash.sh"
-bootstrap::bash::ensure_modern_bash >/dev/null
+modern_bash="$(bootstrap::bash::ensure_modern_bash)"
+
+# Put `machinekit` on PATH under the resolved bash (the helper uses modern libs).
+# Pass through flags like --no-modify-path from the install one-liner.
+"$modern_bash" "$MACHINEKIT_DIR/libexec/machinekit-ensure-on-path" "$@"
 
 printf 'machinekit: installed to %s\n' "$MACHINEKIT_DIR" >&2
-printf 'machinekit: run %s/bin/machinekit apply --help to get started, or add %s/bin to your PATH.\n' \
-  "$MACHINEKIT_DIR" "$MACHINEKIT_DIR" >&2
+printf 'machinekit: run "machinekit apply --help" to get started.\n' >&2
