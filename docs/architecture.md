@@ -36,7 +36,7 @@ The same vocabulary applies across the code, docs, and user-facing language. Wor
 
 ### Two repos
 
-**machinekit** (public): the framework. The `machinekit` CLI (with `apply` and `generate` subcommands), the `lib/` helpers, and the blueprints template. No personal config, no secrets.
+**machinekit** (public): the framework. The `machinekit` CLI (with `apply`, `generate`, and `secrets` subcommands), the `lib/` helpers, and the blueprints template. No personal config, no secrets.
 
 **blueprints** (private, per user): your config. Brewfile choices, dotfile templates, encrypted secrets, module declarations (TOML).
 
@@ -281,7 +281,9 @@ There are two distinct channels for age-encrypted blueprint secrets, and the dis
 
 The age private key itself lives on disk at `~/.config/age/key.txt` (mode 600); "off disk" applies to specific decrypted plaintexts a module chooses to keep in memory, not to encryption material in general.
 
-> Status: implemented. The age module manages the key and supplies the `.age` decode handler (the home-pipeline channel) and the `age::decrypt` primitive (the pool channel). The [home transform pipeline](#home-template-system) runs the former; the `tailscale` module uses the latter.
+**Knowing what the pool needs — `machinekit secrets`.** A module that draws on pool secrets declares them with a `<name>::pool_secrets` hook: resolved against current config, it emits one `path · required · can_be_generated` row per secret it will actually use on this machine (so a *tagged* tailscale device lists its join key while an untagged one lists nothing). `machinekit secrets list` aggregates those declarations across the active modules and joins them against what the pool actually holds — reporting each secret as required-or-not, generated-if-missing-or-not, and present-or-absent, with any pool file no active module claims flagged separately as a likely typo or stale entry. It is **read-only**: it resolves inputs (fetch, config, active modules) without applying anything, so it answers "what does this blueprint need, and what's still missing" before a run. The required/can-be-generated split is two independent booleans by design — a secret can be required but un-generatable (you must provide the LLM key), required and generatable (machinekit mints the tenant key if absent), and the model leaves room for a future merely-optional secret.
+
+> Status: implemented. The age module manages the key and supplies the `.age` decode handler (the home-pipeline channel) and the `age::decrypt` primitive (the pool channel). The [home transform pipeline](#home-template-system) runs the former; the `tailscale` module uses the latter. `machinekit secrets list` reports the pool inventory from the active modules' `pool_secrets` declarations.
 
 ---
 
@@ -442,6 +444,7 @@ machinekit/                             ← this repo (public)
 ├── libexec/                            ← internal impls, not on PATH; run under the resolved modern bash (git-core style)
 │   ├── machinekit-apply                ← apply a blueprint
 │   ├── machinekit-generate             ← scaffold a fresh blueprint
+│   ├── machinekit-secrets              ← inspect the blueprint secrets pool (read-only)
 │   └── machinekit-ensure-on-path       ← installer-invoked: link the command into ~/.local/bin + onto PATH (not a subcommand)
 ├── lib/                                ← all execution code lives here
 │   ├── common/                         ← pure-3.2 primitives shared across layers (sourced by the bootstrap and by lib/machinekit/)

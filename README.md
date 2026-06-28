@@ -46,6 +46,7 @@ machinekit ships a single user-facing command, `machinekit`, that dispatches to 
 |---|---|
 | `machinekit apply [flags]`     | Apply a blueprint to this machine (the workhorse) |
 | `machinekit generate <path>`   | Scaffold a fresh blueprint repo from the template |
+| `machinekit secrets list`      | Show which encrypted secrets the active modules need, and which are already in the pool (read-only) |
 
 Run any subcommand with `--help` for its full flag list.
 
@@ -187,6 +188,7 @@ machinekit/
 ├── libexec/                      # internal impls (not on PATH), run under the resolved bash
 │   ├── machinekit-apply          # apply a blueprint
 │   ├── machinekit-generate       # scaffold a fresh blueprint
+│   ├── machinekit-secrets        # inspect the secrets pool (read-only)
 │   └── machinekit-ensure-on-path # installer helper: link the command into ~/.local/bin + onto PATH
 ├── lib/                          # execution code (bin/ is a thin dispatcher)
 │   ├── machinekit.sh             # aggregator: sources all of lib/machinekit/* eagerly

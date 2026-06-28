@@ -27,6 +27,8 @@ These aren't modules, but everything else assumes them.
 
   (`printf` without a trailing newline matters for secrets consumed verbatim.) See [architecture.md § Secrets and key management](./architecture.md#secrets-and-key-management) for the two secret channels.
 
+  To see which pool secrets your active modules actually need — which are required, which machinekit will generate if missing, and which you've already provided — run `machinekit secrets list` (read-only; it changes nothing).
+
 ---
 
 ## git — register your SSH key with your git host

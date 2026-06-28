@@ -157,6 +157,10 @@ More as needed (prompt themes, password-manager CLIs as a secrets-fetch layer, a
 
 The [home transform pipeline](#home-transform-pipeline) makes a new one (e.g. decompression) a module declaration rather than new plumbing.
 
+### Secrets pool inventory
+
+Shipped: `machinekit secrets list` reports which pool secrets the active modules need — each as required-or-not, generated-if-missing-or-not, and present-or-absent — plus any stray pool files no active module claims. Modules declare their needs through a `<name>::pool_secrets` hook; the command is read-only (it resolves inputs but applies nothing). This is the read side, and the natural precursor to a write side: helpers that encrypt-and-place a generated secret into the pool (the `secret_delivery_helpers` backlog item).
+
 ### Input resolver step 4
 
 Step 3 — the per-user defaults file (`${XDG_CONFIG_HOME:-~/.config}/machinekit/defaults.toml`) — is implemented. The remaining step 4, an `op://`-style secrets manager reference, would make non-interactive first-machine setups cleaner.
