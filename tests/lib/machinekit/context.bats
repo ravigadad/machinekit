@@ -101,9 +101,27 @@ setup() {
   [ "$result" = "from-env" ]
 }
 
+@test "get returns the env value and does not consult user-config" {
+  STUB_RETURN=1 mktest::stub_function context::_from_store "test.key"
+  STUB_OUTPUT="from-env" mktest::stub_function context::_from_env "test.key"
+  mktest::stub_function context::_from_user_config "test.key"
+  result=$(context::get "test.key")
+  [ "$result" = "from-env" ]
+  mktest::assert_stub_not_called context::_from_user_config "test.key"
+}
+
+@test "get falls through to user-config on a store and env miss" {
+  STUB_RETURN=1 mktest::stub_function context::_from_store "test.key"
+  STUB_RETURN=1 mktest::stub_function context::_from_env "test.key"
+  STUB_OUTPUT="from-user-config" mktest::stub_function context::_from_user_config "test.key"
+  result=$(context::get "test.key")
+  [ "$result" = "from-user-config" ]
+}
+
 @test "get does not prompt without --required or --prompt" {
   STUB_RETURN=1 mktest::stub_function context::_from_store
   STUB_RETURN=1 mktest::stub_function context::_from_env
+  STUB_RETURN=1 mktest::stub_function context::_from_user_config
   mktest::stub_function context::_prompt
   run ! context::get "test.key"
   mktest::assert_stub_not_called context::_prompt
@@ -118,6 +136,7 @@ setup() {
 @test "get --required prompts on a full miss" {
   STUB_RETURN=1 mktest::stub_function context::_from_store
   STUB_RETURN=1 mktest::stub_function context::_from_env
+  STUB_RETURN=1 mktest::stub_function context::_from_user_config
   STUB_OUTPUT="from-prompt" mktest::stub_function context::_prompt "test.key"
   result=$(context::get "test.key" --required)
   [ "$result" = "from-prompt" ]
@@ -126,6 +145,7 @@ setup() {
 @test "get --prompt alone triggers prompting and returns the value" {
   STUB_RETURN=1 mktest::stub_function context::_from_store
   STUB_RETURN=1 mktest::stub_function context::_from_env
+  STUB_RETURN=1 mktest::stub_function context::_from_user_config
   STUB_OUTPUT="user-answer" mktest::stub_function context::_prompt "test.key" "--label" "Ask me"
   result=$(context::get "test.key" --prompt "Ask me")
   [ "$result" = "user-answer" ]
@@ -134,6 +154,7 @@ setup() {
 @test "get --prompt with a blank string still prompts" {
   STUB_RETURN=1 mktest::stub_function context::_from_store
   STUB_RETURN=1 mktest::stub_function context::_from_env
+  STUB_RETURN=1 mktest::stub_function context::_from_user_config
   STUB_OUTPUT="user-answer" mktest::stub_function context::_prompt "test.key"
   result=$(context::get "test.key" --prompt "")
   [ "$result" = "user-answer" ]
@@ -141,6 +162,7 @@ setup() {
 @test "get --prompt alone returns 1 when user enters nothing" {
   STUB_RETURN=1 mktest::stub_function context::_from_store
   STUB_RETURN=1 mktest::stub_function context::_from_env
+  STUB_RETURN=1 mktest::stub_function context::_from_user_config
   STUB_RETURN=1 mktest::stub_function context::_prompt "test.key" "--label" "Ask me"
   run ! context::get "test.key" --prompt "Ask me"
 }
@@ -148,6 +170,7 @@ setup() {
 @test "get --required fails when prompt also misses" {
   STUB_RETURN=1 mktest::stub_function context::_from_store
   STUB_RETURN=1 mktest::stub_function context::_from_env
+  STUB_RETURN=1 mktest::stub_function context::_from_user_config
   STUB_RETURN=1 mktest::stub_function context::_prompt "test.key"
   mktest::stub_function context::_fail_required "test.key"
   run ! context::get "test.key" --required
@@ -157,6 +180,7 @@ setup() {
 @test "get --prompt passes the custom text to _prompt" {
   STUB_RETURN=1 mktest::stub_function context::_from_store
   STUB_RETURN=1 mktest::stub_function context::_from_env
+  STUB_RETURN=1 mktest::stub_function context::_from_user_config
   STUB_OUTPUT="from-prompt" mktest::stub_function context::_prompt "test.key" "--label" "Custom text"
   result=$(context::get "test.key" --required --prompt "Custom text")
   [ "$result" = "from-prompt" ]
@@ -165,6 +189,7 @@ setup() {
 @test "get --prompt --secret passes --secret through to _prompt" {
   STUB_RETURN=1 mktest::stub_function context::_from_store
   STUB_RETURN=1 mktest::stub_function context::_from_env
+  STUB_RETURN=1 mktest::stub_function context::_from_user_config
   STUB_OUTPUT="secret-val" mktest::stub_function context::_prompt "test.key" "--label" "Secret" "--secret"
   result=$(context::get "test.key" --prompt "Secret" --secret)
   [ "$result" = "secret-val" ]
@@ -173,6 +198,7 @@ setup() {
 @test "get --default + --prompt prompts and returns default on empty response" {
   STUB_RETURN=1 mktest::stub_function context::_from_store "test.key"
   STUB_RETURN=1 mktest::stub_function context::_from_env "test.key"
+  STUB_RETURN=1 mktest::stub_function context::_from_user_config "test.key"
   STUB_OUTPUT="fallback" mktest::stub_function context::_prompt "test.key" "--label" "Ask me" "--default" "fallback"
   result=$(context::get "test.key" --default "fallback" --prompt "Ask me")
   [ "$result" = "fallback" ]
@@ -181,6 +207,7 @@ setup() {
 @test "get --default returns the default on a full miss" {
   STUB_RETURN=1 mktest::stub_function context::_from_store "test.key"
   STUB_RETURN=1 mktest::stub_function context::_from_env "test.key"
+  STUB_RETURN=1 mktest::stub_function context::_from_user_config "test.key"
   result=$(context::get "test.key" --default "fallback")
   [ "$result" = "fallback" ]
 }
@@ -188,6 +215,7 @@ setup() {
 @test "get --default --store-default also stores the default" {
   STUB_RETURN=1 mktest::stub_function context::_from_store "test.key"
   STUB_RETURN=1 mktest::stub_function context::_from_env "test.key"
+  STUB_RETURN=1 mktest::stub_function context::_from_user_config "test.key"
   mktest::stub_function context::set "test.key" "fallback"
   result=$(context::get "test.key" --default "fallback" --store-default)
   mktest::assert_stub_called context::set "test.key" "fallback"
@@ -285,6 +313,21 @@ setup() {
         MACHINEKIT_MODE_DRY_RUN MACHINEKIT_MODE_INTERACTIVE
   context::seed_from_flags
   [ "$(context::json)" = "{}" ]
+}
+
+# --- context::load_user_config ---
+
+@test "load_user_config parses the defaults file at the resolved path into the cache" {
+  printf 'machine_type = "personal"\n' > "$BATS_TEST_TMPDIR/defaults.toml"
+  STUB_OUTPUT="$BATS_TEST_TMPDIR/defaults.toml" mktest::stub_function context::_user_config_path
+  context::load_user_config
+  [ "$(printf '%s' "$_MK_CONTEXT_USER_CONFIG_JSON" | jq -r '.machine_type')" = "personal" ]
+}
+
+@test "load_user_config leaves the cache empty when the defaults file is absent" {
+  STUB_OUTPUT="$BATS_TEST_TMPDIR/nonexistent.toml" mktest::stub_function context::_user_config_path
+  context::load_user_config
+  [ -z "$_MK_CONTEXT_USER_CONFIG_JSON" ]
 }
 
 # --- context::cleanup ---
@@ -399,6 +442,49 @@ setup() {
 @test "_from_env returns 1 when the MACHINEKIT_ variable is unset" {
   STUB_OUTPUT="TEST_KEY" mktest::stub_function context::_var_key "test.key"
   run ! context::_from_env "test.key"
+}
+
+# --- context::_from_user_config ---
+
+@test "_from_user_config resolves a key from the loaded defaults and writes it back to the store" {
+  _MK_CONTEXT_USER_CONFIG_JSON='{"machine_type":"personal"}'
+  mktest::stub_function context::set "machine_type" "personal"
+  result=$(context::_from_user_config "machine_type")
+  [ "$result" = "personal" ]
+  mktest::assert_stub_called context::set "machine_type" "personal"
+}
+
+@test "_from_user_config resolves a nested dotted key" {
+  _MK_CONTEXT_USER_CONFIG_JSON='{"ssh":{"key_generate":true}}'
+  mktest::stub_function context::set "ssh.key_generate" "true"
+  result=$(context::_from_user_config "ssh.key_generate")
+  [ "$result" = "true" ]
+}
+
+@test "_from_user_config returns 1 when the key is absent from the defaults" {
+  _MK_CONTEXT_USER_CONFIG_JSON='{"machine_type":"personal"}'
+  run ! context::_from_user_config "age.key_generate"
+}
+
+@test "_from_user_config returns 1 when no defaults are loaded" {
+  _MK_CONTEXT_USER_CONFIG_JSON=""
+  run ! context::_from_user_config "machine_type"
+}
+
+# --- context::_user_config_path ---
+
+@test "_user_config_path is defaults.toml under the default config dir" {
+  HOME=/fake/home
+  unset XDG_CONFIG_HOME
+  run context::_user_config_path
+  [ "$output" = "/fake/home/.config/machinekit/defaults.toml" ]
+}
+
+@test "_user_config_path honors XDG_CONFIG_HOME" {
+  HOME=/fake/home
+  XDG_CONFIG_HOME=/fake/home/.xdg
+  run context::_user_config_path
+  [ "$output" = "/fake/home/.xdg/machinekit/defaults.toml" ]
 }
 
 # --- context::_prompt_label ---

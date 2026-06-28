@@ -14,6 +14,11 @@ _MK_CONTEXT_LOADED=1
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/logging.sh"
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lifecycle.sh"
 
+# Per-user defaults (the input-resolver's config-file tier), parsed once by
+# context::load_user_config from the main shell so the cascade's $(...)
+# subshells inherit it. Empty until loaded, or when no defaults file exists.
+_MK_CONTEXT_USER_CONFIG_JSON=""
+
 # context::init_storage
 # Call once from the main shell before any $(...) that touches the store.
 # Satisfies the first-call precondition in context::_internal_storage_file.
@@ -45,7 +50,8 @@ context::set() {
 }
 
 # context::get KEY [--required] [--default VALUE] [--coerce TYPE] [--prompt TEXT] [--secret]
-# Resolve KEY through the cascade: store, then MACHINEKIT_ env var. With
+# Resolve KEY through the cascade: store, then MACHINEKIT_ env var, then the
+# per-user defaults file (loaded by context::load_user_config). With
 # --required, an unresolved key prompts interactively and then fails; without
 # it, an unresolved key returns 1 silently. --secret reads the prompt response
 # without echoing it and never persists it to the store — for secrets, since the
@@ -88,6 +94,7 @@ context::get() {
   local val
   if   val=$(context::_from_store "$key"); then :
   elif val=$(context::_from_env   "$key"); then :
+  elif val=$(context::_from_user_config "$key"); then :
   elif [ "$should_prompt" = 1 ] && val=$(context::_prompt "${_prompt_call[@]}"); then :
   elif [ "$has_default" = 1 ]; then
     [ "$store_default" = 1 ] && context::set "$key" "$default"
@@ -165,6 +172,19 @@ context::seed_from_flags() {
   done
 }
 
+# context::load_user_config
+# Parse the per-user defaults file (TOML) into the cache, once, so context::get
+# can resolve unprovided inputs from it (the cascade tier after flags and env).
+# Call from the main shell after prerequisites::install guarantees toml2json —
+# the cache is a plain variable, so the cascade's $(...) subshells only inherit
+# it when it is set in their parent. A missing file is the common case (no-op).
+context::load_user_config() {
+  local path
+  path=$(context::_user_config_path)
+  [ -f "$path" ] || return 0
+  _MK_CONTEXT_USER_CONFIG_JSON=$(toml2json "$path")
+}
+
 context::cleanup() {
   [ -n "${MACHINEKIT_CONTEXT_FILE:-}" ] && rm -f "$MACHINEKIT_CONTEXT_FILE"
   unset MACHINEKIT_CONTEXT_FILE
@@ -232,6 +252,26 @@ context::_from_env() {
   [ -z "$env_val" ] && return 1
   context::set "$1" "$env_val"
   printf '%s\n' "$env_val"
+}
+
+# context::_from_user_config KEY
+# Resolve KEY (a dotted path) from the per-user defaults loaded by
+# context::load_user_config. Writes the hit back to the store so later reads are
+# served from the cache. Returns 1 when no defaults are loaded or KEY is unset.
+context::_from_user_config() {
+  [ -n "$_MK_CONTEXT_USER_CONFIG_JSON" ] || return 1
+  local val
+  val=$(printf '%s' "$_MK_CONTEXT_USER_CONFIG_JSON" \
+    | jq -r --arg path "$1" '($path | split(".")) as $p | getpath($p)')
+  [ "$val" = "null" ] && return 1
+  context::set "$1" "$val"
+  printf '%s\n' "$val"
+}
+
+# context::_user_config_path
+# The per-user defaults file, in machinekit's XDG config dir.
+context::_user_config_path() {
+  printf '%s\n' "${XDG_CONFIG_HOME:-$HOME/.config}/machinekit/defaults.toml"
 }
 
 # context::_prompt_label KEY

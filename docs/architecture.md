@@ -185,7 +185,7 @@ Every required input passes through the same resolution chain:
 
 1. CLI flag (e.g. `--blueprints-source`)
 2. Environment variable (e.g. `MACHINEKIT_BLUEPRINTS_SOURCE`)
-3. Config file (`~/.config/machinekit/bootstrap.toml`) — *not yet implemented*
+3. Per-user defaults file (`${XDG_CONFIG_HOME:-~/.config}/machinekit/defaults.toml`) — TOML whose keys mirror the context namespace (`machine_type`, `[ssh] key_generate`, …), so you set a default once instead of re-passing it on every apply
 4. Secrets manager reference (`op://...`) — *not yet implemented*
 5. Interactive prompt — only if TTY and not `--non-interactive`
 6. Hard error listing what's missing

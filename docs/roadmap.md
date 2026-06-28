@@ -157,9 +157,9 @@ More as needed (prompt themes, password-manager CLIs as a secrets-fetch layer, a
 
 The [home transform pipeline](#home-transform-pipeline) makes a new one (e.g. decompression) a module declaration rather than new plumbing.
 
-### Input resolver steps 3–4
+### Input resolver step 4
 
-`~/.config/machinekit/bootstrap.toml` config file and `op://` secrets manager reference — would make non-interactive setups cleaner.
+Step 3 — the per-user defaults file (`${XDG_CONFIG_HOME:-~/.config}/machinekit/defaults.toml`) — is implemented. The remaining step 4, an `op://`-style secrets manager reference, would make non-interactive first-machine setups cleaner.
 
 The roadmap stops being prescriptive here. The architecture supports incremental addition; what gets added is a function of what the framework actually needs in use.
 

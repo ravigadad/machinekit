@@ -15,6 +15,7 @@ setup() {
   mktest::stub_function brew::bootstrap
   mktest::stub_function prerequisites::install
   mktest::stub_function context::seed_from_flags
+  mktest::stub_function context::load_user_config
   mktest::stub_function input::detect_mode
   mktest::stub_function sudo::ensure
   mktest::stub_function preflight::run
@@ -44,6 +45,7 @@ setup() {
   mktest::assert_stub_called_in_order brew::bootstrap
   mktest::assert_stub_called_in_order prerequisites::install
   mktest::assert_stub_called_in_order context::seed_from_flags
+  mktest::assert_stub_called_in_order context::load_user_config
   mktest::assert_stub_called_in_order input::detect_mode
   mktest::assert_stub_called_in_order sudo::ensure
   mktest::assert_stub_called_in_order preflight::run

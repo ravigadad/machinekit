@@ -127,6 +127,7 @@ main() {
   brew::bootstrap
   prerequisites::install
   context::seed_from_flags # requires prerequisites (jq)
+  context::load_user_config # requires prerequisites (toml2json)
   input::detect_mode
   input::is_dry_run && logging::step "DRY RUN — showing what would change; nothing will be modified"
   sudo::ensure
