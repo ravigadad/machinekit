@@ -1,0 +1,7 @@
+# Renders context values from every source machinekit feeds the template context
+# — system detection plus each input-resolver tier — so the smoke test can assert
+# they all reach a rendered home file.
+os_family={{ .os.family }}
+flag_blueprints_source={{ .blueprints.source }}
+env_blueprints_protocol={{ .blueprints.source_protocol }}
+defaults_machine_type={{ .machine_type }}

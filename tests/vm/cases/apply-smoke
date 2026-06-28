@@ -11,14 +11,27 @@ scenario::run() {
   local mk_path
   mk_path="$(vm::machinekit_path)"
 
+  vm_step "Seeding a per-user defaults.toml (resolver tier 3)"
+  # Quoted heredoc: ~ and $ expand in the VM. machine_type is provided here only,
+  # so it must resolve from defaults.toml — not a flag or env var.
+  vm::shell <<'SCRIPT'
+set -e
+mkdir -p ~/.config/machinekit
+printf 'machine_type = "smoke-default"\n' > ~/.config/machinekit/defaults.toml
+SCRIPT
+
   vm_step "First apply"
   # Unquoted heredoc: $mk_path is expanded by the host. \$ and $(...) in the
   # body are NOT expanded (they reach the VM literally). \ before newline in
   # an unquoted heredoc is preserved as-is, so it acts as a line continuation
   # in the remote bash script.
+  #
+  # The blueprints source comes from a flag and the source protocol from an env
+  # var, so the rendered ~/.resolver_smoke proves all three resolver tiers.
   vm::shell <<SCRIPT
 set -euo pipefail
 MK_PATH='$mk_path'
+MACHINEKIT_BLUEPRINTS_SOURCE_PROTOCOL=cp \
 "\$MK_PATH/bin/machinekit" apply \
   --non-interactive \
   --blueprints-source "\$MK_PATH/tests/vm/fixture_blueprints"
@@ -28,16 +41,23 @@ SCRIPT
   # Quoted heredoc: no host expansion. \$, $(...) all expand in the VM.
   vm::shell <<'SCRIPT'
 set -e
-test -f ~/.dummyfile
-grep -q "Your OS is" ~/.dummyfile
+test -f ~/.config/a_config_file.toml
 test -f ~/.gitconfig
 grep -q "MK Smoke Test" ~/.gitconfig
+# Context render: a system-detected value plus one from each input-resolver
+# source (flag, env var, defaults.toml) all reached the rendered home file.
+test -f ~/.context_smoke
+grep -qE "os_family=(darwin|linux)" ~/.context_smoke
+grep -q "flag_blueprints_source=.*/fixture_blueprints" ~/.context_smoke
+grep -q "env_blueprints_protocol=cp" ~/.context_smoke
+grep -q "defaults_machine_type=smoke-default" ~/.context_smoke
 SCRIPT
 
   vm_step "Idempotency: second apply"
   vm::shell <<SCRIPT
 set -euo pipefail
 MK_PATH='$mk_path'
+MACHINEKIT_BLUEPRINTS_SOURCE_PROTOCOL=cp \
 "\$MK_PATH/bin/machinekit" apply \
   --non-interactive \
   --blueprints-source "\$MK_PATH/tests/vm/fixture_blueprints"
