@@ -63,6 +63,12 @@ hindsight_integration::preflight() {
   return 0
 }
 
+# Declares the one pool secret this module uses: the fleet tenant key, shared by
+# every box, provide-or-generate (generated when this box is the first).
+hindsight_integration::pool_secrets() {
+  printf '%s\ttrue\ttrue\n' "$(hindsight::secrets::rel tenant_api_key)"
+}
+
 # Install each selected agent's integration software, then assemble the configs
 # that point them at the server.
 hindsight_integration::install() {

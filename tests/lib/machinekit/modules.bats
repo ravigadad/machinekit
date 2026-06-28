@@ -84,6 +84,16 @@ setup() {
   mktest::assert_stub_called bar_module::test
 }
 
+# --- modules::collect ---
+
+@test "collect runs the named hook across modules and forwards their output" {
+  STUB_OUTPUT=$'the_result' \
+    mktest::stub_function modules::_call_function_per_module "pool_secrets"
+  run modules::collect pool_secrets
+  [ "$status" -eq 0 ]
+  [ "$output" = $'the_result' ]
+}
+
 # --- modules::capability_active ---
 
 @test "capability_active is true when an active module provides the capability" {

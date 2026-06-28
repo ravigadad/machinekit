@@ -44,6 +44,16 @@ git_backup::preflight() {
   return 0
 }
 
+# Declares each referenced ssh key as a required pool secret — the push can't
+# decrypt a key that isn't there. A folder using ambient SSH references none.
+git_backup::pool_secrets() {
+  local name
+  while IFS= read -r name; do
+    [ -n "$name" ] || continue
+    printf '%s\ttrue\tfalse\n' "$(git_backup::_secret_rel "$name")"
+  done < <(git_backup::_referenced_key_names)
+}
+
 # Install the keys, write the manifest, lay down the push script, and schedule the
 # one service that runs it. No folders = nothing to install.
 git_backup::install() {

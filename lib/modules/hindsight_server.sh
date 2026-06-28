@@ -55,6 +55,16 @@ hindsight_server::_llm_key_available() {
   hindsight::secrets::provided llm_api_key || [ -f "$(hindsight_server::_env_path)" ]
 }
 
+# Declares the pool secrets this module assembles into the env file. The LLM key
+# is provide-only (required); the tenant key, DB password, and control-plane
+# password are generated when absent.
+hindsight_server::pool_secrets() {
+  printf '%s\ttrue\tfalse\n' "$(hindsight::secrets::rel llm_api_key)"
+  printf '%s\ttrue\ttrue\n'  "$(hindsight::secrets::rel tenant_api_key)"
+  printf '%s\ttrue\ttrue\n'  "$(hindsight::secrets::rel db_password)"
+  printf '%s\ttrue\ttrue\n'  "$(hindsight::secrets::rel cp_access_key)"
+}
+
 # Engine-level prep plus the env file. The postgres primitives, brew, and the
 # env assembly are each dry-run-aware, so install delegates rather than branching
 # on dry-run itself. Host-postgres network access is the postgres module's job

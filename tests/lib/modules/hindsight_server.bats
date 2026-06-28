@@ -73,6 +73,18 @@ setup() {
   run ! hindsight_server::_llm_key_available
 }
 
+# --- hindsight_server::pool_secrets ---
+
+@test "pool_secrets declares the LLM key non-generatable and the generatable trio" {
+  STUB_OUTPUT="secrets/hindsight/llm_api_key.age"    mktest::stub_function hindsight::secrets::rel llm_api_key
+  STUB_OUTPUT="secrets/hindsight/tenant_api_key.age" mktest::stub_function hindsight::secrets::rel tenant_api_key
+  STUB_OUTPUT="secrets/hindsight/db_password.age"    mktest::stub_function hindsight::secrets::rel db_password
+  STUB_OUTPUT="secrets/hindsight/cp_access_key.age"  mktest::stub_function hindsight::secrets::rel cp_access_key
+  run hindsight_server::pool_secrets
+  [ "$status" -eq 0 ]
+  [ "$output" = $'secrets/hindsight/llm_api_key.age\ttrue\tfalse\nsecrets/hindsight/tenant_api_key.age\ttrue\ttrue\nsecrets/hindsight/db_password.age\ttrue\ttrue\nsecrets/hindsight/cp_access_key.age\ttrue\ttrue' ]
+}
+
 # --- hindsight_server::install ---
 
 @test "install installs pgvector before provisioning, then ensures the env file and places the compose" {

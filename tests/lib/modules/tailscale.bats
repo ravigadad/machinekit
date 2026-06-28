@@ -53,6 +53,25 @@ setup() {
   MATCH="secrets/tailscale/default.age" mktest::assert_stub_called lifecycle::fail
 }
 
+# --- tailscale::pool_secrets ---
+
+@test "pool_secrets declares the tailnet secret required and not generatable on a tagged device" {
+  STUB_OUTPUT="server" mktest::stub_function tailscale::_tag
+  STUB_OUTPUT="secrets/tailscale/fake.age" mktest::stub_function tailscale::_secret_rel
+  run tailscale::pool_secrets
+  [ "$status" -eq 0 ]
+  [ "$output" = $'secrets/tailscale/fake.age\ttrue\tfalse' ]
+}
+
+@test "pool_secrets emits nothing for an untagged (user) device" {
+  STUB_OUTPUT="" mktest::stub_function tailscale::_tag
+  mktest::stub_function tailscale::_secret_rel
+  run tailscale::pool_secrets
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  mktest::assert_stub_not_called tailscale::_secret_rel
+}
+
 # --- tailscale::install ---
 
 @test "install delegates to _install_cask when the device wants the macOS GUI app" {

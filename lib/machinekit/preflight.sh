@@ -14,17 +14,26 @@ _MK_PREFLIGHT_LOADED=1
 preflight::run() {
   logging::step "Preflight: resolving inputs"
 
-  system::detect
-  blueprints::fetch
-  preflight::resolve_machine_type
-  config::load
-  preflight::resolve_active_modules
+  preflight::resolve_inputs
   home::transforms::register_from_modules
   home::staging::build
 
   modules::run_preflights
 
   logging::success "Preflight complete."
+}
+
+# Resolve every input the run depends on without mutating the system or applying
+# anything: detect the platform, fetch the blueprint, resolve the machine type,
+# load config, and compute the active module set. Shared by apply's preflight and
+# read-only commands (e.g. secrets listing) that need the resolved context but
+# must not build staging or run module preflights.
+preflight::resolve_inputs() {
+  system::detect
+  blueprints::fetch
+  preflight::resolve_machine_type
+  config::load
+  preflight::resolve_active_modules
 }
 
 preflight::resolve_machine_type() {

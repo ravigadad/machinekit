@@ -94,6 +94,15 @@ setup() {
   MATCH="unknown integration.*bar" mktest::assert_stub_called lifecycle::fail
 }
 
+# --- pool_secrets ---
+
+@test "pool_secrets declares the fleet tenant key required and generatable" {
+  STUB_OUTPUT="secrets/hindsight/tenant_api_key.age" mktest::stub_function hindsight::secrets::rel tenant_api_key
+  run hindsight_integration::pool_secrets
+  [ "$status" -eq 0 ]
+  [ "$output" = $'secrets/hindsight/tenant_api_key.age\ttrue\ttrue' ]
+}
+
 # --- install ---
 
 @test "install installs each integration, then ensures the configs" {

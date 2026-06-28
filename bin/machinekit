@@ -32,6 +32,7 @@ Usage: machinekit <subcommand> [args...]
 Subcommands:
   apply       Apply a blueprint to this machine.
   generate    Scaffold a new blueprint repo from the template.
+  secrets     Inspect the blueprint's age-encrypted secrets pool.
 
 Run `machinekit <subcommand> --help` for subcommand-specific options.
 EOF
@@ -39,7 +40,7 @@ EOF
 
 subcommand="${1:-}"
 case "$subcommand" in
-  apply|generate)
+  apply|generate|secrets)
     shift
     # shellcheck source=../lib/bootstrap/bash.sh
     source "$MACHINEKIT_DIR/lib/bootstrap/bash.sh"

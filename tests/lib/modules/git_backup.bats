@@ -59,6 +59,26 @@ setup() {
   mktest::assert_stub_not_called lifecycle::fail
 }
 
+# --- pool_secrets ---
+
+@test "pool_secrets declares each referenced ssh key required and not generatable" {
+  STUB_OUTPUT=$'deploy\nmirror' mktest::stub_function git_backup::_referenced_key_names
+  STUB_OUTPUT="secrets/git_backup/ssh_keys/deploy.age" mktest::stub_function git_backup::_secret_rel deploy
+  STUB_OUTPUT="secrets/git_backup/ssh_keys/mirror.age" mktest::stub_function git_backup::_secret_rel mirror
+  run git_backup::pool_secrets
+  [ "$status" -eq 0 ]
+  [ "$output" = $'secrets/git_backup/ssh_keys/deploy.age\ttrue\tfalse\nsecrets/git_backup/ssh_keys/mirror.age\ttrue\tfalse' ]
+}
+
+@test "pool_secrets emits nothing when no folder references an ssh key" {
+  STUB_OUTPUT="" mktest::stub_function git_backup::_referenced_key_names
+  mktest::stub_function git_backup::_secret_rel
+  run git_backup::pool_secrets
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  mktest::assert_stub_not_called git_backup::_secret_rel
+}
+
 # --- install ---
 
 @test "install is a no-op when no folders are configured" {

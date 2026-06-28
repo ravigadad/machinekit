@@ -43,6 +43,14 @@ modules::run_post_apply() {
   modules::_call_function_per_module "post_apply"
 }
 
+# modules::collect HOOK — run <mod>::HOOK on each active module that defines it,
+# forwarding their concatenated stdout. The read counterpart to run_preflights /
+# run_post_apply: those drive hooks for their side effects; this gathers what a
+# declarative hook (e.g. pool_secrets) emits.
+modules::collect() {
+  modules::_call_function_per_module "$1"
+}
+
 modules::_call_function_per_module() {
   modules::source_all
   local mod

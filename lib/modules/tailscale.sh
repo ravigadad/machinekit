@@ -37,6 +37,14 @@ tailscale::preflight() {
     "tailscale: tagged device (tag:$tag) needs an encrypted secret at $(tailscale::_secret_rel) — see docs/modules.md (tailscale) to create it."
 }
 
+# Declares the pool secret this device will use, given current config. Only a
+# tagged device joins the tailnet itself, so only it draws on the encrypted
+# secret; an untagged (user) device signs in by hand and declares nothing.
+tailscale::pool_secrets() {
+  [ -n "$(tailscale::_tag)" ] || return 0
+  printf '%s\ttrue\tfalse\n' "$(tailscale::_secret_rel)"
+}
+
 # The cask token is `tailscale-app` (the GUI app); the formula is `tailscale`
 # (the daemon + CLI) — distinct names, not two channels of one package.
 tailscale::install() {

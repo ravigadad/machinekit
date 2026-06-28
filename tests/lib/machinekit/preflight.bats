@@ -25,29 +25,37 @@ setup() {
 
 # --- preflight::run ---
 
-@test "run calls all steps" {
-  mktest::stub_function system::detect
-  mktest::stub_function blueprints::fetch
-  mktest::stub_function config::load
-  mktest::stub_function preflight::resolve_machine_type
-  mktest::stub_function preflight::resolve_active_modules
+@test "run resolves inputs, builds staging, then runs module preflights" {
+  mktest::stub_function preflight::resolve_inputs
   mktest::stub_function home::transforms::register_from_modules
   mktest::stub_function home::staging::build
   mktest::stub_function modules::run_preflights
   preflight::run
-  # preflight::run is an ordered pipeline — each step consumes earlier output:
-  # config reads the fetched blueprint and the resolved machine type; the active
-  # module set comes from config; the transform registry and the staging tree are
-  # each built from that set; and the module preflights query the staging tree
-  # (via will_exist), so it must be built before they run.
+  # Ordered: inputs resolve first; the transform registry and staging tree are
+  # built from the resolved active set; and the module preflights query the
+  # staging tree (via will_exist), so it must exist before they run.
+  mktest::assert_stub_called_in_order preflight::resolve_inputs
+  mktest::assert_stub_called_in_order home::transforms::register_from_modules
+  mktest::assert_stub_called_in_order home::staging::build
+  mktest::assert_stub_called_in_order modules::run_preflights
+}
+
+# --- preflight::resolve_inputs ---
+
+@test "resolve_inputs detects, fetches, and resolves machine type, config, and active modules" {
+  mktest::stub_function system::detect
+  mktest::stub_function blueprints::fetch
+  mktest::stub_function preflight::resolve_machine_type
+  mktest::stub_function config::load
+  mktest::stub_function preflight::resolve_active_modules
+  preflight::resolve_inputs
+  # Ordered: config reads the fetched blueprint and the resolved machine type;
+  # the active module set is then computed from that config.
   mktest::assert_stub_called_in_order system::detect
   mktest::assert_stub_called_in_order blueprints::fetch
   mktest::assert_stub_called_in_order preflight::resolve_machine_type
   mktest::assert_stub_called_in_order config::load
   mktest::assert_stub_called_in_order preflight::resolve_active_modules
-  mktest::assert_stub_called_in_order home::transforms::register_from_modules
-  mktest::assert_stub_called_in_order home::staging::build
-  mktest::assert_stub_called_in_order modules::run_preflights
 }
 
 # --- preflight::resolve_machine_type ---
