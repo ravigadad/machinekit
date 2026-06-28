@@ -290,9 +290,9 @@ The age private key itself lives on disk at `~/.config/age/key.txt` (mode 600); 
 Files that end up in `$HOME` after a bootstrap run fall into two categories:
 
 - **Tool artifacts** — the age key at `~/.config/age/key.txt`, mise's runtimes, and so on. machinekit sets these up but doesn't own them. They live in the tool's own XDG-style directory so any future consumer of that tool can find them where it expects.
-- **machinekit's own state** — files that exist *because* machinekit exists: the cached blueprint source at `~/.local/share/machinekit/blueprints/`, a future per-user bootstrap config (e.g. `~/.config/machinekit/bootstrap.toml`). These live in machinekit's XDG dirs, which honor the standard overrides: `${XDG_DATA_HOME:-~/.local/share}/machinekit/` for data, `${XDG_CONFIG_HOME:-~/.config}/machinekit/` for config.
+- **machinekit's own state** — files that exist *because* machinekit exists: the cached blueprint source at `~/.local/share/machinekit/blueprints/`, the optional per-user defaults file at `${XDG_CONFIG_HOME:-~/.config}/machinekit/defaults.toml` (user-authored, read by the input resolver). These live in machinekit's XDG dirs, which honor the standard overrides: `${XDG_DATA_HOME:-~/.local/share}/machinekit/` for data, `${XDG_CONFIG_HOME:-~/.config}/machinekit/` for config.
 
-> Status: nothing in `~/.config/machinekit/` yet. The directory is created on first use by a feature that needs it, not preemptively.
+> The config dir is created on first use by a feature that needs it, not preemptively.
 
 When adding new files, ask: tool artifact, or machinekit's own state? Former → the tool's XDG dir. Latter → `~/.config/machinekit/`.
 

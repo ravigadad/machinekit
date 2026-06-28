@@ -106,7 +106,7 @@ Subsequent applies skip what's already done (Homebrew is installed, the age key 
 
 `machinekit apply` runs in one of two modes.
 
-**Interactive** — the default when stdin is a TTY. Inputs are resolved CLI flag → env var → interactive prompt for whatever is missing. Force interactive with `--interactive` if stdin isn't a TTY but `/dev/tty` is readable.
+**Interactive** — the default when stdin is a TTY. Inputs are resolved CLI flag → env var → [per-user defaults file](#per-user-defaults--xdg-directories) → interactive prompt for whatever is missing. Force interactive with `--interactive` if stdin isn't a TTY but `/dev/tty` is readable.
 
 ```bash
 machinekit apply                                                  # prompts for everything
@@ -118,7 +118,7 @@ The blueprint source can be a git repo (cloned) or a local directory (copied as-
 - `--blueprints-source <url-or-path>` (`MACHINEKIT_BLUEPRINTS_SOURCE`): the protocol is sniffed automatically. A URL (`https://`, `http://`, `ssh://`, `git@host:owner/repo`, `file://`) or a local path containing `.git/` is cloned via `git clone`; a plain local path is copied as-is, skipping git entirely.
 - `--blueprints-source-protocol <git|cp>` (`MACHINEKIT_BLUEPRINTS_SOURCE_PROTOCOL`): override the sniffed protocol — e.g. force `cp` to copy a local git repo's working tree (uncommitted edits included) instead of cloning its committed state.
 
-**Non-interactive** — auto-detected when stdin isn't a TTY (cron, CI, curl-piped, redirected stdin), or forced with `--non-interactive` / `MACHINEKIT_MODE_INTERACTIVE=0`. Inputs are resolved CLI flag → env var → hard-fail.
+**Non-interactive** — auto-detected when stdin isn't a TTY (cron, CI, curl-piped, redirected stdin), or forced with `--non-interactive` / `MACHINEKIT_MODE_INTERACTIVE=0`. Inputs are resolved CLI flag → env var → [per-user defaults file](#per-user-defaults--xdg-directories) → hard-fail.
 
 Prerequisites to set up before a non-interactive run:
 
@@ -152,6 +152,20 @@ MACHINEKIT_EXISTING_AGE_KEY_FILE=/path/to/age.key \
 
 Run `machinekit apply --help` for the full flag list.
 
+## Per-user defaults & XDG directories
+
+Inputs you'd otherwise re-pass on every apply can live in a per-user defaults file at `${XDG_CONFIG_HOME:-~/.config}/machinekit/defaults.toml`. It's consulted in the resolution cascade between env vars and prompting/erroring — a flag or env var still wins; the file only fills in what you didn't provide. Its keys mirror the input names:
+
+```toml
+machine_type = "dev"
+blueprints.source = "https://github.com/me/blueprints"
+
+[ssh]
+key_generate = true
+```
+
+machinekit honors the [XDG base-directory](https://specification.freedesktop.org/basedir-spec/latest/) variables throughout: its config lives under `${XDG_CONFIG_HOME:-~/.config}/machinekit/` and its own data (the cached blueprint source, the install clone) under `${XDG_DATA_HOME:-~/.local/share}/machinekit/`. It also respects them when placing config for tools that read them — e.g. the `git` and `mise` module dotfiles land under `$XDG_CONFIG_HOME` when you've set it. The `~/.config` and `~/.local/share` paths shown elsewhere in this README are the defaults when those variables aren't set.
+
 ## Developing machinekit
 
 To work on machinekit itself, clone the repo and run it from the checkout — `bin/machinekit` is the entry point, so no install step is needed:
@@ -178,8 +192,8 @@ machinekit/
 │   ├── machinekit.sh             # aggregator: sources all of lib/machinekit/* eagerly
 │   ├── machinekit/               # core: helpers, blueprints, brew bootstrap, preflight, hooks, module orchestration
 │   └── modules/                  # built-in modules, lazy-sourced via modules::source_all
-│       ├── git/templates/        # module-shipped defaults (dot_gitconfig.tmpl, dot_config/git/ignore.tmpl)
-│       ├── mise/templates/       # module-shipped defaults (dot_config/mise/…, env.zsh.d/mise.zsh)
+│       ├── git/templates/        # module-shipped defaults (dot_gitconfig.tmpl, xdg_config/git/ignore.tmpl)
+│       ├── mise/templates/       # module-shipped defaults (xdg_config/mise/…, env.zsh.d/mise.zsh)
 │       └── zsh/templates/        # framework zsh dotfiles (dot_zshrc, env.zsh w/ env.zsh.d loop)
 ├── scripts/                      # dev/maintainer tools (e.g. lint)
 ├── tests/                        # bats test suite mirroring lib/ and bin/
