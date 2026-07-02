@@ -14,6 +14,24 @@ setup() {
   tool_version_manager::is_capability
 }
 
+# --- tool_version_manager::exec ---
+
+@test "exec runs the command through the version manager with the tool available" {
+  mktest::stub_function input::command_exists mise
+  mktest::stub_function mise "exec" "node@latest" "--" "fake_installer" "fake_arg"
+  tool_version_manager::exec node@latest fake_installer fake_arg
+  mktest::assert_stub_called mise "exec" "node@latest" "--" "fake_installer" "fake_arg"
+}
+
+@test "exec runs the command directly when no version manager is installed" {
+  STUB_RETURN=1 mktest::stub_function input::command_exists mise
+  mktest::stub_function mise
+  mktest::stub_function fake_installer "fake_arg"
+  tool_version_manager::exec node@latest fake_installer fake_arg
+  mktest::assert_stub_called fake_installer "fake_arg"
+  mktest::assert_stub_not_called mise
+}
+
 # --- tool_version_manager::default_satisfier ---
 
 @test "default_satisfier outputs mise" {
