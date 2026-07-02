@@ -157,9 +157,11 @@ More as needed (prompt themes, password-manager CLIs as a secrets-fetch layer, a
 
 The [home transform pipeline](#home-transform-pipeline) makes a new one (e.g. decompression) a module declaration rather than new plumbing.
 
-### Secrets pool inventory
+### Secrets pool inventory and delivery
 
-Shipped: `machinekit secrets list` reports which pool secrets the active modules need — each as required-or-not, generated-if-missing-or-not, and present-or-absent — plus any stray pool files no active module claims. Modules declare their needs through a `<name>::pool_secrets` hook; the command is read-only (it resolves inputs but applies nothing). This is the read side, and the natural precursor to a write side: helpers that encrypt-and-place a generated secret into the pool (the `secret_delivery_helpers` backlog item).
+Shipped: `machinekit secrets list` reports which pool secrets the active modules need — each as required-or-not, generated-if-missing-or-not, and present-or-absent — plus any stray pool files no active module claims. Modules declare their needs through a `<name>::pool_secrets` hook; the command is read-only (it resolves inputs but applies nothing).
+
+Also shipped, the write side: `machinekit secrets put [<path>]` age-encrypts a value (stdin / `--from-file` / hidden prompt — never an argument) and places it as a pool secret, with an interactive picker over the inventory when no path is given. It writes only to a local blueprint working tree — never git, never the apply-time fetch cache — so you commit and push to propagate.
 
 ### Input resolver step 4
 

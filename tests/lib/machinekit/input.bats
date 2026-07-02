@@ -69,6 +69,23 @@ setup() {
   mktest::assert_stub_called context::set "mode.interactive" "false"
 }
 
+# --- input::stdin_is_tty ---
+
+@test "stdin_is_tty is false when stdin is a pipe or redirect" {
+  # bats redirects stdin, so fd 0 is never a terminal here; the tty-true branch
+  # is the irreducible builtin read this seam exists to isolate.
+  run input::stdin_is_tty < /dev/null
+  [ "$status" -ne 0 ]
+}
+
+# --- input::stdout_is_tty ---
+
+@test "stdout_is_tty is false when stdout is a pipe" {
+  # bats captures stdout, so fd 1 is never a terminal here; same irreducible read.
+  run input::stdout_is_tty
+  [ "$status" -ne 0 ]
+}
+
 # --- input::is_dry_run ---
 
 @test "is_dry_run returns false when mode.dry_run is not set" {
@@ -84,6 +101,16 @@ setup() {
 @test "is_dry_run returns false when mode.dry_run is false" {
   STUB_OUTPUT="false" mktest::stub_function context::get "mode.dry_run" "--coerce" "boolean" "--default" "false"
   run ! input::is_dry_run
+}
+
+# --- input::command_exists ---
+
+@test "command_exists returns true for bash" {
+  input::command_exists bash
+}
+
+@test "command_exists returns false for a nonexistent command" {
+  run ! input::command_exists __machinekit_nonexistent_cmd__
 }
 
 # --- input::conflict_behavior ---
@@ -112,14 +139,4 @@ setup() {
   STUB_RETURN=1 mktest::stub_function config::get "conflict_behavior"
   result=$(input::conflict_behavior)
   [ -z "$result" ]
-}
-
-# --- input::command_exists ---
-
-@test "command_exists returns true for bash" {
-  input::command_exists bash
-}
-
-@test "command_exists returns false for a nonexistent command" {
-  run ! input::command_exists __machinekit_nonexistent_cmd__
 }

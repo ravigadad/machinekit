@@ -133,3 +133,47 @@ age::decrypt() {
   [ -f "$file" ] || lifecycle::fail "age::decrypt: file not found: $file"
   age --decrypt --identity "$key_path" "$file"
 }
+
+# age::recipient — the public recipient (encryption target) derived from the
+# installed age private key. The encrypt-side counterpart to the identity
+# age::decrypt reads, so a caller can default "encrypt to this box's key" without
+# handling the public half itself.
+age::recipient() {
+  local key_path
+  key_path=$(config::get "module.age.key_path" --default "$AGE_KEY_PATH")
+  [ -f "$key_path" ] || lifecycle::fail "age::recipient: no age key at $key_path"
+  age-keygen -y "$key_path"
+}
+
+# age::encrypt RECIPIENT — encrypt stdin to RECIPIENT (an age public key),
+# ciphertext to stdout. The encrypt primitive; stdin in / stdout out lets the
+# caller keep plaintext off disk and decide where the ciphertext lands. Mirror of
+# age::decrypt.
+age::encrypt() {
+  local recipient="$1"
+  [ -n "$recipient" ] || lifecycle::fail "age::encrypt: no recipient given"
+  age --encrypt --recipient "$recipient"
+}
+
+# age::is_encrypted_file FILE — true when FILE is an age-encrypted file, judged by
+# its header magic (binary or ASCII-armored), not its name. Lets a caller tell an
+# already-encrypted secret from plaintext before choosing to encrypt or copy it.
+age::is_encrypted_file() {
+  local file="$1" first
+  [ -f "$file" ] || return 1
+  IFS= read -r first < "$file" || true
+  case "$first" in
+    "age-encryption.org/v1"|"-----BEGIN AGE ENCRYPTED FILE-----") return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# age::can_decrypt FILE — true when the installed identity can decrypt FILE. A
+# trial decryption, plaintext discarded: age files don't reveal their recipients,
+# so attempting to unwrap the file-key is the only way to confirm this key is one.
+# False covers both "wrong recipient" and "no local key" — the caller phrases why.
+age::can_decrypt() {
+  local file="$1" key_path
+  key_path=$(config::get "module.age.key_path" --default "$AGE_KEY_PATH")
+  age --decrypt --identity "$key_path" "$file" >/dev/null 2>&1
+}

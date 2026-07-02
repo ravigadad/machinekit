@@ -279,3 +279,79 @@ setup() {
   run ! age::decrypt "$BATS_TEST_TMPDIR/missing.age"
   MATCH="not found" mktest::assert_stub_called lifecycle::fail
 }
+
+# --- age::recipient ---
+
+@test "recipient derives the public key from the installed identity" {
+  mkdir -p "$(dirname "$AGE_KEY_PATH")"
+  printf 'AGE-SECRET-KEY-1FAKE\n' > "$AGE_KEY_PATH"
+  STUB_OUTPUT="$AGE_KEY_PATH" mktest::stub_function config::get "module.age.key_path" "--default" "$AGE_KEY_PATH"
+  STUB_OUTPUT="age1fakepubkey" mktest::stub_function age-keygen "-y" "$AGE_KEY_PATH"
+  run age::recipient
+  [ "$status" -eq 0 ]
+  [ "$output" = "age1fakepubkey" ]
+  mktest::assert_stub_called age-keygen "-y" "$AGE_KEY_PATH"
+}
+
+@test "recipient fails when the age key is missing" {
+  STUB_OUTPUT="$AGE_KEY_PATH" mktest::stub_function config::get "module.age.key_path" "--default" "$AGE_KEY_PATH"
+  STUB_EXIT=1 mktest::stub_function lifecycle::fail
+  run ! age::recipient
+  MATCH="no age key" mktest::assert_stub_called lifecycle::fail
+}
+
+# --- age::encrypt ---
+
+@test "encrypt pipes stdin through age to the given recipient" {
+  STUB_OUTPUT="ciphertext-bytes" mktest::stub_function age "--encrypt" "--recipient" "age1fakepubkey"
+  run age::encrypt age1fakepubkey <<< "plaintext-value"
+  [ "$status" -eq 0 ]
+  [ "$output" = "ciphertext-bytes" ]
+  mktest::assert_stub_called age "--encrypt" "--recipient" "age1fakepubkey"
+}
+
+@test "encrypt fails when no recipient is given" {
+  STUB_EXIT=1 mktest::stub_function lifecycle::fail
+  run ! age::encrypt ""
+  MATCH="recipient" mktest::assert_stub_called lifecycle::fail
+}
+
+# --- age::is_encrypted_file ---
+
+@test "is_encrypted_file recognizes a binary age header" {
+  local file="$BATS_TEST_TMPDIR/secret.age"
+  printf 'age-encryption.org/v1\n-> X25519 abc\nbody\n' > "$file"
+  age::is_encrypted_file "$file"
+}
+
+@test "is_encrypted_file recognizes an ASCII-armored age header" {
+  local file="$BATS_TEST_TMPDIR/secret.age"
+  printf -- '-----BEGIN AGE ENCRYPTED FILE-----\nYWdl\n-----END AGE ENCRYPTED FILE-----\n' > "$file"
+  age::is_encrypted_file "$file"
+}
+
+@test "is_encrypted_file rejects a plaintext file" {
+  local file="$BATS_TEST_TMPDIR/plain.txt"
+  printf 'just-a-secret-value\n' > "$file"
+  run ! age::is_encrypted_file "$file"
+}
+
+@test "is_encrypted_file rejects a nonexistent file" {
+  run ! age::is_encrypted_file "$BATS_TEST_TMPDIR/no-such-file"
+}
+
+# --- age::can_decrypt ---
+
+@test "can_decrypt is true when the installed identity decrypts the file" {
+  local file="$BATS_TEST_TMPDIR/secret.age"; : > "$file"
+  STUB_OUTPUT="$AGE_KEY_PATH" mktest::stub_function config::get "module.age.key_path" "--default" "$AGE_KEY_PATH"
+  mktest::stub_function age "--decrypt" "--identity" "$AGE_KEY_PATH" "$file"
+  age::can_decrypt "$file"
+}
+
+@test "can_decrypt is false when the identity cannot decrypt the file" {
+  local file="$BATS_TEST_TMPDIR/secret.age"; : > "$file"
+  STUB_OUTPUT="$AGE_KEY_PATH" mktest::stub_function config::get "module.age.key_path" "--default" "$AGE_KEY_PATH"
+  STUB_RETURN=1 mktest::stub_function age "--decrypt" "--identity" "$AGE_KEY_PATH" "$file"
+  run ! age::can_decrypt "$file"
+}

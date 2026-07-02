@@ -34,6 +34,19 @@ input::is_interactive() {
   [ "$val" = "true" ]
 }
 
+# input::stdin_is_tty / input::stdout_is_tty — is that standard stream a terminal
+# right now? The lone `[ -t N ]` reads, kept as named functions so a caller's
+# surrounding logic stays testable (a builtin test can't be stubbed) and no module
+# re-rolls them. Distinct from is_interactive, which asks about interactive *mode*
+# (tty readability via MACHINEKIT_TTY), not whether a specific fd is a terminal.
+input::stdin_is_tty() {
+  [ -t 0 ]
+}
+
+input::stdout_is_tty() {
+  [ -t 1 ]
+}
+
 input::is_dry_run() {
   local val
   val=$(context::get "mode.dry_run" --coerce boolean --default false)

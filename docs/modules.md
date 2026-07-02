@@ -27,7 +27,14 @@ These aren't modules, but everything else assumes them.
 
   (`printf` without a trailing newline matters for secrets consumed verbatim.) See [architecture.md § Secrets and key management](./architecture.md#secrets-and-key-management) for the two secret channels.
 
-  To see which pool secrets your active modules actually need — which are required, which machinekit will generate if missing, and which you've already provided — run `machinekit secrets list` (read-only; it changes nothing).
+  To see which pool secrets your active modules actually need — which are required, which machinekit will generate if missing, and which you've already provided — run `machinekit secrets list` (read-only; it changes nothing). To create one without hand-rolling the `age -r …` pipe (right recipient, right path), use `machinekit secrets put` — the value comes from stdin, a file, or a hidden prompt, and it lands in your local blueprint working tree for you to commit:
+
+  ```bash
+  printf '%s' '<secret-value>' | machinekit secrets put secrets/<service>/<name>.age \
+    --blueprints-dir <your-blueprints-checkout>
+  ```
+
+  If you already have the *encrypted* `.age` file (and your key can decrypt it), pass it with `--from-file` — machinekit verifies it and copies it in as-is rather than re-encrypting it.
 
 ---
 
