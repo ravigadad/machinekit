@@ -22,8 +22,9 @@
 # tenancy is the tailnet (config key `tailnet`, default "default"), so the path
 # is secrets/tailscale/<tailnet>.age. Outside home/, so it bypasses the home
 # transform pipeline; the module decrypts in memory at join time, keeping the
-# plaintext off disk.
-_TAILSCALE_SECRET_DIR="secrets/tailscale"
+# plaintext off disk. This holds only tailscale's own namespace under the pool;
+# the "secrets" prefix comes from secrets::pool_path.
+_TAILSCALE_POOL_NAMESPACE="tailscale"
 
 tailscale::requires() { printf 'age\n'; }
 
@@ -217,7 +218,7 @@ tailscale::_tailnet() {
 # Blueprint-relative secret path, e.g. secrets/tailscale/default.age — the
 # single source of the path structure; preflight's error message reuses it.
 tailscale::_secret_rel() {
-  printf '%s/%s.age\n' "$_TAILSCALE_SECRET_DIR" "$(tailscale::_tailnet)"
+  secrets::pool_path "$_TAILSCALE_POOL_NAMESPACE/$(tailscale::_tailnet).age"
 }
 
 tailscale::_secret_path() {

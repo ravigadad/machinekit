@@ -487,12 +487,14 @@ setup() {
 }
 
 @test "_secret_rel builds the pool-relative path for a key name" {
+  STUB_OUTPUT="fake-pool/git_backup/ssh_keys/agents.age" mktest::stub_function secrets::pool_path "git_backup/ssh_keys/agents.age"
   run git_backup::_secret_rel "agents"
-  [ "$output" = "secrets/git_backup/ssh_keys/agents.age" ]
+  [ "$output" = "fake-pool/git_backup/ssh_keys/agents.age" ]
 }
 
 @test "_secret_path roots the relative path under the blueprint dir" {
   STUB_OUTPUT="/bp" mktest::stub_function blueprints::dir
+  STUB_OUTPUT="secrets/git_backup/ssh_keys/agents.age" mktest::stub_function git_backup::_secret_rel "agents"
   run git_backup::_secret_path "agents"
   [ "$output" = "/bp/secrets/git_backup/ssh_keys/agents.age" ]
 }

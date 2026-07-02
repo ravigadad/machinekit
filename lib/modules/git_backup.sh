@@ -22,7 +22,9 @@ _GIT_BACKUP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Encrypted ssh keys live in the blueprint-global secrets pool (sibling of
 # common/), namespaced by service then key name: secrets/git_backup/ssh_keys/<name>.age.
-_GIT_BACKUP_SECRET_DIR="secrets/git_backup/ssh_keys"
+# This holds only git_backup's own namespace; the "secrets" prefix comes from
+# secrets::pool_path.
+_GIT_BACKUP_POOL_NAMESPACE="git_backup/ssh_keys"
 
 # Depends on age only when a folder names an ssh_key to decrypt; pushing over
 # ambient SSH needs no secret. Config loads before the resolver calls requires.
@@ -370,7 +372,7 @@ git_backup::_referenced_key_names() {
 # Blueprint-relative secret path for a key name — the single source of the path
 # structure; preflight's error message reuses it.
 git_backup::_secret_rel() {
-  printf '%s/%s.age\n' "$_GIT_BACKUP_SECRET_DIR" "$1"
+  secrets::pool_path "$_GIT_BACKUP_POOL_NAMESPACE/$1.age"
 }
 
 git_backup::_secret_path() {

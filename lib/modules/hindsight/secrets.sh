@@ -9,12 +9,14 @@
 # shared secret is the tenant API key, which every box must match: whichever box
 # is provisioned first may generate it, and the rest provide the carried value.
 
-_HINDSIGHT_SECRET_DIR="secrets/hindsight"
+# Holds only hindsight's own namespace; the "secrets" prefix comes from
+# secrets::pool_path.
+_HINDSIGHT_POOL_NAMESPACE="hindsight"
 
 # Blueprint-relative path of a pool secret, e.g. secrets/hindsight/db_password.age.
 # Single source of the path shape; error messages and the path helper reuse it.
 hindsight::secrets::rel() {
-  printf '%s/%s.age\n' "$_HINDSIGHT_SECRET_DIR" "$1"
+  secrets::pool_path "$_HINDSIGHT_POOL_NAMESPACE/$1.age"
 }
 
 hindsight::secrets::path() {

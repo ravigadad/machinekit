@@ -11,14 +11,16 @@ setup() {
 # --- hindsight::secrets::rel ---
 
 @test "rel is the blueprint-relative pool path of the named secret" {
+  STUB_OUTPUT="fake-pool/hindsight/tenant_api_key.age" mktest::stub_function secrets::pool_path "hindsight/tenant_api_key.age"
   run hindsight::secrets::rel tenant_api_key
-  [ "$output" = "secrets/hindsight/tenant_api_key.age" ]
+  [ "$output" = "fake-pool/hindsight/tenant_api_key.age" ]
 }
 
 # --- hindsight::secrets::path ---
 
 @test "path anchors the pool secret under the blueprints dir" {
   STUB_OUTPUT="/bp" mktest::stub_function blueprints::dir
+  STUB_OUTPUT="secrets/hindsight/db_password.age" mktest::stub_function hindsight::secrets::rel db_password
   run hindsight::secrets::path db_password
   [ "$output" = "/bp/secrets/hindsight/db_password.age" ]
 }

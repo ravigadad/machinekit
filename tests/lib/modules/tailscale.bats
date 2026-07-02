@@ -368,8 +368,9 @@ setup() {
 
 @test "_secret_rel builds the blueprint-relative path by service and tailnet" {
   STUB_OUTPUT="work" mktest::stub_function tailscale::_tailnet
+  STUB_OUTPUT="fake-pool/tailscale/work.age" mktest::stub_function secrets::pool_path "tailscale/work.age"
   run tailscale::_secret_rel
-  [ "$output" = "secrets/tailscale/work.age" ]
+  [ "$output" = "fake-pool/tailscale/work.age" ]
 }
 
 # --- tailscale::_secret_path ---

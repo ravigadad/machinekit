@@ -10,8 +10,17 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/secrets/put.sh"
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/secrets/cli.sh"
 
 # Pool root, blueprint-relative. Every module namespaces its secrets under this
-# (secrets/<service>/...); the single source of the prefix.
+# (secrets/<service>/...); the single source of the prefix. Modules never hardcode
+# it — they compose paths through secrets::pool_path.
 _MK_SECRETS_POOL_REL="secrets"
+
+# secrets::pool_path SUBPATH — the blueprint-relative path of SUBPATH inside the
+# secrets pool. The single place the pool prefix lives: a secret-bearing module
+# passes only its own namespace (e.g. "tailscale/home.age") and gets the full pool
+# path back, so renaming the pool means editing _MK_SECRETS_POOL_REL alone.
+secrets::pool_path() {
+  printf '%s/%s\n' "$_MK_SECRETS_POOL_REL" "$1"
+}
 
 # secrets::in_pool — the blueprint-relative path of every .age secret currently
 # in the pool, one per line, sorted. Empty when the pool dir is absent.
