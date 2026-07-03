@@ -146,6 +146,7 @@ Shipped since the module system landed:
 - `tailscale` (mesh networking, with headless tagged-device support)
 - a `postgres` host-provisioning module
 - coding-agent installers — `claude_code`, `codex`, and `opencode` (each installs its CLI via the vendor's official self-updating installer)
+- persistent-assistant installers — `openclaw` and `hermes` (each installs its CLI via the vendor's official self-updating installer)
 - the Hindsight memory stack — `hindsight_server` (self-hosted memory API as a container) and `hindsight_integration` (wires coding agents to it)
 - the agents-config pair — `agents_config_setup` (ensures the shared agents-config directory is present, seeding it from a git or local source) and `agents_config_harnesses` (projects that directory — top-level instructions plus on-demand skills — into coding agents)
 - `syncthing` (generic peer-to-peer, tailnet-only folder sync that keeps that directory live across the fleet)
