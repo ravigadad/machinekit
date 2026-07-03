@@ -48,57 +48,12 @@ setup() {
 
 # --- _ensure_skills_link ---
 
-@test "_ensure_skills_link creates the symlink when the path is absent" {
-  local home_dir; home_dir="$(mktemp -d)"
-  local skills_link_path="$home_dir/.claude/skills" skills_dir="$home_dir/agents/skills"
-  mkdir -p "$skills_dir"
-  STUB_RETURN=1 mktest::stub_function agents_config_harnesses::claude_code::_skills_link_present "$home_dir/agents"
-  STUB_OUTPUT="$skills_link_path" mktest::stub_function agents_config_harnesses::claude_code::_skills_link_path
-  STUB_OUTPUT="$skills_dir" mktest::stub_function agents_config_harnesses::claude_code::_skills_dir "$home_dir/agents"
-  agents_config_harnesses::claude_code::_ensure_skills_link "$home_dir/agents"
-  [ -L "$skills_link_path" ]
-  [ "$(readlink "$skills_link_path")" = "$skills_dir" ]
-}
-
-@test "_ensure_skills_link is a no-op when the correct symlink already exists" {
-  local home_dir; home_dir="$(mktemp -d)"
-  local skills_link_path="$home_dir/.claude/skills" skills_dir="$home_dir/agents/skills"
-  mkdir -p "$skills_dir" "$home_dir/.claude"
-  mktest::stub_function ln
-  STUB_RETURN=0 mktest::stub_function agents_config_harnesses::claude_code::_skills_link_present "$home_dir/agents"
-  STUB_OUTPUT="$skills_link_path" mktest::stub_function agents_config_harnesses::claude_code::_skills_link_path
-  STUB_OUTPUT="$skills_dir" mktest::stub_function agents_config_harnesses::claude_code::_skills_dir "$home_dir/agents"
-  mktest::stub_function lifecycle::fail
-  agents_config_harnesses::claude_code::_ensure_skills_link "$home_dir/agents"
-  mktest::assert_stub_not_called lifecycle::fail
-  mktest::assert_stub_not_called ln
-}
-
-@test "_ensure_skills_link fails loudly when a real directory occupies the path" {
-  local home_dir; home_dir="$(mktemp -d)"
-  local skills_link_path="$home_dir/.claude/skills" skills_dir="$home_dir/agents/skills"
-  mkdir -p "$skills_link_path" "$skills_dir"
-  STUB_RETURN=1 mktest::stub_function agents_config_harnesses::claude_code::_skills_link_present "$home_dir/agents"
-  STUB_OUTPUT="$skills_link_path" mktest::stub_function agents_config_harnesses::claude_code::_skills_link_path
-  STUB_OUTPUT="$skills_dir" mktest::stub_function agents_config_harnesses::claude_code::_skills_dir "$home_dir/agents"
-  STUB_EXIT=1 mktest::stub_function lifecycle::fail
-  run agents_config_harnesses::claude_code::_ensure_skills_link "$home_dir/agents"
-  [ "$status" -ne 0 ]
-  mktest::assert_stub_called lifecycle::fail
-}
-
-@test "_ensure_skills_link fails loudly when the path is a symlink to a different target" {
-  local home_dir; home_dir="$(mktemp -d)"
-  local skills_link_path="$home_dir/.claude/skills" skills_dir="$home_dir/agents/skills"
-  mkdir -p "$skills_dir" "$home_dir/.claude" "$home_dir/other"
-  ln -s "$home_dir/other" "$skills_link_path"
-  STUB_RETURN=1 mktest::stub_function agents_config_harnesses::claude_code::_skills_link_present "$home_dir/agents"
-  STUB_OUTPUT="$skills_link_path" mktest::stub_function agents_config_harnesses::claude_code::_skills_link_path
-  STUB_OUTPUT="$skills_dir" mktest::stub_function agents_config_harnesses::claude_code::_skills_dir "$home_dir/agents"
-  STUB_EXIT=1 mktest::stub_function lifecycle::fail
-  run agents_config_harnesses::claude_code::_ensure_skills_link "$home_dir/agents"
-  [ "$status" -ne 0 ]
-  mktest::assert_stub_called lifecycle::fail
+@test "_ensure_skills_link delegates to _ensure_link with the skills link and dir paths" {
+  STUB_OUTPUT="/home/.claude/skills" mktest::stub_function agents_config_harnesses::claude_code::_skills_link_path
+  STUB_OUTPUT="/agents/skills" mktest::stub_function agents_config_harnesses::claude_code::_skills_dir "/agents"
+  mktest::stub_function agents_config_harnesses::_ensure_link "/home/.claude/skills" "/agents/skills"
+  agents_config_harnesses::claude_code::_ensure_skills_link "/agents"
+  mktest::assert_stub_called agents_config_harnesses::_ensure_link "/home/.claude/skills" "/agents/skills"
 }
 
 # --- _ensure_agents_md_import ---
@@ -138,37 +93,12 @@ setup() {
 
 # --- _skills_link_present ---
 
-@test "_skills_link_present is true for the correct symlink" {
-  local home_dir; home_dir="$(mktemp -d)"
-  local skills_link_path="$home_dir/skills" skills_dir="$home_dir/agents/skills"
-  mkdir -p "$skills_dir"; ln -s "$skills_dir" "$skills_link_path"
-  STUB_OUTPUT="$skills_link_path" mktest::stub_function agents_config_harnesses::claude_code::_skills_link_path
-  STUB_OUTPUT="$skills_dir" mktest::stub_function agents_config_harnesses::claude_code::_skills_dir "/agents"
+@test "_skills_link_present delegates to _link_present with the skills link and dir paths" {
+  STUB_OUTPUT="/home/.claude/skills" mktest::stub_function agents_config_harnesses::claude_code::_skills_link_path
+  STUB_OUTPUT="/agents/skills" mktest::stub_function agents_config_harnesses::claude_code::_skills_dir "/agents"
+  mktest::stub_function agents_config_harnesses::_link_present "/home/.claude/skills" "/agents/skills"
   agents_config_harnesses::claude_code::_skills_link_present "/agents"
-}
-
-@test "_skills_link_present is false when the link is absent" {
-  local home_dir; home_dir="$(mktemp -d)"
-  STUB_OUTPUT="$home_dir/skills" mktest::stub_function agents_config_harnesses::claude_code::_skills_link_path
-  STUB_OUTPUT="$home_dir/agents/skills" mktest::stub_function agents_config_harnesses::claude_code::_skills_dir "/agents"
-  run ! agents_config_harnesses::claude_code::_skills_link_present "/agents"
-}
-
-@test "_skills_link_present is false when the symlink points elsewhere" {
-  local home_dir; home_dir="$(mktemp -d)"
-  local skills_link_path="$home_dir/skills"
-  mkdir -p "$home_dir/other"; ln -s "$home_dir/other" "$skills_link_path"
-  STUB_OUTPUT="$skills_link_path" mktest::stub_function agents_config_harnesses::claude_code::_skills_link_path
-  STUB_OUTPUT="$home_dir/agents/skills" mktest::stub_function agents_config_harnesses::claude_code::_skills_dir "/agents"
-  run ! agents_config_harnesses::claude_code::_skills_link_present "/agents"
-}
-
-@test "_skills_link_present is false when a real directory occupies the path" {
-  local home_dir; home_dir="$(mktemp -d)"
-  mkdir -p "$home_dir/skills"
-  STUB_OUTPUT="$home_dir/skills" mktest::stub_function agents_config_harnesses::claude_code::_skills_link_path
-  STUB_OUTPUT="$home_dir/agents/skills" mktest::stub_function agents_config_harnesses::claude_code::_skills_dir "/agents"
-  run ! agents_config_harnesses::claude_code::_skills_link_present "/agents"
+  mktest::assert_stub_called agents_config_harnesses::_link_present "/home/.claude/skills" "/agents/skills"
 }
 
 # --- _agents_md_import_present ---

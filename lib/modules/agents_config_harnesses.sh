@@ -112,23 +112,35 @@ agents_config_harnesses::_agents_md_source() {
   printf '%s/AGENTS.md\n' "$1"
 }
 
-# Own LINK_PATH as a symlink to the dir's AGENTS.md. No-op if already correct;
-# refuse to clobber a real file or a symlink to a different target — surface it so
-# the user can reconcile it themselves rather than lose their content.
+# Own LINK_PATH as a symlink to the dir's AGENTS.md — a named-file link whose
+# source is derived from the dir rather than passed in.
 agents_config_harnesses::_ensure_agents_md_link() {
-  local link_path="$1" agents_config_dir="$2" source
-  agents_config_harnesses::_agents_md_link_present "$link_path" "$agents_config_dir" && return 0
-  source="$(agents_config_harnesses::_agents_md_source "$agents_config_dir")"
+  agents_config_harnesses::_ensure_link \
+    "$1" "$(agents_config_harnesses::_agents_md_source "$2")"
+}
+
+agents_config_harnesses::_agents_md_link_present() {
+  agents_config_harnesses::_link_present \
+    "$1" "$(agents_config_harnesses::_agents_md_source "$2")"
+}
+
+# The one implementation of a projected symlink, shared by every harness: own
+# LINK_PATH as a symlink to SOURCE (a named file or the skills directory — both
+# are just symlinks). No-op if already correct; refuse to clobber a real path or a
+# symlink to a different target — surface it so the user can move their content
+# into SOURCE (where it gets synced and projected) rather than lose it.
+agents_config_harnesses::_ensure_link() {
+  local link_path="$1" source="$2"
+  agents_config_harnesses::_link_present "$link_path" "$source" && return 0
   if [ -e "$link_path" ] || [ -L "$link_path" ]; then
-    lifecycle::fail "agents_config_harnesses: $link_path exists and is not the expected symlink to $source — move or remove it, then re-apply."
+    lifecycle::fail "agents_config_harnesses: $link_path exists and is not the expected symlink to $source — move or remove it (migrate any content into $source), then re-apply."
   fi
   mkdir -p "$(dirname "$link_path")"
   ln -s "$source" "$link_path"
 }
 
-agents_config_harnesses::_agents_md_link_present() {
-  local link_path="$1" agents_config_dir="$2" source
-  source="$(agents_config_harnesses::_agents_md_source "$agents_config_dir")"
+agents_config_harnesses::_link_present() {
+  local link_path="$1" source="$2"
   [ -L "$link_path" ] || return 1
   [ "$(readlink "$link_path")" = "$source" ]
 }

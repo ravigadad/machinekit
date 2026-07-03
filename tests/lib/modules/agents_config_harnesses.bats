@@ -177,70 +177,84 @@ setup() {
 }
 
 # --- _ensure_agents_md_link ---
+# A thin specialization of _ensure_link whose source is the dir's AGENTS.md.
 
-@test "_ensure_agents_md_link creates the symlink when the path is absent" {
-  local home_dir; home_dir="$(mktemp -d)"
-  local link_path="$home_dir/.codex/AGENTS.md" source="$home_dir/agents/AGENTS.md"
-  STUB_RETURN=1 mktest::stub_function agents_config_harnesses::_agents_md_link_present "$link_path" "/agents"
-  STUB_OUTPUT="$source" mktest::stub_function agents_config_harnesses::_agents_md_source "/agents"
-  agents_config_harnesses::_ensure_agents_md_link "$link_path" "/agents"
-  [ -L "$link_path" ]
-  [ "$(readlink "$link_path")" = "$source" ]
-}
-
-@test "_ensure_agents_md_link is a no-op when the correct symlink already exists" {
-  mktest::stub_function ln
-  mktest::stub_function lifecycle::fail
-  mktest::stub_function agents_config_harnesses::_agents_md_link_present "/fake/.codex/AGENTS.md" "/agents"
-  agents_config_harnesses::_ensure_agents_md_link "/fake/.codex/AGENTS.md" "/agents"
-  mktest::assert_stub_not_called ln
-  mktest::assert_stub_not_called lifecycle::fail
-}
-
-@test "_ensure_agents_md_link fails loudly when a real file occupies the path" {
-  local home_dir; home_dir="$(mktemp -d)"
-  local link_path="$home_dir/.codex/AGENTS.md"
-  mkdir -p "$home_dir/.codex"; printf 'mine\n' > "$link_path"
-  STUB_RETURN=1 mktest::stub_function agents_config_harnesses::_agents_md_link_present "$link_path" "/agents"
+@test "_ensure_agents_md_link delegates to _ensure_link with the derived AGENTS.md source" {
   STUB_OUTPUT="/agents/AGENTS.md" mktest::stub_function agents_config_harnesses::_agents_md_source "/agents"
-  STUB_EXIT=1 mktest::stub_function lifecycle::fail
-  run agents_config_harnesses::_ensure_agents_md_link "$link_path" "/agents"
-  [ "$status" -ne 0 ]
-  mktest::assert_stub_called lifecycle::fail
-}
-
-@test "_ensure_agents_md_link fails loudly when the path is a symlink to a different target" {
-  local home_dir; home_dir="$(mktemp -d)"
-  local link_path="$home_dir/.codex/AGENTS.md"
-  mkdir -p "$home_dir/.codex" "$home_dir/other"; ln -s "$home_dir/other/AGENTS.md" "$link_path"
-  STUB_RETURN=1 mktest::stub_function agents_config_harnesses::_agents_md_link_present "$link_path" "/agents"
-  STUB_OUTPUT="/agents/AGENTS.md" mktest::stub_function agents_config_harnesses::_agents_md_source "/agents"
-  STUB_EXIT=1 mktest::stub_function lifecycle::fail
-  run agents_config_harnesses::_ensure_agents_md_link "$link_path" "/agents"
-  [ "$status" -ne 0 ]
-  mktest::assert_stub_called lifecycle::fail
+  mktest::stub_function agents_config_harnesses::_ensure_link "/home/.codex/AGENTS.md" "/agents/AGENTS.md"
+  agents_config_harnesses::_ensure_agents_md_link "/home/.codex/AGENTS.md" "/agents"
+  mktest::assert_stub_called agents_config_harnesses::_ensure_link "/home/.codex/AGENTS.md" "/agents/AGENTS.md"
 }
 
 # --- _agents_md_link_present ---
 
-@test "_agents_md_link_present is true for the correct symlink" {
-  local home_dir; home_dir="$(mktemp -d)"
-  local link_path="$home_dir/.codex/AGENTS.md" source="$home_dir/agents/AGENTS.md"
-  mkdir -p "$home_dir/agents" "$home_dir/.codex"; ln -s "$source" "$link_path"
-  STUB_OUTPUT="$source" mktest::stub_function agents_config_harnesses::_agents_md_source "/agents"
-  agents_config_harnesses::_agents_md_link_present "$link_path" "/agents"
+@test "_agents_md_link_present delegates to _link_present with the derived AGENTS.md source" {
+  STUB_OUTPUT="/agents/AGENTS.md" mktest::stub_function agents_config_harnesses::_agents_md_source "/agents"
+  mktest::stub_function agents_config_harnesses::_link_present "/home/.codex/AGENTS.md" "/agents/AGENTS.md"
+  agents_config_harnesses::_agents_md_link_present "/home/.codex/AGENTS.md" "/agents"
+  mktest::assert_stub_called agents_config_harnesses::_link_present "/home/.codex/AGENTS.md" "/agents/AGENTS.md"
 }
 
-@test "_agents_md_link_present is false when the link is absent" {
+# --- _ensure_link ---
+# Generic symlink projection used by the identity harnesses; SOURCE is explicit.
+
+@test "_ensure_link creates the symlink when the path is absent" {
   local home_dir; home_dir="$(mktemp -d)"
-  STUB_OUTPUT="$home_dir/agents/AGENTS.md" mktest::stub_function agents_config_harnesses::_agents_md_source "/agents"
-  run ! agents_config_harnesses::_agents_md_link_present "$home_dir/.codex/AGENTS.md" "/agents"
+  local link_path="$home_dir/.openclaw/workspace/SOUL.md" source="$home_dir/agents/SOUL.md"
+  STUB_RETURN=1 mktest::stub_function agents_config_harnesses::_link_present "$link_path" "$source"
+  agents_config_harnesses::_ensure_link "$link_path" "$source"
+  [ -L "$link_path" ]
+  [ "$(readlink "$link_path")" = "$source" ]
 }
 
-@test "_agents_md_link_present is false when the symlink points elsewhere" {
+@test "_ensure_link is a no-op when the correct symlink already exists" {
+  mktest::stub_function ln
+  mktest::stub_function lifecycle::fail
+  mktest::stub_function agents_config_harnesses::_link_present "/fake/link" "/fake/source"
+  agents_config_harnesses::_ensure_link "/fake/link" "/fake/source"
+  mktest::assert_stub_not_called ln
+  mktest::assert_stub_not_called lifecycle::fail
+}
+
+@test "_ensure_link fails loudly when a real file occupies the path" {
   local home_dir; home_dir="$(mktemp -d)"
-  local link_path="$home_dir/.codex/AGENTS.md"
-  mkdir -p "$home_dir/.codex" "$home_dir/other"; ln -s "$home_dir/other/AGENTS.md" "$link_path"
-  STUB_OUTPUT="$home_dir/agents/AGENTS.md" mktest::stub_function agents_config_harnesses::_agents_md_source "/agents"
-  run ! agents_config_harnesses::_agents_md_link_present "$link_path" "/agents"
+  local link_path="$home_dir/workspace/SOUL.md"
+  mkdir -p "$home_dir/workspace"; printf 'mine\n' > "$link_path"
+  STUB_RETURN=1 mktest::stub_function agents_config_harnesses::_link_present "$link_path" "/agents/SOUL.md"
+  STUB_EXIT=1 mktest::stub_function lifecycle::fail
+  run agents_config_harnesses::_ensure_link "$link_path" "/agents/SOUL.md"
+  [ "$status" -ne 0 ]
+  mktest::assert_stub_called lifecycle::fail
+}
+
+@test "_ensure_link fails loudly when the path is a symlink to a different target" {
+  local home_dir; home_dir="$(mktemp -d)"
+  local link_path="$home_dir/workspace/SOUL.md"
+  mkdir -p "$home_dir/workspace" "$home_dir/other"; ln -s "$home_dir/other/SOUL.md" "$link_path"
+  STUB_RETURN=1 mktest::stub_function agents_config_harnesses::_link_present "$link_path" "/agents/SOUL.md"
+  STUB_EXIT=1 mktest::stub_function lifecycle::fail
+  run agents_config_harnesses::_ensure_link "$link_path" "/agents/SOUL.md"
+  [ "$status" -ne 0 ]
+  mktest::assert_stub_called lifecycle::fail
+}
+
+# --- _link_present ---
+
+@test "_link_present is true for the correct symlink" {
+  local home_dir; home_dir="$(mktemp -d)"
+  local link_path="$home_dir/workspace/SOUL.md" source="$home_dir/agents/SOUL.md"
+  mkdir -p "$home_dir/agents" "$home_dir/workspace"; ln -s "$source" "$link_path"
+  agents_config_harnesses::_link_present "$link_path" "$source"
+}
+
+@test "_link_present is false when the link is absent" {
+  local home_dir; home_dir="$(mktemp -d)"
+  run ! agents_config_harnesses::_link_present "$home_dir/workspace/SOUL.md" "$home_dir/agents/SOUL.md"
+}
+
+@test "_link_present is false when the symlink points elsewhere" {
+  local home_dir; home_dir="$(mktemp -d)"
+  local link_path="$home_dir/workspace/SOUL.md"
+  mkdir -p "$home_dir/workspace" "$home_dir/other"; ln -s "$home_dir/other/SOUL.md" "$link_path"
+  run ! agents_config_harnesses::_link_present "$link_path" "$home_dir/agents/SOUL.md"
 }

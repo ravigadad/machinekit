@@ -33,19 +33,12 @@ agents_config_harnesses::claude_code::project() {
   agents_config_harnesses::claude_code::_ensure_agents_md_import "$agents_config_dir"
 }
 
-# Own ~/.claude/skills as a symlink to the skills dir. No-op if already
-# correct; refuse to clobber a real directory or a different target — surface it
-# so the user can migrate those skills into the synced skills dir themselves.
+# Own ~/.claude/skills as a symlink to the skills dir, via the shared link
+# primitive (a directory symlink is a link like any other).
 agents_config_harnesses::claude_code::_ensure_skills_link() {
-  local agents_config_dir="$1" skills_link_path skills_dir
-  skills_link_path="$(agents_config_harnesses::claude_code::_skills_link_path)"
-  skills_dir="$(agents_config_harnesses::claude_code::_skills_dir "$agents_config_dir")"
-  agents_config_harnesses::claude_code::_skills_link_present "$agents_config_dir" && return 0
-  if [ -e "$skills_link_path" ] || [ -L "$skills_link_path" ]; then
-    lifecycle::fail "agents_config_harnesses::claude_code: $skills_link_path exists and is not the expected symlink to $skills_dir — move or remove it (migrate any skills into $skills_dir), then re-apply."
-  fi
-  mkdir -p "$(dirname "$skills_link_path")"
-  ln -s "$skills_dir" "$skills_link_path"
+  agents_config_harnesses::_ensure_link \
+    "$(agents_config_harnesses::claude_code::_skills_link_path)" \
+    "$(agents_config_harnesses::claude_code::_skills_dir "$1")"
 }
 
 # Ensure ~/.claude/CLAUDE.md imports the AGENTS.md instructions file. Append
@@ -61,11 +54,9 @@ agents_config_harnesses::claude_code::_ensure_agents_md_import() {
 }
 
 agents_config_harnesses::claude_code::_skills_link_present() {
-  local agents_config_dir="$1" skills_link_path skills_dir
-  skills_link_path="$(agents_config_harnesses::claude_code::_skills_link_path)"
-  skills_dir="$(agents_config_harnesses::claude_code::_skills_dir "$agents_config_dir")"
-  [ -L "$skills_link_path" ] || return 1
-  [ "$(readlink "$skills_link_path")" = "$skills_dir" ]
+  agents_config_harnesses::_link_present \
+    "$(agents_config_harnesses::claude_code::_skills_link_path)" \
+    "$(agents_config_harnesses::claude_code::_skills_dir "$1")"
 }
 
 agents_config_harnesses::claude_code::_agents_md_import_present() {
