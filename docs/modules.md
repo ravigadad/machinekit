@@ -122,15 +122,17 @@ A private git source needs the same SSH access blueprints do — register your k
 
 ## agents_config_harnesses — a populated agents-config directory
 
-`agents_config_harnesses` wires your coding agents to a shared agents-config directory (default `~/.agents`) so they all load the same instructions and skills. machinekit creates the projection; **you provide the directory's contents** — let `agents_config_setup` seed it from a source (above), populate it yourself, or sync it onto the machine. It holds:
+`agents_config_harnesses` wires your agents to a shared agents-config directory (default `~/.agents`) so they all load the same instructions and skills. machinekit creates the projection; **you provide the directory's contents** — let `agents_config_setup` seed it from a source (above), populate it yourself, or sync it onto the machine. It holds:
 
 - a top-level `AGENTS.md` — your instructions, loaded every session;
-- `skills/<name>/SKILL.md` files — skills the agent loads when the task is relevant.
+- `skills/<name>/SKILL.md` files — skills the agent loads when the task is relevant;
+- optionally, identity files (`SOUL.md`, `IDENTITY.md`, `USER.md`) — projected into the persistent-assistant harnesses that read them (below).
 
-Then list `agents_config_harnesses` in `modules`, choose agents with `harnesses` (e.g. `["claude_code", "codex", "opencode"]`), and apply. The available harnesses are **claude_code**, **codex**, and **opencode**:
+Then list `agents_config_harnesses` in `modules`, choose agents with `harnesses` (e.g. `["claude_code", "codex", "opencode"]`), and apply. Each harness projects only what it reads — a coding agent gets `AGENTS.md` and skills; a persistent assistant also gets the identity files:
 
 - **claude_code** symlinks `~/.claude/skills` → `<dir>/skills` and adds an `@<dir>/AGENTS.md` import to `~/.claude/CLAUDE.md`.
 - **codex** and **opencode** read skills from the shared dir natively, so the projection is just a symlink of their global `AGENTS.md` (`~/.codex/AGENTS.md`, `~/.config/opencode/AGENTS.md`) to the dir's.
+- **openclaw** and **hermes** are persistent-assistant CLIs that read identity files. openclaw symlinks `SOUL.md`, `IDENTITY.md`, `USER.md`, `AGENTS.md`, and `skills` into its default workspace (`~/.openclaw/workspace`); hermes symlinks the single file it reads, `~/.hermes/SOUL.md`. Each entry is projected only once you've authored its source file — and openclaw's, only once the workspace exists (created by openclaw's own onboarding). Selecting either harness also installs its CLI.
 
 (Cursor has no global instructions file to project to — its global rules live in the settings UI — so it isn't a harness here; its skills are still read from the shared dir natively.)
 

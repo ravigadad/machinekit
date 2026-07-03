@@ -127,17 +127,20 @@
 # # holds a top-level AGENTS.md (instructions loaded every session) and a
 # # skills/<name>/SKILL.md folder (skills the agent loads when relevant). List
 # # "agents_config_harnesses" in `modules` and pick agents with `harnesses` (each
-# # set up by its own submodule). Available: claude_code, codex, opencode. Optional —
-# # omit or leave empty to project nothing.
+# # set up by its own submodule). Available: claude_code, codex, opencode, openclaw,
+# # hermes. Optional — omit or leave empty to project nothing.
 # harnesses = ["claude_code", "codex", "opencode"]
 # #
 # # For Claude Code this symlinks ~/.claude/skills → <dir>/skills and adds an
 # # `@<dir>/AGENTS.md` import to ~/.claude/CLAUDE.md. Codex and opencode read skills
 # # from <dir> natively, so for them it is just a symlink of their global AGENTS.md
-# # (~/.codex/AGENTS.md, ~/.config/opencode/AGENTS.md) to <dir>/AGENTS.md. Every
-# # binding is idempotent and refuses to overwrite a pre-existing real file in its
-# # place. The directory itself must already exist — populate it yourself, or sync it
-# # onto the machine.
+# # (~/.codex/AGENTS.md, ~/.config/opencode/AGENTS.md) to <dir>/AGENTS.md. openclaw
+# # and hermes are persistent-assistant CLIs: openclaw symlinks the identity files
+# # (SOUL.md, IDENTITY.md, USER.md), AGENTS.md, and skills into ~/.openclaw/workspace;
+# # hermes symlinks the one file it reads, ~/.hermes/SOUL.md. Every binding is
+# # idempotent, projects a file only once you've authored it, and refuses to
+# # overwrite a pre-existing real file in its place. The directory itself must
+# # already exist — populate it yourself, or sync it onto the machine.
 # #
 # # The directory is the one owned by [module.agents_config_setup] above (its
 # # `dir` key, default ~/.agents) — shared config, one source of truth.
