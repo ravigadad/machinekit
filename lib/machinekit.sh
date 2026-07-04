@@ -22,6 +22,8 @@ source "$_mk_core_dir/brew.sh"
 source "$_mk_core_dir/fetch.sh"
 # shellcheck source=machinekit/managed_block.sh
 source "$_mk_core_dir/managed_block.sh"
+# shellcheck source=machinekit/service.sh
+source "$_mk_core_dir/service.sh"
 # shellcheck source=machinekit/path.sh
 source "$_mk_core_dir/path.sh"
 # shellcheck source=machinekit/blueprints.sh
