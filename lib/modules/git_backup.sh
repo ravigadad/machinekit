@@ -14,9 +14,10 @@
 # which the install decrypts to a private key file the push uses. Omit it to push
 # over ambient SSH (an agent or an on-disk default key).
 #
-# RUNTIME-UNVERIFIED: the launchd/systemd load wrappers encode the unit-loading
-# commands from docs, not a live run. The unit content generators, manifest
-# writing, key handling, and orchestration are tested; loading is the VM seam.
+# The scheduled-service mechanics — launchd/systemd unit generation and load —
+# live in lib/machinekit/service.sh; git_backup hands it the push script, interval,
+# and pinned environment. Manifest writing, key handling, and orchestration are
+# tested here.
 
 _GIT_BACKUP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -218,103 +219,19 @@ git_backup::_install_push_script() {
   chmod 755 "$dest"
 }
 
+# Schedule the one service that runs the push script for every folder, pinning the
+# manifest, notify command, and absolute git path into its environment. The push
+# script is a self-contained executable, so service::install_interval runs it
+# directly (its shebang picks the interpreter); the launchd/systemd split is
+# service.sh's job.
 git_backup::_install_service() {
-  local family
-  family=$(context::get os.family)
-  case "$family" in
-    darwin) git_backup::_install_service_darwin ;;
-    linux)  git_backup::_install_service_linux ;;
-    *) lifecycle::fail "git_backup: unsupported os.family '$family' for the backup service" ;;
-  esac
-}
-
-# --- unit content generators (pure; tested) ---
-
-git_backup::_plist_content() {
-  local script="$1" manifest="$2" notify="$3" git="$4" interval="$5" user="$6"
-  cat <<EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>Label</key><string>com.machinekit.git-backup</string>
-  <key>UserName</key><string>$user</string>
-  <key>ProgramArguments</key>
-  <array><string>/bin/bash</string><string>$script</string></array>
-  <key>EnvironmentVariables</key>
-  <dict>
-    <key>MK_GIT_BACKUP_MANIFEST</key><string>$manifest</string>
-    <key>MK_GIT_BACKUP_NOTIFY</key><string>$notify</string>
-    <key>MK_GIT_BACKUP_GIT</key><string>$git</string>
-  </dict>
-  <key>StartInterval</key><integer>$interval</integer>
-  <key>RunAtLoad</key><true/>
-</dict>
-</plist>
-EOF
-}
-
-git_backup::_systemd_service_content() {
-  local script="$1" manifest="$2" notify="$3" git="$4"
-  cat <<EOF
-[Unit]
-Description=machinekit git backup
-
-[Service]
-Type=oneshot
-Environment=MK_GIT_BACKUP_MANIFEST=$manifest
-Environment=MK_GIT_BACKUP_NOTIFY=$notify
-Environment=MK_GIT_BACKUP_GIT=$git
-ExecStart=/bin/bash $script
-EOF
-}
-
-git_backup::_systemd_timer_content() {
-  local interval="$1"
-  cat <<EOF
-[Unit]
-Description=machinekit git backup timer
-
-[Timer]
-OnBootSec=120
-OnUnitActiveSec=$interval
-
-[Install]
-WantedBy=timers.target
-EOF
-}
-
-# --- service load (RUNTIME-UNVERIFIED seam) ---
-
-# Headless server → a system LaunchDaemon (loads at boot with no GUI session),
-# which is why this needs sudo (a user LaunchAgent wouldn't run headless). The
-# daemon is dropped to the applying user via UserName so git operates on their
-# repos without tripping the dubious-ownership guard.
-git_backup::_install_service_darwin() {
-  local plist="/Library/LaunchDaemons/com.machinekit.git-backup.plist"
-  git_backup::_plist_content \
-    "$(git_backup::_push_script_path)" "$(git_backup::_manifest_path)" \
-    "$(git_backup::_notify)" "$(git_backup::_git_path)" "$(git_backup::_interval)" \
-    "$(git_backup::_service_user)" \
-    | sudo tee "$plist" >/dev/null
-  sudo launchctl bootout system "$plist" 2>/dev/null || true
-  sudo launchctl bootstrap system "$plist"
-}
-
-# Headless server → a user systemd timer plus linger (the service survives logout
-# and reboot), the Linux equivalent of the LaunchDaemon. Mirrors brew::_service.
-git_backup::_install_service_linux() {
-  local unit_dir="$HOME/.config/systemd/user"
-  mkdir -p "$unit_dir"
-  git_backup::_systemd_service_content \
-    "$(git_backup::_push_script_path)" "$(git_backup::_manifest_path)" \
-    "$(git_backup::_notify)" "$(git_backup::_git_path)" \
-    > "$unit_dir/machinekit-git-backup.service"
-  git_backup::_systemd_timer_content "$(git_backup::_interval)" \
-    > "$unit_dir/machinekit-git-backup.timer"
-  sudo loginctl enable-linger "$(id -un)"
-  systemctl --user daemon-reload
-  systemctl --user enable --now machinekit-git-backup.timer
+  service::install_interval \
+    git-backup \
+    "$(git_backup::_push_script_path)" \
+    "$(git_backup::_interval)" \
+    "MK_GIT_BACKUP_MANIFEST=$(git_backup::_manifest_path)" \
+    "MK_GIT_BACKUP_NOTIFY=$(git_backup::_notify)" \
+    "MK_GIT_BACKUP_GIT=$(git_backup::_git_path)"
 }
 
 # --- config accessors + paths ---
@@ -340,15 +257,6 @@ git_backup::_notify() {
 # rather than trusting whatever git the machine may or may not carry.
 git_backup::_git_path() {
   command -v git
-}
-
-# The user the macOS LaunchDaemon runs as. The daemon is loaded into the system
-# domain (so it starts at boot with no GUI login), but it must execute as the
-# repo's owner: push.sh writes to the working tree, and git rejects a user-owned
-# repo touched by root as "dubious ownership". SUDO_USER recovers the real user if
-# apply was itself run under sudo; otherwise it's whoever is applying.
-git_backup::_service_user() {
-  printf '%s\n' "${SUDO_USER:-$(id -un)}"
 }
 
 # Module-level default ssh_key name; a folder may override it. Empty = ambient SSH.

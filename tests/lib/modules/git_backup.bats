@@ -327,90 +327,26 @@ setup() {
   grep -q "push-only-with-abort" "$dest"
 }
 
-# --- _install_service dispatch ---
+# --- _install_service ---
 
-@test "_install_service dispatches to the darwin installer on macOS" {
-  STUB_OUTPUT="darwin" mktest::stub_function context::get "os.family"
-  mktest::stub_function git_backup::_install_service_darwin
-  mktest::stub_function git_backup::_install_service_linux
-  git_backup::_install_service
-  mktest::assert_stub_called git_backup::_install_service_darwin
-  mktest::assert_stub_not_called git_backup::_install_service_linux
-}
-
-@test "_install_service dispatches to the linux installer on Linux" {
-  STUB_OUTPUT="linux" mktest::stub_function context::get "os.family"
-  mktest::stub_function git_backup::_install_service_darwin
-  mktest::stub_function git_backup::_install_service_linux
-  git_backup::_install_service
-  mktest::assert_stub_called git_backup::_install_service_linux
-  mktest::assert_stub_not_called git_backup::_install_service_darwin
-}
-
-# --- unit content generators ---
-
-@test "_plist_content embeds the script, manifest, notify, git, interval, and run-as user" {
-  run git_backup::_plist_content "/s/push.sh" "/m/manifest.tsv" "/n/notify" "/b/git" "600" "alice"
-  [[ "$output" == *"com.machinekit.git-backup"* ]]
-  [[ "$output" == *"/s/push.sh"* ]]
-  [[ "$output" == *"<key>MK_GIT_BACKUP_MANIFEST</key><string>/m/manifest.tsv</string>"* ]]
-  [[ "$output" == *"<key>MK_GIT_BACKUP_GIT</key><string>/b/git</string>"* ]]
-  [[ "$output" == *"<integer>600</integer>"* ]]
-  # The daemon runs as root by default; UserName drops it to the repo's owner so
-  # git doesn't reject the user-owned working tree as dubious ownership.
-  [[ "$output" == *"<key>UserName</key><string>alice</string>"* ]]
-}
-
-@test "_systemd_service_content embeds the env (incl. git) and ExecStart" {
-  run git_backup::_systemd_service_content "/s/push.sh" "/m/manifest.tsv" "/n/notify" "/b/git"
-  [[ "$output" == *"Environment=MK_GIT_BACKUP_MANIFEST=/m/manifest.tsv"* ]]
-  [[ "$output" == *"Environment=MK_GIT_BACKUP_GIT=/b/git"* ]]
-  [[ "$output" == *"ExecStart=/bin/bash /s/push.sh"* ]]
-}
-
-@test "_systemd_timer_content sets the interval" {
-  run git_backup::_systemd_timer_content "600"
-  [[ "$output" == *"OnUnitActiveSec=600"* ]]
-}
-
-# --- _install_service_darwin / _install_service_linux (external commands stubbed) ---
-
-@test "_install_service_darwin writes the system LaunchDaemon and reloads it" {
+@test "_install_service schedules the push script on the interval with the pinned env" {
   STUB_OUTPUT="/s/push.sh" mktest::stub_function git_backup::_push_script_path
   STUB_OUTPUT="/m/manifest.tsv" mktest::stub_function git_backup::_manifest_path
   STUB_OUTPUT="/n/notify" mktest::stub_function git_backup::_notify
   STUB_OUTPUT="/b/git" mktest::stub_function git_backup::_git_path
   STUB_OUTPUT="300" mktest::stub_function git_backup::_interval
-  STUB_OUTPUT="alice" mktest::stub_function git_backup::_service_user
-  # Exact-arg stub: only matches if the resolved git and run-as user are threaded
-  # into the right slots.
-  mktest::stub_function git_backup::_plist_content "/s/push.sh" "/m/manifest.tsv" "/n/notify" "/b/git" "300" "alice"
-  mktest::stub_function sudo
-  git_backup::_install_service_darwin
-  local plist="/Library/LaunchDaemons/com.machinekit.git-backup.plist"
-  mktest::assert_stub_called sudo "tee" "$plist"
-  mktest::assert_stub_called sudo "launchctl" "bootout" "system" "$plist"
-  mktest::assert_stub_called sudo "launchctl" "bootstrap" "system" "$plist"
-}
-
-@test "_install_service_linux writes the user units and enables the timer with linger" {
-  HOME="$BATS_TEST_TMPDIR"
-  STUB_OUTPUT="/s/push.sh" mktest::stub_function git_backup::_push_script_path
-  STUB_OUTPUT="/m/manifest.tsv" mktest::stub_function git_backup::_manifest_path
-  STUB_OUTPUT="/n/notify" mktest::stub_function git_backup::_notify
-  STUB_OUTPUT="/b/git" mktest::stub_function git_backup::_git_path
-  STUB_OUTPUT="300" mktest::stub_function git_backup::_interval
-  # Exact-arg stubs: SERVICE/TIMER only land if the inputs (incl. git) are threaded right.
-  STUB_OUTPUT="SERVICE" mktest::stub_function git_backup::_systemd_service_content "/s/push.sh" "/m/manifest.tsv" "/n/notify" "/b/git"
-  STUB_OUTPUT="TIMER" mktest::stub_function git_backup::_systemd_timer_content "300"
-  mktest::stub_function sudo
-  mktest::stub_function systemctl
-  git_backup::_install_service_linux
-  [ "$(cat "$HOME/.config/systemd/user/machinekit-git-backup.service")" = "SERVICE" ]
-  [ "$(cat "$HOME/.config/systemd/user/machinekit-git-backup.timer")" = "TIMER" ]
-  MATCH="enable-linger" mktest::assert_stub_called sudo
-  mktest::assert_stub_called systemctl "--user" "daemon-reload"
-  mktest::assert_stub_called systemctl "--user" "enable" "--now" "machinekit-git-backup.timer"
+  # Exact-arg stub: only matches if every resolved part lands in its positional slot.
+  mktest::stub_function service::install_interval \
+    "git-backup" "/s/push.sh" "300" \
+    "MK_GIT_BACKUP_MANIFEST=/m/manifest.tsv" \
+    "MK_GIT_BACKUP_NOTIFY=/n/notify" \
+    "MK_GIT_BACKUP_GIT=/b/git"
+  git_backup::_install_service
+  mktest::assert_stub_called service::install_interval \
+    "git-backup" "/s/push.sh" "300" \
+    "MK_GIT_BACKUP_MANIFEST=/m/manifest.tsv" \
+    "MK_GIT_BACKUP_NOTIFY=/n/notify" \
+    "MK_GIT_BACKUP_GIT=/b/git"
 }
 
 # --- config accessors + paths ---
@@ -447,17 +383,6 @@ setup() {
   chmod +x "$fakebin/git"
   PATH="$fakebin:$PATH" run git_backup::_git_path
   [ "$output" = "$fakebin/git" ]
-}
-
-@test "_service_user prefers SUDO_USER (the real user behind a sudo'd apply)" {
-  SUDO_USER="alice" run git_backup::_service_user
-  [ "$output" = "alice" ]
-}
-
-@test "_service_user falls back to the current user when SUDO_USER is unset" {
-  unset SUDO_USER
-  run git_backup::_service_user
-  [ "$output" = "$(id -un)" ]
 }
 
 @test "_default_ssh_key reads the module-level key" {
