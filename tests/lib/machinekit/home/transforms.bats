@@ -14,7 +14,6 @@ setup() {
   _MK_HOME_TRANSFORM_PIPELINE=()
   _MK_HOME_TRANSFORM_TEMPS=()
   _MK_HOME_TRANSFORM_DEST=""
-  _MK_HOME_TRANSFORM_CONTENT=""
   unset _MK_HOME_TRANSFORM_CLEANUP_REGISTERED
 
   # Logging collaborators — allow-only; mechanism, not contract.
@@ -187,26 +186,26 @@ setup() {
 
 # --- home::transforms::execute ---
 
-@test "execute runs a single handler and exposes its output as the content path" {
+@test "execute runs a single handler and returns its output as the content path" {
   mktest::stub_function lifecycle::register_cleanup
   fake_a::stage() { printf 'A:'; cat "$1"; }
-  _MK_HOME_TRANSFORM_PIPELINE=(fake_a::stage)
   local src="$BATS_TEST_TMPDIR/src"
   printf 'seed\n' > "$src"
-  home::transforms::execute "$src"
-  [ "$_MK_HOME_TRANSFORM_CONTENT" != "$src" ]
-  [ "$(cat "$_MK_HOME_TRANSFORM_CONTENT")" = "A:seed" ]
+  local content
+  content=${ home::transforms::execute "$src" fake_a::stage; }
+  [ "$content" != "$src" ]
+  [ "$(cat "$content")" = "A:seed" ]
 }
 
 @test "execute chains handlers in pipeline order, threading each output into the next" {
   mktest::stub_function lifecycle::register_cleanup
   fake_a::stage() { printf 'A:'; cat "$1"; }
   fake_b::stage() { printf 'B:'; cat "$1"; }
-  _MK_HOME_TRANSFORM_PIPELINE=(fake_a::stage fake_b::stage)
   local src="$BATS_TEST_TMPDIR/src"
   printf 'seed\n' > "$src"
-  home::transforms::execute "$src"
-  [ "$(cat "$_MK_HOME_TRANSFORM_CONTENT")" = "B:A:seed" ]
+  local content
+  content=${ home::transforms::execute "$src" fake_a::stage fake_b::stage; }
+  [ "$(cat "$content")" = "B:A:seed" ]
 }
 
 @test "execute removes the intermediate temp, keeping only the final content" {
@@ -215,34 +214,34 @@ setup() {
   fake_a::stage() { printf 'A:'; cat "$1"; }
   # The second stage's input is the first stage's output temp — the intermediate.
   fake_b::stage() { printf '%s' "$1" > "$marker"; printf 'B:'; cat "$1"; }
-  _MK_HOME_TRANSFORM_PIPELINE=(fake_a::stage fake_b::stage)
   local src="$BATS_TEST_TMPDIR/src"
   printf 'seed\n' > "$src"
-  home::transforms::execute "$src"
+  local content
+  content=${ home::transforms::execute "$src" fake_a::stage fake_b::stage; }
   local intermediate
   intermediate=$(cat "$marker")
   [ ! -f "$intermediate" ]
-  [ "$intermediate" != "$_MK_HOME_TRANSFORM_CONTENT" ]
-  [ -f "$_MK_HOME_TRANSFORM_CONTENT" ]
+  [ "$intermediate" != "$content" ]
+  [ -f "$content" ]
 }
 
 @test "execute identity-copies the source to a removable temp when the pipeline is empty" {
   mktest::stub_function lifecycle::register_cleanup
-  _MK_HOME_TRANSFORM_PIPELINE=()
   local src="$BATS_TEST_TMPDIR/src"
   printf 'hello\n' > "$src"
-  home::transforms::execute "$src"
-  [ "$_MK_HOME_TRANSFORM_CONTENT" != "$src" ]
-  [ "$(cat "$_MK_HOME_TRANSFORM_CONTENT")" = "hello" ]
+  local content
+  content=${ home::transforms::execute "$src"; }
+  [ "$content" != "$src" ]
+  [ "$(cat "$content")" = "hello" ]
 }
 
 @test "execute registers a cleanup hook for the temps it creates" {
   mktest::stub_function lifecycle::register_cleanup
   fake_a::stage() { printf 'A:'; cat "$1"; }
-  _MK_HOME_TRANSFORM_PIPELINE=(fake_a::stage)
   local src="$BATS_TEST_TMPDIR/src"
   printf 'seed\n' > "$src"
-  home::transforms::execute "$src"
+  local content
+  content=${ home::transforms::execute "$src" fake_a::stage; }
   mktest::assert_stub_called lifecycle::register_cleanup home::transforms::_cleanup_temps
 }
 
@@ -252,10 +251,9 @@ setup() {
   local second_ran="$BATS_TEST_TMPDIR/second_ran"
   failing::stage() { return 1; }
   second::stage() { printf 'ran' > "$second_ran"; cat "$1"; }
-  _MK_HOME_TRANSFORM_PIPELINE=(failing::stage second::stage)
   local src="$BATS_TEST_TMPDIR/src"
   printf 'seed\n' > "$src"
-  run ! home::transforms::execute "$src"
+  run ! home::transforms::execute "$src" failing::stage second::stage
   MATCH="failing::stage" mktest::assert_stub_called lifecycle::fail
   [ ! -f "$second_ran" ]
 }

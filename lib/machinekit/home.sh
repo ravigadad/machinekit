@@ -16,8 +16,8 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/home/transforms.sh"
 
 _MK_HOME_STAGING_DIR=""
 
-# Scratch variables set by home::_decode_path and consumed by
-# _apply_file / _render_to_outdir in the same call frame.
+# Scratch variables set by home::_decode_path and read by home::_build_plan
+# (via home::transforms::resolve) in the same call frame.
 _MK_HOME_DEST_PATH=""
 _MK_HOME_IS_PRIVATE=0
 
@@ -41,65 +41,103 @@ home::will_exist() {
   local dest_path="$1"
   [ -e "$dest_path" ] && return 0
 
-  local staging ignore_file src src_rel
-  staging="$(home::staging::dir)"
-  ignore_file="$staging/.mkignore"
+  local plan
+  plan="$(home::_build_plan)"
+  jq -e --arg d "$dest_path" \
+    'any(.[]; .dest == $d and (.suppressed | not))' <<<"$plan" >/dev/null
+}
 
-  while IFS= read -r src; do
-    src_rel="${src#"$staging"/}"
-    home::_decode_path "$src_rel"
-    home::transforms::resolve "$_MK_HOME_DEST_PATH"
-    [ "$_MK_HOME_TRANSFORM_DEST" = "$dest_path" ] || continue
-    # The staged file maps to the query; it lands unless mkignore suppresses it.
-    if [ -f "$ignore_file" ] && \
-       grep -qxF "$(home::_dest_key "$dest_path")" "$ignore_file" 2>/dev/null; then
-      return 1
-    fi
-    return 0
-  done < <(find "$staging" -type f)
-  return 1
+# --- the plan ---
+
+# Build the plan: a JSON array describing every payload file in the staging dir
+# and where it lands. One record per file; the .mkignore manifest is not a
+# payload file and is omitted. The suppression *decision* is made here, once, so
+# apply and the dry-run preview can never disagree on which files land. Each
+# record:
+#   src        absolute staging path (input to templating)
+#   src_rel    staging-relative path (drives the private-parent perm check)
+#   dest       absolute destination (addressing markers already resolved)
+#   key        portable dest key (HOME-relative or absolute; mkignore + labels)
+#   private    true if any path component carried the private_ prefix
+#   suppressed true if the blueprint's .mkignore lists this dest key
+#   pipeline   the content-transform handlers resolve() peeled off, in run order
+# Suppressed records stay in the plan (rather than being filtered out here) so a
+# file the user suppressed is a recorded decision, not a silent absence.
+home::_build_plan() {
+  local staging
+  staging="$(home::staging::dir)"
+  local ignore_file="$staging/.mkignore"
+
+  {
+    local src src_rel dest key private suppressed
+    while IFS= read -r src; do
+      src_rel="${src#"$staging"/}"
+      home::_decode_path "$src_rel"
+      home::transforms::resolve "$_MK_HOME_DEST_PATH"
+      dest="$_MK_HOME_TRANSFORM_DEST"
+      key="$(home::_dest_key "$dest")"
+      [ "$key" = ".mkignore" ] && continue
+
+      private=false
+      [ "$_MK_HOME_IS_PRIVATE" = "1" ] && private=true
+      suppressed=false
+      if [ -f "$ignore_file" ] && grep -qxF "$key" "$ignore_file" 2>/dev/null; then
+        suppressed=true
+      fi
+
+      jq -n \
+        --arg src "$src" --arg src_rel "$src_rel" --arg dest "$dest" \
+        --arg key "$key" --argjson private "$private" \
+        --argjson suppressed "$suppressed" \
+        '{src:$src, src_rel:$src_rel, dest:$dest, key:$key, private:$private, suppressed:$suppressed, pipeline:$ARGS.positional}' \
+        --args "${_MK_HOME_TRANSFORM_PIPELINE[@]}"
+    done < <(find "$staging" -type f | sort)
+  } | jq -s '.'
+}
+
+# Stream every planned file to CALLBACK: any PREFIX args first, then the record's
+# fields in record order (src src_rel dest key private suppressed) and its
+# transform pipeline as trailing args. The iterator makes no per-file decisions —
+# it does not act on `suppressed`; each sink decides what to do with a suppressed
+# record, exactly as it decides what to do with `private`. Apply and the dry-run
+# preview take the identical record shape.
+home::_each_planned_file() {
+  local callback="$1"; shift
+  local plan
+  plan="$(home::_build_plan)"
+
+  local src src_rel dest key private suppressed pipeline_str
+  local -a pipeline
+  while IFS=$'\t' read -r src src_rel dest key private suppressed pipeline_str; do
+    # Pipeline elements are handler function names (space-free), so the plan's
+    # join(" ") and this split round-trip losslessly.
+    IFS=' ' read -ra pipeline <<< "$pipeline_str"
+    "$callback" "$@" "$src" "$src_rel" "$dest" "$key" "$private" "$suppressed" "${pipeline[@]}"
+  done < <(jq -r '.[] | [.src, .src_rel, .dest, .key, (if .private then "1" else "0" end), (.suppressed | tostring), (.pipeline | join(" "))] | @tsv' <<<"$plan")
 }
 
 # --- _apply and helpers ---
 
 home::_apply() {
-  local staging src_path
-  staging="$(home::staging::dir)"
   logging::step "Applying home files"
-  while IFS= read -r src_path; do
-    home::_apply_file "$src_path" "$staging"
-  done < <(find "$staging" -type f | sort)
+  home::_each_planned_file home::_apply_file
   logging::success "Home files applied."
 }
 
-# Apply a single staging file to $HOME: decode its addressing, resolve its
-# content pipeline, then (unless ignored) run the pipeline and reconcile the
-# result. Resolve is parse-only, so an ignored file is never executed.
+# Write one planned file to its destination — unless the blueprint suppressed it,
+# in which case log the skip and stop. Otherwise make the parent dir, lock it
+# down if private, run the content pipeline, and reconcile the result.
 home::_apply_file() {
-  local src="$1" staging="$2"
-  local src_rel dest_path dest_key is_private
-
-  src_rel="${src#"$staging"/}"
-  home::_decode_path "$src_rel"
-  is_private="$_MK_HOME_IS_PRIVATE"
-
-  home::transforms::resolve "$_MK_HOME_DEST_PATH"
-  dest_path="$_MK_HOME_TRANSFORM_DEST"
-  dest_key="$(home::_dest_key "$dest_path")"
-
-  [ "$dest_key" = ".mkignore" ] && return 0
-
-  local ignore_file="$staging/.mkignore"
-  if [ -f "$ignore_file" ] && grep -qxF "$dest_key" "$ignore_file" 2>/dev/null; then
-    logging::debug "home: skipping $dest_key (mkignore)"
+  local src="$1" src_rel="$2" dest="$3" key="$4" private="$5" suppressed="$6"; shift 6
+  if [ "$suppressed" = "true" ]; then
+    logging::debug "home: skipping $key (suppressed by .mkignore)"
     return 0
   fi
-
-  mkdir -p "$(dirname "$dest_path")"
-  home::_apply_parent_perms "$src_rel" "$dest_path"
-
-  home::transforms::execute "$src"
-  home::_reconcile_file "$_MK_HOME_TRANSFORM_CONTENT" "$dest_path" "$dest_key" "$is_private"
+  mkdir -p "$(dirname "$dest")"
+  home::_apply_parent_perms "$src_rel" "$dest"
+  local content
+  content=${ home::transforms::execute "$src" "$@"; }
+  home::_reconcile_file "$content" "$dest" "$key" "$private"
 }
 
 # home::_decode_path REL_PATH

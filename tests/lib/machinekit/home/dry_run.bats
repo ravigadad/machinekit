@@ -32,67 +32,38 @@ setup() {
 
 # --- home::dry_run::show_diff ---
 
-@test "show_diff renders each staging file and shows the diff" {
-  _MK_HOME_STAGING_DIR="$BATS_TEST_TMPDIR/staging"
-  mkdir -p "$_MK_HOME_STAGING_DIR"
-  printf 'foo\n' > "$_MK_HOME_STAGING_DIR/dot_1"
-  printf 'bar\n' > "$_MK_HOME_STAGING_DIR/dot_2"
-  STUB_OUTPUT="$_MK_HOME_STAGING_DIR" mktest::stub_function home::staging::dir
-  mktest::stub_function home::dry_run::_render_to_outdir
-  mktest::stub_function home::dry_run::_show_diff
+@test "show_diff renders the planned files into a temp dir and shows the diff" {
   STUB_OUTPUT="the-temp-dir" mktest::stub_function mktemp -d
+  mktest::stub_function home::_each_planned_file
+  mktest::stub_function home::dry_run::_show_diff
   home::dry_run::show_diff
-  mktest::assert_stub_called_in_order home::dry_run::_render_to_outdir "$_MK_HOME_STAGING_DIR/dot_1" "$_MK_HOME_STAGING_DIR" "the-temp-dir"
-  mktest::assert_stub_called_in_order home::dry_run::_render_to_outdir "$_MK_HOME_STAGING_DIR/dot_2" "$_MK_HOME_STAGING_DIR" "the-temp-dir"
-  mktest::assert_stub_called_in_order home::dry_run::_show_diff "the-temp-dir"
+  mktest::assert_stub_called home::_each_planned_file home::dry_run::_render_to_outdir "the-temp-dir"
+  mktest::assert_stub_called home::dry_run::_show_diff "the-temp-dir"
 }
 
 # --- home::_render_to_outdir ---
 
-@test "_render_to_outdir resolves, executes, and mirrors the absolute dest under out_dir" {
+@test "_render_to_outdir executes the pipeline and mirrors the absolute dest under out_dir" {
   export HOME="$BATS_TEST_TMPDIR/home"
   mkdir -p "$HOME"
-  mktest::stub_function home::_decode_path
-  mktest::stub_function home::transforms::resolve
-  mktest::stub_function home::transforms::execute
-  _MK_HOME_DEST_PATH="$HOME/.zshrc.tmpl"
-  _MK_HOME_TRANSFORM_DEST="$HOME/.zshrc"
   local content="$BATS_TEST_TMPDIR/rendered"
   printf 'rendered\n' > "$content"
-  _MK_HOME_TRANSFORM_CONTENT="$content"
-  local staging="$BATS_TEST_TMPDIR/staging" out_dir="$BATS_TEST_TMPDIR/out"
-  mkdir -p "$staging" "$out_dir"
-  home::dry_run::_render_to_outdir "$staging/dot_zshrc.tmpl" "$staging" "$out_dir"
-  mktest::assert_stub_called home::transforms::resolve "$HOME/.zshrc.tmpl"
-  mktest::assert_stub_called home::transforms::execute "$staging/dot_zshrc.tmpl"
+  STUB_OUTPUT="$content" mktest::stub_function home::transforms::execute
+  local out_dir="$BATS_TEST_TMPDIR/out"
+  mkdir -p "$out_dir"
+  # (out_dir, src, src_rel, dest, key, private, suppressed, pipeline…)
+  home::dry_run::_render_to_outdir "$out_dir" "/staging/dot_zshrc.tmpl" "dot_zshrc.tmpl" "$HOME/.zshrc" ".zshrc" "0" "false" "gomplate::render"
+  mktest::assert_stub_called home::transforms::execute "/staging/dot_zshrc.tmpl" "gomplate::render"
   [ "$(cat "$out_dir/${HOME#/}/.zshrc")" = "rendered" ]
 }
 
-@test "_render_to_outdir skips .mkignore itself, without executing" {
-  export HOME="$BATS_TEST_TMPDIR/home"
-  mkdir -p "$HOME"
-  mktest::stub_function home::_decode_path
-  mktest::stub_function home::transforms::resolve
+@test "_render_to_outdir skips a suppressed file: logs it and does not execute" {
   mktest::stub_function home::transforms::execute
-  _MK_HOME_TRANSFORM_DEST="$HOME/.mkignore"
-  local staging="$BATS_TEST_TMPDIR/staging" out_dir="$BATS_TEST_TMPDIR/out"
-  mkdir -p "$staging" "$out_dir"
-  home::dry_run::_render_to_outdir "$staging/.mkignore" "$staging" "$out_dir"
+  local out_dir="$BATS_TEST_TMPDIR/out"
+  mkdir -p "$out_dir"
+  home::dry_run::_render_to_outdir "$out_dir" "/s/x" "x" "/h/x" ".x" "0" "true" "gomplate::render"
   mktest::assert_stub_not_called home::transforms::execute
-}
-
-@test "_render_to_outdir skips a file listed in .mkignore, without executing" {
-  export HOME="$BATS_TEST_TMPDIR/home"
-  mkdir -p "$HOME"
-  mktest::stub_function home::_decode_path
-  mktest::stub_function home::transforms::resolve
-  mktest::stub_function home::transforms::execute
-  _MK_HOME_TRANSFORM_DEST="$HOME/.zshrc.local"
-  local staging="$BATS_TEST_TMPDIR/staging" out_dir="$BATS_TEST_TMPDIR/out"
-  mkdir -p "$staging" "$out_dir"
-  printf '.zshrc.local\n' > "$staging/.mkignore"
-  home::dry_run::_render_to_outdir "$staging/dot_zshrc.local" "$staging" "$out_dir"
-  mktest::assert_stub_not_called home::transforms::execute
+  MATCH="\.x" mktest::assert_stub_called logging::debug
 }
 
 # --- home::_show_diff ---

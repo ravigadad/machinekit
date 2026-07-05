@@ -57,139 +57,181 @@ setup() {
 
 # --- home::will_exist ---
 
-@test "will_exist is true when the absolute destination already exists (sync never removes)" {
+@test "will_exist is true when the absolute destination already exists, without building the plan" {
   export HOME="$BATS_TEST_TMPDIR/home"
   mkdir -p "$HOME/.config"
   : > "$HOME/.config/already_there"
-  # Literal existence short-circuits before any staging lookup.
+  mktest::stub_function home::_build_plan
+  # Literal existence short-circuits before the plan is ever built.
   home::will_exist "$HOME/.config/already_there"
+  mktest::assert_stub_not_called home::_build_plan
 }
 
-@test "will_exist is true when a staged file maps to the queried absolute destination" {
-  export HOME="$BATS_TEST_TMPDIR/home"
-  mkdir -p "$HOME"
-  local staging="$BATS_TEST_TMPDIR/staging"
-  mkdir -p "$staging"
-  : > "$staging/staged_file"
-  STUB_OUTPUT="$staging" mktest::stub_function home::staging::dir
-  # Fake, deterministic mapping derived from the input — so a match can only
-  # happen if will_exist actually runs the staged file through decode → resolve.
-  # The mappings are obviously not the real addressing/transform rules.
-  home::_decode_path()       { _MK_HOME_DEST_PATH="$HOME/.decoded/$1"; }
-  home::transforms::resolve() { _MK_HOME_TRANSFORM_DEST="${1}.resolved"; }
-  home::will_exist "$HOME/.decoded/staged_file.resolved"
+@test "will_exist is true when a non-suppressed plan record lands at the queried destination" {
+  local query="$BATS_TEST_TMPDIR/nope"
+  STUB_OUTPUT="[{\"dest\":\"$query\",\"suppressed\":false}]" mktest::stub_function home::_build_plan
+  home::will_exist "$query"
 }
 
-@test "will_exist is false when no staged file maps to the queried destination" {
-  export HOME="$BATS_TEST_TMPDIR/home"
-  mkdir -p "$HOME"
-  local staging="$BATS_TEST_TMPDIR/staging"
-  mkdir -p "$staging"
-  : > "$staging/staged_file"
-  STUB_OUTPUT="$staging" mktest::stub_function home::staging::dir
-  home::_decode_path()       { _MK_HOME_DEST_PATH="$HOME/.decoded/$1"; }
-  home::transforms::resolve() { _MK_HOME_TRANSFORM_DEST="${1}.resolved"; }
-  # staged_file maps to $HOME/.decoded/staged_file.resolved, not the query.
-  run ! home::will_exist "$HOME/.not_the_staged_file"
+@test "will_exist is false when no plan record lands at the queried destination" {
+  local query="$BATS_TEST_TMPDIR/nope"
+  STUB_OUTPUT="[{\"dest\":\"$BATS_TEST_TMPDIR/other\",\"suppressed\":false}]" mktest::stub_function home::_build_plan
+  run home::will_exist "$query"
+  [ "$status" -ne 0 ]
 }
 
-@test "will_exist is false when the queried destination is mkignored" {
-  export HOME="$BATS_TEST_TMPDIR/home"
-  mkdir -p "$HOME"
+@test "will_exist is false when the plan record at the queried destination is suppressed" {
+  local query="$BATS_TEST_TMPDIR/nope"
+  STUB_OUTPUT="[{\"dest\":\"$query\",\"suppressed\":true}]" mktest::stub_function home::_build_plan
+  run home::will_exist "$query"
+  [ "$status" -ne 0 ]
+}
+
+# --- home::_build_plan ---
+
+# Fake, deterministic decode/resolve/dest_key so the test controls each file's
+# destination, key, and privacy — obviously not the real addressing rules.
+_stub_plan_resolution() {
+  home::_decode_path()        { _MK_HOME_DEST_PATH="D:$1"; _MK_HOME_IS_PRIVATE=0; [ "$1" = "a" ] && _MK_HOME_IS_PRIVATE=1; }
+  # resolve yields the stripped dest AND the transform pipeline; a gets a
+  # one-stage pipeline, everything else gets none — so the plan captures both.
+  home::transforms::resolve() { _MK_HOME_TRANSFORM_DEST="R:$1"; case "$1" in *a) _MK_HOME_TRANSFORM_PIPELINE=("P:$1") ;; *) _MK_HOME_TRANSFORM_PIPELINE=() ;; esac; }
+  # Faithful to the one invariant that matters: the real .mkignore manifest
+  # decodes to the key ".mkignore" (which _build_plan omits from the plan).
+  home::_dest_key()           { case "$1" in *.mkignore) printf '%s\n' ".mkignore" ;; *) printf '%s\n' "K:$1" ;; esac; }
+}
+
+@test "_build_plan emits one record per staged file, in sorted order, with private and suppressed flags" {
   local staging="$BATS_TEST_TMPDIR/staging"
   mkdir -p "$staging"
-  : > "$staging/staged_file"
+  : > "$staging/a"
+  : > "$staging/b"
   STUB_OUTPUT="$staging" mktest::stub_function home::staging::dir
-  home::_decode_path()       { _MK_HOME_DEST_PATH="$HOME/.decoded/$1"; }
-  home::transforms::resolve() { _MK_HOME_TRANSFORM_DEST="${1}.resolved"; }
-  # The staged file *would* map to the query, but mkignore (keyed by the
-  # $HOME-relative path) suppresses it — so dropping the mkignore check would
-  # flip this into a (wrong) match.
-  printf '.decoded/staged_file.resolved\n' > "$staging/.mkignore"
-  run ! home::will_exist "$HOME/.decoded/staged_file.resolved"
+  _stub_plan_resolution
+  # b's key is listed in the blueprint's .mkignore → suppressed; a is not.
+  printf 'K:R:D:b\n' > "$staging/.mkignore"
+
+  local plan
+  plan="$(home::_build_plan)"
+
+  [ "$(jq -r 'length' <<<"$plan")" = "2" ]
+  [ "$(jq -r '.[0].src' <<<"$plan")" = "$staging/a" ]
+  [ "$(jq -r '.[0].src_rel' <<<"$plan")" = "a" ]
+  [ "$(jq -r '.[0].dest' <<<"$plan")" = "R:D:a" ]
+  [ "$(jq -r '.[0].key' <<<"$plan")" = "K:R:D:a" ]
+  [ "$(jq -r '.[0].private' <<<"$plan")" = "true" ]
+  [ "$(jq -r '.[0].suppressed' <<<"$plan")" = "false" ]
+  [ "$(jq -r '.[0].pipeline[0]' <<<"$plan")" = "P:D:a" ]
+  [ "$(jq -r '.[1].src_rel' <<<"$plan")" = "b" ]
+  [ "$(jq -r '.[1].private' <<<"$plan")" = "false" ]
+  [ "$(jq -r '.[1].suppressed' <<<"$plan")" = "true" ]
+  [ "$(jq -r '.[1].pipeline | length' <<<"$plan")" = "0" ]
+}
+
+@test "_build_plan omits the .mkignore manifest itself" {
+  local staging="$BATS_TEST_TMPDIR/staging"
+  mkdir -p "$staging"
+  : > "$staging/only"
+  STUB_OUTPUT="$staging" mktest::stub_function home::staging::dir
+  home::_decode_path()        { _MK_HOME_DEST_PATH="d"; _MK_HOME_IS_PRIVATE=0; }
+  home::transforms::resolve() { _MK_HOME_TRANSFORM_DEST="d"; }
+  home::_dest_key()           { printf '%s\n' ".mkignore"; }
+
+  local plan
+  plan="$(home::_build_plan)"
+
+  [ "$(jq -r 'length' <<<"$plan")" = "0" ]
+}
+
+@test "_build_plan marks nothing suppressed when there is no .mkignore" {
+  local staging="$BATS_TEST_TMPDIR/staging"
+  mkdir -p "$staging"
+  : > "$staging/a"
+  STUB_OUTPUT="$staging" mktest::stub_function home::staging::dir
+  _stub_plan_resolution
+
+  local plan
+  plan="$(home::_build_plan)"
+
+  [ "$(jq -r '.[0].suppressed' <<<"$plan")" = "false" ]
+}
+
+@test "_build_plan is an empty array when staging has no files" {
+  local staging="$BATS_TEST_TMPDIR/staging"
+  mkdir -p "$staging"
+  STUB_OUTPUT="$staging" mktest::stub_function home::staging::dir
+  _stub_plan_resolution
+
+  local plan
+  plan="$(home::_build_plan)"
+
+  [ "$(jq -r 'length' <<<"$plan")" = "0" ]
+}
+
+# --- home::_each_planned_file ---
+
+@test "_each_planned_file streams every record — including suppressed — to the callback with fields then pipeline" {
+  STUB_OUTPUT='[{"src":"/s/a","src_rel":"a","dest":"/h/a","key":"ka","private":true,"suppressed":false,"pipeline":["fn_a"]},{"src":"/s/b","src_rel":"b","dest":"/h/b","key":"kb","private":false,"suppressed":true,"pipeline":[]}]' \
+    mktest::stub_function home::_build_plan
+  mktest::stub_function fake_sink
+  home::_each_planned_file fake_sink
+  # Both records reach the sink (the iterator does not decide suppression); the
+  # fields arrive in record order with the pipeline as trailing args.
+  mktest::assert_stub_called_in_order fake_sink "/s/a" "a" "/h/a" "ka" "1" "false" "fn_a"
+  mktest::assert_stub_called_in_order fake_sink "/s/b" "b" "/h/b" "kb" "0" "true"
+}
+
+@test "_each_planned_file forwards prefix args ahead of the record fields" {
+  STUB_OUTPUT='[{"src":"/s/a","src_rel":"a","dest":"/h/a","key":"ka","private":false,"suppressed":false,"pipeline":[]}]' \
+    mktest::stub_function home::_build_plan
+  mktest::stub_function fake_sink
+  home::_each_planned_file fake_sink "the-prefix"
+  mktest::assert_stub_called fake_sink "the-prefix" "/s/a" "a" "/h/a" "ka" "0" "false"
 }
 
 # --- home::_apply ---
 
-@test "_apply calls _apply_file for each file in staging" {
-  _MK_HOME_STAGING_DIR="$BATS_TEST_TMPDIR/staging"
-  mkdir -p "$_MK_HOME_STAGING_DIR"
-  printf 'foo\n' > "$_MK_HOME_STAGING_DIR/dot_1"
-  printf 'bar\n' > "$_MK_HOME_STAGING_DIR/dot_2"
-  STUB_OUTPUT="$_MK_HOME_STAGING_DIR" mktest::stub_function home::staging::dir
-  mktest::stub_function home::_apply_file
+@test "_apply delegates each planned file to _apply_file" {
+  mktest::stub_function home::_each_planned_file
   home::_apply
-  mktest::assert_stub_called_in_order home::_apply_file "$_MK_HOME_STAGING_DIR/dot_1" "$_MK_HOME_STAGING_DIR"
-  mktest::assert_stub_called_in_order home::_apply_file "$_MK_HOME_STAGING_DIR/dot_2" "$_MK_HOME_STAGING_DIR"
+  mktest::assert_stub_called home::_each_planned_file home::_apply_file
 }
 
 # --- home::_apply_file ---
 
-@test "_apply_file skips .mkignore itself, without executing or reconciling" {
-  export HOME="$BATS_TEST_TMPDIR/home"
-  mkdir -p "$HOME"
-  mktest::stub_function home::_decode_path
-  mktest::stub_function home::transforms::resolve
+@test "_apply_file makes the dest dir, applies parent perms, executes the pipeline, and reconciles" {
+  mktest::stub_function home::_apply_parent_perms
+  STUB_OUTPUT="$BATS_TEST_TMPDIR/rendered" mktest::stub_function home::transforms::execute
+  mktest::stub_function home::_reconcile_file
+  local dest="$BATS_TEST_TMPDIR/home/.gitconfig"
+  home::_apply_file "/staging/dot_gitconfig.tmpl" "dot_gitconfig.tmpl" "$dest" ".gitconfig" "0" "false" "gomplate::render"
+  [ -d "$BATS_TEST_TMPDIR/home" ]
+  mktest::assert_stub_called home::_apply_parent_perms "dot_gitconfig.tmpl" "$dest"
+  # The pipeline handlers travel to execute as trailing args; its stdout is the
+  # rendered content path that reconcile then receives.
+  mktest::assert_stub_called home::transforms::execute "/staging/dot_gitconfig.tmpl" "gomplate::render"
+  mktest::assert_stub_called home::_reconcile_file "$BATS_TEST_TMPDIR/rendered" "$dest" ".gitconfig" "0"
+}
+
+@test "_apply_file skips a suppressed file: logs it and neither executes nor reconciles" {
+  mktest::stub_function home::_apply_parent_perms
   mktest::stub_function home::transforms::execute
   mktest::stub_function home::_reconcile_file
-  _MK_HOME_TRANSFORM_DEST="$HOME/.mkignore"
-  home::_apply_file "/staging/.mkignore" "/staging"
+  # Writable dest so dropping the suppressed guard fails on the execute/reconcile
+  # contract, not on an incidental mkdir into a read-only path.
+  home::_apply_file "/s/x" "x" "$BATS_TEST_TMPDIR/home/.x" ".x" "0" "true" "gomplate::render"
   mktest::assert_stub_not_called home::transforms::execute
   mktest::assert_stub_not_called home::_reconcile_file
+  MATCH="\.x" mktest::assert_stub_called logging::debug
 }
 
-@test "_apply_file skips a file listed in .mkignore, without executing or reconciling" {
-  export HOME="$BATS_TEST_TMPDIR/home"
-  mkdir -p "$HOME"
-  mktest::stub_function home::_decode_path
-  mktest::stub_function home::transforms::resolve
-  mktest::stub_function home::transforms::execute
-  mktest::stub_function home::_reconcile_file
-  local staging="$BATS_TEST_TMPDIR/staging"
-  mkdir -p "$staging"
-  printf '.zshrc.local\n' > "$staging/.mkignore"
-  _MK_HOME_TRANSFORM_DEST="$HOME/.zshrc.local"
-  home::_apply_file "$staging/dot_zshrc.local" "$staging"
-  mktest::assert_stub_not_called home::transforms::execute
-  mktest::assert_stub_not_called home::_reconcile_file
-}
-
-@test "_apply_file resolves the decoded path, executes the pipeline, and reconciles the result" {
-  mktest::stub_function home::_decode_path
-  mktest::stub_function home::transforms::resolve
-  mktest::stub_function home::transforms::execute
+@test "_apply_file forwards is_private to reconcile" {
   mktest::stub_function home::_apply_parent_perms
+  STUB_OUTPUT="$BATS_TEST_TMPDIR/rendered" mktest::stub_function home::transforms::execute
   mktest::stub_function home::_reconcile_file
-  local staging="$BATS_TEST_TMPDIR/staging"
-  mkdir -p "$staging"
-  export HOME="$BATS_TEST_TMPDIR/home"
-  mkdir -p "$HOME"
-  _MK_HOME_DEST_PATH="$HOME/.gitconfig.tmpl"
-  _MK_HOME_TRANSFORM_DEST="$HOME/.gitconfig"
-  _MK_HOME_TRANSFORM_CONTENT="$BATS_TEST_TMPDIR/rendered"
-  home::_apply_file "$staging/dot_gitconfig.tmpl" "$staging"
-  mktest::assert_stub_called home::_decode_path "dot_gitconfig.tmpl"
-  mktest::assert_stub_called home::transforms::resolve "$HOME/.gitconfig.tmpl"
-  mktest::assert_stub_called home::transforms::execute "$staging/dot_gitconfig.tmpl"
-  mktest::assert_stub_called home::_reconcile_file "$BATS_TEST_TMPDIR/rendered" "$HOME/.gitconfig" ".gitconfig" "0"
-}
-
-@test "_apply_file forwards is_private and the parent path for a private nested file" {
-  mktest::stub_function home::_decode_path
-  mktest::stub_function home::transforms::resolve
-  mktest::stub_function home::transforms::execute
-  mktest::stub_function home::_apply_parent_perms
-  mktest::stub_function home::_reconcile_file
-  local staging="$BATS_TEST_TMPDIR/staging"
-  mkdir -p "$staging/private_dot_ssh"
-  export HOME="$BATS_TEST_TMPDIR/home"
-  mkdir -p "$HOME"
-  _MK_HOME_IS_PRIVATE=1
-  _MK_HOME_TRANSFORM_DEST="$HOME/.ssh/config"
-  _MK_HOME_TRANSFORM_CONTENT="$BATS_TEST_TMPDIR/rendered"
-  home::_apply_file "$staging/private_dot_ssh/private_config" "$staging"
-  mktest::assert_stub_called home::_reconcile_file "$BATS_TEST_TMPDIR/rendered" "$HOME/.ssh/config" ".ssh/config" "1"
-  mktest::assert_stub_called home::_apply_parent_perms "private_dot_ssh/private_config" "$HOME/.ssh/config"
+  local dest="$BATS_TEST_TMPDIR/home/.ssh/config"
+  home::_apply_file "/staging/private_dot_ssh/private_config" "private_dot_ssh/private_config" "$dest" ".ssh/config" "1" "false"
+  mktest::assert_stub_called home::_reconcile_file "$BATS_TEST_TMPDIR/rendered" "$dest" ".ssh/config" "1"
 }
 
 # --- home::_decode_path ---

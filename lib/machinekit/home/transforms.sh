@@ -20,10 +20,9 @@ _MK_HOME_TRANSFORM_EXTS=()
 _MK_HOME_TRANSFORM_TIERS=()
 _MK_HOME_TRANSFORM_FNS=()
 
-# Per-file scratch, set by _parse / _execute and read by the caller.
+# Per-file scratch set by resolve, read by the caller in the same frame.
 _MK_HOME_TRANSFORM_PIPELINE=()
 _MK_HOME_TRANSFORM_DEST=""
-_MK_HOME_TRANSFORM_CONTENT=""
 
 # Temp files produced during execution. Run-scoped, not per-file: intermediates
 # are removed eagerly as they are spent and each final temp is the caller's to
@@ -124,22 +123,25 @@ home::transforms::resolve() {
   fi
 }
 
-# execute SRC — run the pipeline that resolve() built over SRC, leaving the
-# result in _MK_HOME_TRANSFORM_CONTENT (a temp the caller consumes). Stages are
-# chained via redirection, never command substitution, so a handler's memoized
-# state (e.g. gomplate's context) survives across files. Intermediates are
+# execute SRC [FN...] — run the pipeline of handler functions over SRC and print
+# the path of the final temp (which the caller consumes and frees). The pipeline
+# is passed explicitly (resolve() computes it; the home plan carries it), so this
+# has no hidden dependency on resolve having just run. Stages are chained via
+# redirection, never command substitution, so a handler's memoized state (e.g.
+# gomplate's context) survives across files — and callers must capture our output
+# with a non-forking `${ ...; }` funsub for the same reason. Intermediates are
 # removed as they are spent.
 home::transforms::execute() {
-  local src="$1"
+  local src="$1"; shift
   local in="$src" tmp fn stages
   # No transforms still must yield a fresh temp; the identity copy (cat) does it
   # and shares the uniform "IN > OUT" handler signature, so an empty pipeline is
   # just a one-stage pipeline — no separate copy path. (The if/else avoids
   # expanding an empty array, which errors under `set -u` in bash 3.2.)
-  if [ "${#_MK_HOME_TRANSFORM_PIPELINE[@]}" -eq 0 ]; then
+  if [ "$#" -eq 0 ]; then
     stages=(cat)
   else
-    stages=("${_MK_HOME_TRANSFORM_PIPELINE[@]}")
+    stages=("$@")
   fi
 
   for fn in "${stages[@]}"; do
@@ -152,7 +154,7 @@ home::transforms::execute() {
     [ "$in" != "$src" ] && rm -f -- "$in"
     in="$tmp"
   done
-  _MK_HOME_TRANSFORM_CONTENT="$in"
+  printf '%s\n' "$in"
 }
 
 # --- Internals ---

@@ -6,47 +6,36 @@ _MK_HOME_DRY_RUN_LOADED=1
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../home.sh"
 
 home::dry_run::show_diff() {
-  local staging tmp_out src_path
-  staging="$(home::staging::dir)"
   logging::step "home dry-run: diff against $HOME"
-
+  local tmp_out
   tmp_out=$(mktemp -d)
 
-  while IFS= read -r src_path; do
-    home::dry_run::_render_to_outdir "$src_path" "$staging" "$tmp_out"
-  done < <(find "$staging" -type f | sort)
+  home::_each_planned_file home::dry_run::_render_to_outdir "$tmp_out"
 
   home::dry_run::_show_diff "$tmp_out"
 
   rm -rf -- "$tmp_out"
 }
 
+# Called by home::_each_planned_file with (out_dir, then the record fields).
+# Takes the same record apply does; $3 src_rel and $6 private are received for
+# parity but not surfaced in the preview yet.
 home::dry_run::_render_to_outdir() {
-  local src="$1" staging="$2" out_dir="$3"
-  local src_rel dest_path dest_key out_path
-
-  src_rel="${src#"$staging"/}"
-  home::_decode_path "$src_rel"
-
-  home::transforms::resolve "$_MK_HOME_DEST_PATH"
-  dest_path="$_MK_HOME_TRANSFORM_DEST"
-  dest_key="$(home::_dest_key "$dest_path")"
-
-  [ "$dest_key" = ".mkignore" ] && return 0
-
-  local ignore_file="$staging/.mkignore"
-  if [ -f "$ignore_file" ] && grep -qxF "$dest_key" "$ignore_file" 2>/dev/null; then
+  # shellcheck disable=SC2034  # src_rel, private: received for parity, unused here
+  local out_dir="$1" src="$2" src_rel="$3" dest="$4" key="$5" private="$6" suppressed="$7"; shift 7
+  if [ "$suppressed" = "true" ]; then
+    logging::debug "home dry-run: skipping $key (suppressed by .mkignore)"
     return 0
   fi
-
   # Mirror the absolute destination under the preview dir (leading slash
   # stripped); _generate_diff re-roots back to the real path by re-adding it.
-  out_path="$out_dir/${dest_path#/}"
+  local out_path="$out_dir/${dest#/}"
   mkdir -p "$(dirname "$out_path")"
 
-  home::transforms::execute "$src"
-  cp -- "$_MK_HOME_TRANSFORM_CONTENT" "$out_path"
-  rm -f -- "$_MK_HOME_TRANSFORM_CONTENT"
+  local content
+  content=${ home::transforms::execute "$src" "$@"; }
+  cp -- "$content" "$out_path"
+  rm -f -- "$content"
 }
 
 home::dry_run::_show_diff() {
