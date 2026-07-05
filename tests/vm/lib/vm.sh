@@ -53,25 +53,33 @@ _vm_out() {
 # vm::start IMAGE REPO_DIR
 # Clone IMAGE to a temp VM, start it headlessly with REPO_DIR mounted
 # read-only via virtiofs, and wait until the VM accepts commands.
+#
+# Every step below is guarded with `|| return 1` rather than relying on the
+# caller's errexit: this function sets VM_NAME/VM_OS for the caller, so it
+# can't be run in a subshell to get a clean errexit boundary, and a plain
+# function called directly as an if/&&/|| condition has bash's errexit
+# suppressed for its *entire* execution (a real, confirmed bash quirk) — so
+# an inherited `set -e` alone would silently let a failed step here fall
+# through to the next one instead of aborting.
 vm::start() {
   local image="$1" repo_dir="$2"
   VM_NAME="mk-test-$$-$RANDOM"
   VM_OS="$(vm::_detect_os "$image")"
 
   vm_log "Cloning $image → $VM_NAME"
-  tart clone "$image" "$VM_NAME"
+  tart clone "$image" "$VM_NAME" || return 1
 
   vm_log "Starting VM (machinekit at $(vm::machinekit_path))"
   tart run "$VM_NAME" --no-graphics --dir="${_VM_DIR_TAG}:${repo_dir}:ro" &
 
   vm_log "Waiting for VM to be ready"
-  vm::wait_ready
+  vm::wait_ready || return 1
 
   vm_step "Configuring passwordless sudo"
   # machinekit apply requires sudo in non-interactive mode. Both Cirrus images
   # use 'admin' as the admin password; configure a sudoers drop-in so the test
   # run doesn't need pre-warmed credentials.
-  vm::shell <<'SCRIPT'
+  vm::shell <<'SCRIPT' || return 1
 if ! sudo -n true 2>/dev/null; then
   echo 'admin' | sudo -S bash -c \
     'echo "admin ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/mk-test && chmod 440 /etc/sudoers.d/mk-test'
@@ -80,8 +88,8 @@ SCRIPT
 
   if [ "$VM_OS" = "linux" ]; then
     vm_step "Mounting virtiofs share"
-    vm::exec sudo mkdir -p "$_VM_LINUX_MOUNT"
-    vm::exec sudo mount -t virtiofs com.apple.virtio-fs.automount "$_VM_LINUX_MOUNT"
+    vm::exec sudo mkdir -p "$_VM_LINUX_MOUNT" || return 1
+    vm::exec sudo mount -t virtiofs com.apple.virtio-fs.automount "$_VM_LINUX_MOUNT" || return 1
   fi
 }
 

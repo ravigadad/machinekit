@@ -144,11 +144,27 @@ for image in "${IMAGES[@]}"; do
       trap 'vm::stop 2>/dev/null || true' EXIT INT TERM
 
       _run_ok=false
-      if vm::start "$image" "$REPO_ROOT"; then
+
+      # vm::start and the case-file subshell below are run as bare statements,
+      # not as the direct condition of if/&&/||: bash suppresses errexit for
+      # the *entire* duration of a compound command that is itself being
+      # tested that way (confirmed — this is what let the machine_type VM
+      # smoke failure run to completion instead of stopping at its real
+      # cause). Capturing $? from a bare call keeps errexit meaningful
+      # throughout vm::start and every case file's scenario::run.
+      set +e
+      vm::start "$image" "$REPO_ROOT"
+      start_status=$?
+      set -e
+
+      if [ "$start_status" -eq 0 ]; then
+        set +e
         # shellcheck source=/dev/null
-        if (source "$case_file" && scenario::run); then
-          _run_ok=true
-        fi
+        ( set -e; source "$case_file" && scenario::run )
+        scenario_status=$?
+        set -e
+
+        [ "$scenario_status" -eq 0 ] && _run_ok=true
       fi
 
       if [ "$KEEP_VM" = true ] && [ -n "${VM_NAME:-}" ]; then
