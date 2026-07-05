@@ -35,6 +35,14 @@ _VM_DIR_TAG="mk"
 _VM_LINUX_MOUNT="/mnt/mk-host"
 _VM_MAC_MOUNT="/Volumes/My Shared Files"
 
+# macOS/SSH calls occasionally hit an intermittent sshpass/ssh tty race: ssh
+# falls through to reading its password prompt via /dev/tty instead of
+# through sshpass's pty, that read fails ("Device not configured"), and the
+# VM's sshd drops the connection ("Too many authentication failures"). Retry
+# a bounded number of times before giving up.
+_VM_SSH_RETRY_ATTEMPTS=3
+_VM_SSH_RETRY_DELAY=2
+
 # When set to a file path, vm::exec and vm::shell route all output there.
 # The run script sets this before each scenario and dumps it on failure.
 _VM_LOG=""
@@ -48,6 +56,15 @@ _vm_out() {
   else
     "$@"
   fi
+}
+
+# _vm_ssh_is_connection_failure STATUS
+# 255 is ssh's own exit code for a connection-level failure (couldn't
+# connect, auth failed, disconnected) — distinct from the remote command's
+# exit status, which is what we want to retry on, never on the remote
+# command genuinely failing.
+_vm_ssh_is_connection_failure() {
+  [ "$1" -eq 255 ]
 }
 
 # vm::start IMAGE REPO_DIR
@@ -99,17 +116,28 @@ vm::exec() {
     # tart exec passes args directly to execve — no shell, no quoting needed.
     _vm_out tart exec "$VM_NAME" "$@"
   else
-    local ip remote_cmd
+    local ip remote_cmd attempt status
     ip="$(tart ip "$VM_NAME" 2>/dev/null)" || return 1
     # SSH joins args with spaces before handing to the remote shell, so we
     # must quote each one ourselves to survive that round-trip.
     remote_cmd="$(printf '%q ' "$@")"
-    _vm_out sshpass -p "$_VM_SSH_PASS" ssh \
-      -o StrictHostKeyChecking=no \
-      -o UserKnownHostsFile=/dev/null \
-      -o LogLevel=ERROR \
-      -o ConnectTimeout=5 \
-      "${_VM_SSH_USER}@${ip}" "$remote_cmd"
+    for attempt in $(seq 1 "$_VM_SSH_RETRY_ATTEMPTS"); do
+      set +e
+      _vm_out sshpass -p "$_VM_SSH_PASS" ssh \
+        -o StrictHostKeyChecking=no \
+        -o UserKnownHostsFile=/dev/null \
+        -o LogLevel=ERROR \
+        -o ConnectTimeout=5 \
+        "${_VM_SSH_USER}@${ip}" "$remote_cmd"
+      status=$?
+      set -e
+      _vm_ssh_is_connection_failure "$status" || return "$status"
+      if [ "$attempt" -lt "$_VM_SSH_RETRY_ATTEMPTS" ]; then
+        vm_log "ssh connection failed (attempt $attempt/$_VM_SSH_RETRY_ATTEMPTS) — retrying"
+        sleep "$_VM_SSH_RETRY_DELAY"
+      fi
+    done
+    return "$status"
   fi
 }
 
@@ -122,14 +150,28 @@ vm::shell() {
   if [ "$VM_OS" = "linux" ]; then
     _vm_out tart exec -i "$VM_NAME" bash "$bash_flags"
   else
-    local ip
+    local ip script attempt status
     ip="$(tart ip "$VM_NAME" 2>/dev/null)" || return 1
-    _vm_out sshpass -p "$_VM_SSH_PASS" ssh \
-      -o StrictHostKeyChecking=no \
-      -o UserKnownHostsFile=/dev/null \
-      -o LogLevel=ERROR \
-      -o ConnectTimeout=5 \
-      "${_VM_SSH_USER}@${ip}" "bash $bash_flags"
+    # Slurp stdin once so each retry attempt can re-feed the same script —
+    # ssh would otherwise consume it on the first (possibly failed) attempt.
+    script=$(cat)
+    for attempt in $(seq 1 "$_VM_SSH_RETRY_ATTEMPTS"); do
+      set +e
+      printf '%s\n' "$script" | _vm_out sshpass -p "$_VM_SSH_PASS" ssh \
+        -o StrictHostKeyChecking=no \
+        -o UserKnownHostsFile=/dev/null \
+        -o LogLevel=ERROR \
+        -o ConnectTimeout=5 \
+        "${_VM_SSH_USER}@${ip}" "bash $bash_flags"
+      status=$?
+      set -e
+      _vm_ssh_is_connection_failure "$status" || return "$status"
+      if [ "$attempt" -lt "$_VM_SSH_RETRY_ATTEMPTS" ]; then
+        vm_log "ssh connection failed (attempt $attempt/$_VM_SSH_RETRY_ATTEMPTS) — retrying"
+        sleep "$_VM_SSH_RETRY_DELAY"
+      fi
+    done
+    return "$status"
   fi
 }
 
