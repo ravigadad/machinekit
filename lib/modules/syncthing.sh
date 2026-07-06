@@ -30,6 +30,8 @@
 # device's addresses are a list). The orchestration, config parsing, consent, and
 # dry-run logic above them are unit-tested.
 
+_SYNCTHING_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 syncthing::preflight() {
   local folders peers
   folders=$(syncthing::_folders)
@@ -50,7 +52,7 @@ syncthing::install() {
   brew::install_formula syncthing
 
   if input::is_dry_run; then
-    logging::dry_run "would generate identity, start the daemon, set the discovery posture, and apply folders/peers"
+    logging::dry_run "would generate identity, start the daemon, set the discovery posture, apply folders/peers, and install the conflict notifier"
     return 0
   fi
 
@@ -67,6 +69,7 @@ syncthing::install() {
     logging::warn "syncthing: mesh join not consented; folders stay local. Set MACHINEKIT_SYNCTHING_JOIN=1 to join."
   fi
   syncthing::_ensure_folders "$share_with"
+  syncthing::_install_conflict_notifier
 }
 
 # Each folder entry must carry an id (stable + identical across machines, so the
@@ -265,6 +268,56 @@ syncthing::_join_consented() {
   [ "$consent" = "true" ]
 }
 
+# Lay down the standing conflict-notifier service: a manifest of the configured
+# folder paths, the standalone scan script, and the scheduled service that runs
+# it. No folders = nothing that could ever conflict, so nothing to install.
+syncthing::_install_conflict_notifier() {
+  local folders
+  folders=$(syncthing::_folders)
+  [ -n "$folders" ] || return 0
+  syncthing::_write_conflict_manifest "$folders"
+  syncthing::_install_conflict_scan_script
+  syncthing::_install_conflict_service
+}
+
+# Write each folder's expanded path, one per line — the plain list the scan
+# script reads (folders carry no ssh_key/remote, so unlike git_backup's
+# manifest there's no per-row branching worth its own helper).
+syncthing::_write_conflict_manifest() {
+  local folders="$1" manifest folder path
+  manifest=$(syncthing::_conflict_manifest_path)
+  mkdir -p "$(dirname "$manifest")"
+  : > "$manifest"
+  while IFS= read -r folder; do
+    [ -n "$folder" ] || continue
+    path=$(printf '%s' "$folder" | jq -r '.path')
+    path=${path/#\~/$HOME}
+    printf '%s\n' "$path" >> "$manifest"
+  done < <(printf '%s' "$folders" | jq -c '.[]')
+}
+
+syncthing::_install_conflict_scan_script() {
+  local dest
+  dest=$(syncthing::_conflict_scan_script_path)
+  mkdir -p "$(dirname "$dest")"
+  cp "$_SYNCTHING_DIR/syncthing/conflict_scan.sh" "$dest"
+  chmod 755 "$dest"
+}
+
+# Schedule the service that runs the scan script for every folder, pinning the
+# manifest and notify command into its environment. The scan script is a
+# self-contained executable, so service::install_interval runs it directly
+# (its shebang picks the interpreter); the launchd/systemd split is service.sh's
+# job.
+syncthing::_install_conflict_service() {
+  service::install_interval \
+    syncthing-conflicts \
+    "$(syncthing::_conflict_scan_script_path)" \
+    "$(syncthing::_conflict_interval)" \
+    "MK_SYNCTHING_CONFLICT_MANIFEST=$(syncthing::_conflict_manifest_path)" \
+    "MK_SYNCTHING_CONFLICT_NOTIFY=$(syncthing::_conflict_notify)"
+}
+
 # --- config accessors ---
 
 # Array-of-tables; `|| true` so an unset key is an empty result (no folders is a
@@ -305,6 +358,26 @@ syncthing::_discovery_options() {
     default) : ;;
     *) lifecycle::fail "syncthing: unknown discovery posture '$preset' (expected 'tailnet' or 'default')." ;;
   esac
+}
+
+# Optional notify command for the conflict scan; empty lets it fall back to
+# logger/journald. Mirrors git_backup's own notify config.
+syncthing::_conflict_notify() {
+  config::get "module.syncthing.notify" --default ""
+}
+
+syncthing::_conflict_interval() {
+  config::get "module.syncthing.interval" --default 300
+}
+
+# --- conflict notifier paths ---
+
+syncthing::_conflict_manifest_path() {
+  printf '%s\n' "${XDG_DATA_HOME:-$HOME/.local/share}/machinekit/syncthing/conflict_manifest.txt"
+}
+
+syncthing::_conflict_scan_script_path() {
+  printf '%s\n' "${XDG_DATA_HOME:-$HOME/.local/share}/machinekit/syncthing/conflict_scan.sh"
 }
 
 # --- external command seam (syncthing 2.x surface; isolated for easy correction) ---

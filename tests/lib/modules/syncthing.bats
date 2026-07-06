@@ -65,6 +65,7 @@ setup() {
   mktest::stub_function syncthing::_ensure_folders
   mktest::stub_function syncthing::_wait_ready
   mktest::stub_function syncthing::_apply_discovery
+  mktest::stub_function syncthing::_install_conflict_notifier
   syncthing::install
   mktest::assert_stub_called brew::install_formula syncthing
   mktest::assert_stub_called logging::dry_run
@@ -74,9 +75,10 @@ setup() {
   mktest::assert_stub_not_called syncthing::_ensure_folders
   mktest::assert_stub_not_called syncthing::_wait_ready
   mktest::assert_stub_not_called syncthing::_apply_discovery
+  mktest::assert_stub_not_called syncthing::_install_conflict_notifier
 }
 
-@test "install runs the setup steps in order, then joins and shares the joined devices" {
+@test "install runs the setup steps in order, then joins, shares the joined devices, and installs the conflict notifier" {
   mktest::stub_function brew::install_formula syncthing
   STUB_RETURN=1 mktest::stub_function input::is_dry_run
   mktest::stub_function syncthing::_ensure_identity
@@ -87,6 +89,7 @@ setup() {
   mktest::stub_function syncthing::_join_consented
   STUB_OUTPUT=$'DEV1\nDEV2' mktest::stub_function syncthing::_join
   mktest::stub_function syncthing::_ensure_folders
+  mktest::stub_function syncthing::_install_conflict_notifier
   syncthing::install
   mktest::assert_stub_called_in_order brew::install_formula syncthing
   mktest::assert_stub_called_in_order syncthing::_ensure_identity
@@ -97,6 +100,7 @@ setup() {
   mktest::assert_stub_called_in_order syncthing::_join_consented
   mktest::assert_stub_called_in_order syncthing::_join
   mktest::assert_stub_called_in_order syncthing::_ensure_folders $'DEV1\nDEV2'
+  mktest::assert_stub_called_in_order syncthing::_install_conflict_notifier
 }
 
 @test "install warns and shares nothing when the join is declined" {
@@ -110,12 +114,14 @@ setup() {
   STUB_RETURN=1 mktest::stub_function syncthing::_join_consented
   mktest::stub_function syncthing::_join
   mktest::stub_function syncthing::_ensure_folders
+  mktest::stub_function syncthing::_install_conflict_notifier
   syncthing::install
   mktest::assert_stub_called_in_order syncthing::_apply_discovery
   mktest::assert_stub_called_in_order syncthing::_join_consented
   mktest::assert_stub_not_called syncthing::_join
   MATCH="not consented" mktest::assert_stub_called logging::warn
   mktest::assert_stub_called_in_order syncthing::_ensure_folders ""
+  mktest::assert_stub_called_in_order syncthing::_install_conflict_notifier
 }
 
 # --- _validate_folders / _validate_peers (real jq) ---
@@ -410,6 +416,76 @@ setup() {
   run ! syncthing::_join_consented
 }
 
+# --- _install_conflict_notifier (orchestrator) ---
+
+@test "_install_conflict_notifier writes the manifest, installs the scan script, and schedules the service" {
+  STUB_OUTPUT='[{"id":"f","path":"/p"}]' mktest::stub_function syncthing::_folders
+  mktest::stub_function syncthing::_write_conflict_manifest '[{"id":"f","path":"/p"}]'
+  mktest::stub_function syncthing::_install_conflict_scan_script
+  mktest::stub_function syncthing::_install_conflict_service
+  syncthing::_install_conflict_notifier
+  mktest::assert_stub_called_in_order syncthing::_write_conflict_manifest '[{"id":"f","path":"/p"}]'
+  mktest::assert_stub_called_in_order syncthing::_install_conflict_scan_script
+  mktest::assert_stub_called_in_order syncthing::_install_conflict_service
+}
+
+@test "_install_conflict_notifier is a no-op when no folders are configured" {
+  STUB_OUTPUT="" mktest::stub_function syncthing::_folders
+  mktest::stub_function syncthing::_write_conflict_manifest
+  mktest::stub_function syncthing::_install_conflict_scan_script
+  mktest::stub_function syncthing::_install_conflict_service
+  syncthing::_install_conflict_notifier
+  mktest::assert_stub_not_called syncthing::_write_conflict_manifest
+  mktest::assert_stub_not_called syncthing::_install_conflict_scan_script
+  mktest::assert_stub_not_called syncthing::_install_conflict_service
+}
+
+# --- _write_conflict_manifest ---
+
+@test "_write_conflict_manifest writes each folder's expanded path, one per line" {
+  local manifest="$BATS_TEST_TMPDIR/out/manifest.txt"
+  STUB_OUTPUT="$manifest" mktest::stub_function syncthing::_conflict_manifest_path
+  HOME="$BATS_TEST_TMPDIR/home"
+  syncthing::_write_conflict_manifest '[{"id":"a","path":"/a"},{"id":"b","path":"~/b"}]'
+  [ "$(cat "$manifest")" = "$(printf '/a\n%s/b' "$BATS_TEST_TMPDIR/home")" ]
+}
+
+@test "_write_conflict_manifest truncates a stale manifest when there is nothing to write" {
+  local manifest="$BATS_TEST_TMPDIR/manifest.txt"
+  printf 'stale\n' > "$manifest"
+  STUB_OUTPUT="$manifest" mktest::stub_function syncthing::_conflict_manifest_path
+  syncthing::_write_conflict_manifest '[]'
+  [ ! -s "$manifest" ]
+}
+
+# --- _install_conflict_scan_script ---
+
+@test "_install_conflict_scan_script installs the real script as executable" {
+  local dest="$BATS_TEST_TMPDIR/out/conflict_scan.sh"
+  STUB_OUTPUT="$dest" mktest::stub_function syncthing::_conflict_scan_script_path
+  syncthing::_install_conflict_scan_script
+  [ -x "$dest" ]
+  grep -q "sync-conflict" "$dest"
+}
+
+# --- _install_conflict_service ---
+
+@test "_install_conflict_service schedules the scan script on the interval with the pinned env" {
+  STUB_OUTPUT="/s/conflict_scan.sh" mktest::stub_function syncthing::_conflict_scan_script_path
+  STUB_OUTPUT="/m/manifest.txt" mktest::stub_function syncthing::_conflict_manifest_path
+  STUB_OUTPUT="/n/notify" mktest::stub_function syncthing::_conflict_notify
+  STUB_OUTPUT="300" mktest::stub_function syncthing::_conflict_interval
+  mktest::stub_function service::install_interval \
+    "syncthing-conflicts" "/s/conflict_scan.sh" "300" \
+    "MK_SYNCTHING_CONFLICT_MANIFEST=/m/manifest.txt" \
+    "MK_SYNCTHING_CONFLICT_NOTIFY=/n/notify"
+  syncthing::_install_conflict_service
+  mktest::assert_stub_called service::install_interval \
+    "syncthing-conflicts" "/s/conflict_scan.sh" "300" \
+    "MK_SYNCTHING_CONFLICT_MANIFEST=/m/manifest.txt" \
+    "MK_SYNCTHING_CONFLICT_NOTIFY=/n/notify"
+}
+
 # --- config accessors ---
 
 @test "_folders returns the configured folders" {
@@ -475,6 +551,48 @@ setup() {
   STUB_EXIT=1 mktest::stub_function lifecycle::fail
   run ! syncthing::_discovery_options
   MATCH="unknown discovery" mktest::assert_stub_called lifecycle::fail
+}
+
+@test "_conflict_notify defaults to empty" {
+  STUB_OUTPUT="" mktest::stub_function config::get "module.syncthing.notify" "--default" ""
+  run syncthing::_conflict_notify
+  [ -z "$output" ]
+}
+
+@test "_conflict_interval defaults to 300" {
+  STUB_OUTPUT="600" mktest::stub_function config::get "module.syncthing.interval" "--default" "300"
+  run syncthing::_conflict_interval
+  [ "$output" = "600" ]
+}
+
+# --- conflict notifier paths ---
+
+@test "_conflict_manifest_path locates the manifest under the default data dir" {
+  HOME=/fake/home
+  unset XDG_DATA_HOME
+  run syncthing::_conflict_manifest_path
+  [ "$output" = "/fake/home/.local/share/machinekit/syncthing/conflict_manifest.txt" ]
+}
+
+@test "_conflict_manifest_path honors XDG_DATA_HOME" {
+  HOME=/fake/home
+  XDG_DATA_HOME=/fake/home/.xdg-data
+  run syncthing::_conflict_manifest_path
+  [ "$output" = "/fake/home/.xdg-data/machinekit/syncthing/conflict_manifest.txt" ]
+}
+
+@test "_conflict_scan_script_path locates the installed scan script under the default data dir" {
+  HOME=/fake/home
+  unset XDG_DATA_HOME
+  run syncthing::_conflict_scan_script_path
+  [ "$output" = "/fake/home/.local/share/machinekit/syncthing/conflict_scan.sh" ]
+}
+
+@test "_conflict_scan_script_path honors XDG_DATA_HOME" {
+  HOME=/fake/home
+  XDG_DATA_HOME=/fake/home/.xdg-data
+  run syncthing::_conflict_scan_script_path
+  [ "$output" = "/fake/home/.xdg-data/machinekit/syncthing/conflict_scan.sh" ]
 }
 
 # --- external command seam (real `syncthing`/`brew` stubbed; asserts our

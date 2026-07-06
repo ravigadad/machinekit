@@ -501,7 +501,7 @@ machinekit/                             ← this repo (public)
 │       ├── mise/templates/             ← module-shipped dotfile defaults (xdg_config/mise/…, env.zsh.d/mise.zsh)
 │       ├── orbstack.sh                 ← orbstack::provides + orbstack::install (macOS container runtime)
 │       ├── postgres.sh                 ← postgres host provisioning; sources postgres/{introspect,access}.sh
-│       ├── syncthing.sh                ← syncthing::install (generic peer-to-peer folder sync; consent-gated mesh join; tailnet-only)
+│       ├── syncthing.sh                ← syncthing::install (generic peer-to-peer folder sync; consent-gated mesh join; tailnet-only); ships syncthing/conflict_scan.sh
 │       ├── tailscale.sh                ← tailscale::install (client + headless tagged-device join)
 │       ├── zsh.sh                      ← zsh::install (installs zsh via brew; module ships templates)
 │       ├── zsh/templates/              ← framework zsh dotfiles (dot_zshrc, env.zsh w/ env.zsh.d loop)

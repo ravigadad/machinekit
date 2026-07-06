@@ -178,6 +178,14 @@ introducer = true             # learn the other clients through the hub
 
 **Ignore patterns.** Each folder gets a machinekit-managed `.stignore` by default — a delimited block holding junk that should never replicate (`(?d).DS_Store` and friends; the `(?d)` marks them deletable so they can't block a directory removal). Per folder you can add your own with `ignore_patterns = [...]` (kept above the defaults, so a `!`-negation wins Syncthing's first-match precedence), drop the built-ins with `add_default_ignores = false`, or hand the file entirely back to yourself with `manage_stignore = false`. machinekit only ever rewrites its own block; everything else in the file is yours, and deleting the block just gets it restored next apply.
 
+**Conflict notifications.** Syncthing silently renames the losing side of a concurrent same-file edit to `*.sync-conflict-*` and never surfaces it on its own. Whenever any folders are configured, machinekit installs a standing scheduled scan of them (no extra setup needed) that re-fires a notify hook on every run while any conflict files remain — a nag until you resolve them, not a one-time ping you might miss:
+
+```toml
+[module.syncthing]
+# interval = 300               # seconds between conflict scans
+# notify = "/path/to/notify-hook"  # run with a message on trouble; default: logger/journald
+```
+
 ## git_backup — an SSH key for the folders you back up
 
 `git_backup` periodically pushes one or more working dirs to git remotes, so a live, replicated dir gets durable history (Syncthing, for example, propagates deletions, so it isn't itself a backup). It's generic — it backs up whatever folders you list and knows nothing about what's in them. The agents-config dir is the typical case, but any git-pushable folder works.
