@@ -14,13 +14,15 @@ setup() {
 # --- secrets::put (use-case orchestrator) ---
 
 @test "put resolves the dest, confirms overwrite, then encrypts a plaintext source" {
-  STUB_OUTPUT="fake-target" mktest::stub_function secrets::put::_target
-  STUB_OUTPUT="fake-dest" mktest::stub_function secrets::dest_path "fake-target"
+  STUB_OUTPUT="fake-name" mktest::stub_function secrets::put::_target
+  STUB_OUTPUT="fake-pool-path" mktest::stub_function secrets::put::_pool_path "fake-name"
+  STUB_OUTPUT="fake-dest" mktest::stub_function secrets::dest_path "fake-pool-path"
   mktest::stub_function secrets::put::_confirm_overwrite "fake-dest"
   mktest::stub_function secrets::put::_from_plaintext "" "fake-dest"
   mktest::stub_function secrets::put::_from_encrypted
   secrets::put "" ""
-  mktest::assert_stub_called_in_order secrets::dest_path "fake-target"
+  mktest::assert_stub_called_in_order secrets::put::_pool_path "fake-name"
+  mktest::assert_stub_called_in_order secrets::dest_path "fake-pool-path"
   mktest::assert_stub_called_in_order secrets::put::_confirm_overwrite "fake-dest"
   mktest::assert_stub_called_in_order secrets::put::_from_plaintext "" "fake-dest"
   mktest::assert_stub_not_called secrets::put::_from_encrypted
@@ -28,9 +30,45 @@ setup() {
   mktest::assert_stub_not_called preflight::resolve_inputs
 }
 
+@test "put refuses to file the reserved age_key name into the pool (explicit target)" {
+  STUB_OUTPUT="age_key" mktest::stub_function secrets::put::_target
+  STUB_EXIT=1 mktest::stub_function lifecycle::fail
+  run ! secrets::put "age_key" ""
+  MATCH="age identity key" mktest::assert_stub_called lifecycle::fail
+}
+
+@test "put refuses a target that already carries the secrets/ pool prefix — it takes a bare name" {
+  STUB_OUTPUT="secrets/tailscale/default.age" mktest::stub_function secrets::put::_target
+  STUB_EXIT=1 mktest::stub_function lifecycle::fail
+  run ! secrets::put "secrets/tailscale/default.age" ""
+  MATCH="looks like a pool path" mktest::assert_stub_called lifecycle::fail
+}
+
+@test "put refuses a target with a trailing .age suffix — it takes a bare name" {
+  STUB_OUTPUT="tailscale/default.age" mktest::stub_function secrets::put::_target
+  STUB_EXIT=1 mktest::stub_function lifecycle::fail
+  run ! secrets::put "tailscale/default.age" ""
+  MATCH="looks like a pool path" mktest::assert_stub_called lifecycle::fail
+}
+
+@test "put lets an absolute target through the pool-path guard (place-anywhere escape hatch)" {
+  STUB_OUTPUT="/anywhere/secret.age" mktest::stub_function secrets::put::_target
+  STUB_OUTPUT="/anywhere/secret.age" mktest::stub_function secrets::put::_pool_path "/anywhere/secret.age"
+  STUB_OUTPUT="/anywhere/secret.age" mktest::stub_function secrets::dest_path "/anywhere/secret.age"
+  mktest::stub_function secrets::put::_confirm_overwrite "/anywhere/secret.age"
+  mktest::stub_function secrets::put::_from_plaintext "" "/anywhere/secret.age"
+  mktest::stub_function logging::success
+  mktest::stub_function logging::info
+  STUB_EXIT=1 mktest::stub_function lifecycle::fail
+  secrets::put "/anywhere/secret.age" ""
+  mktest::assert_stub_called secrets::put::_from_plaintext "" "/anywhere/secret.age"
+  mktest::assert_stub_not_called lifecycle::fail
+}
+
 @test "put files an already-encrypted source as-is via _from_encrypted" {
-  STUB_OUTPUT="fake-target" mktest::stub_function secrets::put::_target
-  STUB_OUTPUT="fake-dest" mktest::stub_function secrets::dest_path "fake-target"
+  STUB_OUTPUT="fake-name" mktest::stub_function secrets::put::_target
+  STUB_OUTPUT="fake-pool-path" mktest::stub_function secrets::put::_pool_path "fake-name"
+  STUB_OUTPUT="fake-dest" mktest::stub_function secrets::dest_path "fake-pool-path"
   mktest::stub_function secrets::put::_confirm_overwrite "fake-dest"
   mktest::stub_function age::is_encrypted_file "/fake/secret.age"   # recognized as encrypted
   mktest::stub_function secrets::put::_from_encrypted "/fake/secret.age" "fake-dest"
@@ -41,8 +79,9 @@ setup() {
 }
 
 @test "put encrypts a plaintext file source via _from_plaintext" {
-  STUB_OUTPUT="fake-target" mktest::stub_function secrets::put::_target
-  STUB_OUTPUT="fake-dest" mktest::stub_function secrets::dest_path "fake-target"
+  STUB_OUTPUT="fake-name" mktest::stub_function secrets::put::_target
+  STUB_OUTPUT="fake-pool-path" mktest::stub_function secrets::put::_pool_path "fake-name"
+  STUB_OUTPUT="fake-dest" mktest::stub_function secrets::dest_path "fake-pool-path"
   mktest::stub_function secrets::put::_confirm_overwrite "fake-dest"
   STUB_RETURN=1 mktest::stub_function age::is_encrypted_file "/fake/plain.txt"   # not an age file
   mktest::stub_function secrets::put::_from_plaintext "/fake/plain.txt" "fake-dest"
@@ -52,16 +91,25 @@ setup() {
   mktest::assert_stub_not_called secrets::put::_from_encrypted
 }
 
-@test "put resolves inputs in the main shell then picks when no target is given" {
+@test "put resolves inputs then readies the manager in the main shell, then picks, when no target is given" {
   STUB_OUTPUT="" mktest::stub_function secrets::put::_target
   mktest::stub_function input::is_interactive
-  STUB_OUTPUT="secrets/picked.age" mktest::stub_function secrets::put::_pick
-  STUB_OUTPUT="fake-dest" mktest::stub_function secrets::dest_path "secrets/picked.age"
+  mktest::stub_function secrets_manager::ensure_ready
+  mktest::stub_function secrets::assert_age_key_not_pooled
+  mktest::stub_function age::assert_key_source_type
+  STUB_OUTPUT="tailscale/picked" mktest::stub_function secrets::put::_pick
+  STUB_OUTPUT="fake-pool-path" mktest::stub_function secrets::put::_pool_path "tailscale/picked"
+  STUB_OUTPUT="fake-dest" mktest::stub_function secrets::dest_path "fake-pool-path"
   mktest::stub_function secrets::put::_confirm_overwrite "fake-dest"
   mktest::stub_function secrets::put::_from_plaintext "" "fake-dest"
   secrets::put "" ""
-  # resolve_inputs (which arms cleanup traps) runs before the pick, not inside its $().
+  # resolve_inputs (arms cleanup traps), ensure_ready (so the picker's source
+  # column is truthful), and the age-key-not-pooled assertion all run before the
+  # pick, in the main shell — not inside the pick's $().
   mktest::assert_stub_called_in_order preflight::resolve_inputs
+  mktest::assert_stub_called_in_order secrets_manager::ensure_ready
+  mktest::assert_stub_called_in_order secrets::assert_age_key_not_pooled
+  mktest::assert_stub_called_in_order age::assert_key_source_type
   mktest::assert_stub_called_in_order secrets::put::_pick
   mktest::assert_stub_called secrets::put::_from_plaintext "" "fake-dest"
 }
@@ -158,14 +206,14 @@ setup() {
 # --- secrets::put::_target ---
 
 @test "_target prefers the positional argument" {
-  run secrets::put::_target "secrets/from/positional.age"
-  [ "$output" = "secrets/from/positional.age" ]
+  run secrets::put::_target "tailscale/from-positional"
+  [ "$output" = "tailscale/from-positional" ]
 }
 
-@test "_target falls back to the env-resolved path when the argument is empty" {
-  STUB_OUTPUT="secrets/from/env.age" mktest::stub_function context::get "secrets.path"
+@test "_target falls back to the env-resolved name when the argument is empty" {
+  STUB_OUTPUT="tailscale/from-env" mktest::stub_function context::get "secrets.path"
   run secrets::put::_target ""
-  [ "$output" = "secrets/from/env.age" ]
+  [ "$output" = "tailscale/from-env" ]
 }
 
 @test "_target is empty when neither the argument nor the env is set" {
@@ -175,23 +223,55 @@ setup() {
   [ -z "$output" ]
 }
 
+# --- secrets::put::_pool_path ---
+
+@test "_pool_path resolves a bare name to its pool-relative .age path" {
+  STUB_OUTPUT="secrets/tailscale/default.age" mktest::stub_function secrets::pool_path "tailscale/default.age"
+  run secrets::put::_pool_path "tailscale/default"
+  [ "$output" = "secrets/tailscale/default.age" ]
+}
+
+@test "_pool_path passes an absolute path through unchanged" {
+  mktest::stub_function secrets::pool_path
+  run secrets::put::_pool_path "/anywhere/secret.age"
+  [ "$output" = "/anywhere/secret.age" ]
+  mktest::assert_stub_not_called secrets::pool_path
+}
+
 # --- secrets::put::_pick ---
 
 @test "_pick returns the inventory row the user selects" {
-  STUB_OUTPUT=$'secrets/a.age\ttrue\tfalse\tmissing\nsecrets/b.age\ttrue\ttrue\tprovided' \
+  STUB_OUTPUT=$'tailscale/a\ttrue\tfalse\tmissing\ntailscale/b\ttrue\ttrue\tpool' \
     mktest::stub_function secrets::inventory
   printf '2\n' > "$BATS_TEST_TMPDIR/tty"
   MACHINEKIT_TTY="$BATS_TEST_TMPDIR/tty" run --separate-stderr secrets::put::_pick
   [ "$status" -eq 0 ]
-  [ "$output" = "secrets/b.age" ]
+  [ "$output" = "tailscale/b" ]
 }
 
 @test "_pick fails on an out-of-range selection" {
-  STUB_OUTPUT=$'secrets/a.age\ttrue\tfalse\tmissing' mktest::stub_function secrets::inventory
+  STUB_OUTPUT=$'tailscale/a\ttrue\tfalse\tmissing' mktest::stub_function secrets::inventory
   STUB_EXIT=1 mktest::stub_function lifecycle::fail
   printf '9\n' > "$BATS_TEST_TMPDIR/tty"
   MACHINEKIT_TTY="$BATS_TEST_TMPDIR/tty" run ! secrets::put::_pick
   MATCH="invalid selection" mktest::assert_stub_called lifecycle::fail
+}
+
+@test "_pick excludes the reserved age_key row from the menu" {
+  STUB_OUTPUT=$'age_key\ttrue\tfalse\tmanager\ntailscale/a\ttrue\tfalse\tmissing' \
+    mktest::stub_function secrets::inventory
+  printf '1\n' > "$BATS_TEST_TMPDIR/tty"
+  MACHINEKIT_TTY="$BATS_TEST_TMPDIR/tty" run --separate-stderr secrets::put::_pick
+  [ "$status" -eq 0 ]
+  # age_key was filtered, so selection #1 is the next secret, not the age key.
+  [ "$output" = "tailscale/a" ]
+}
+
+@test "_pick fails when the only declared secret is the reserved age_key" {
+  STUB_OUTPUT=$'age_key\ttrue\tfalse\tmanager' mktest::stub_function secrets::inventory
+  STUB_EXIT=1 mktest::stub_function lifecycle::fail
+  run ! secrets::put::_pick
+  MATCH="no pool-fileable secrets" mktest::assert_stub_called lifecycle::fail
 }
 
 # --- secrets::put::_confirm_overwrite ---

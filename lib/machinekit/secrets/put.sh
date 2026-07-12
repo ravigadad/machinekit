@@ -2,30 +2,55 @@
 # secrets put — file a secret as an .age in a blueprint working tree. Resolve the
 # target (or pick one) and settle any overwrite, then either encrypt a plaintext
 # value or, when the source is already age-encrypted, verify and copy it as-is.
-# Never touches git — the caller commits.
+# Never touches git — the caller commits. Pool/age-only by design: a
+# manager-backed secret is populated in the manager directly, not through here.
 [ -n "${_MK_SECRETS_PUT_LOADED:-}" ] && return 0
 _MK_SECRETS_PUT_LOADED=1
 
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../secrets.sh"
 
-# secrets::put TARGET FROM_FILE — the put use-case. TARGET is the positional path
-# (empty → pick interactively); FROM_FILE is --from-file (empty → stdin/prompt).
-# A FROM_FILE that is already age-encrypted is verified and copied as-is; anything
-# else is treated as plaintext and encrypted. Modules must already be sourced.
+# secrets::put TARGET FROM_FILE — the put use-case. TARGET is the positional bare
+# logical name (empty → pick interactively); FROM_FILE is --from-file (empty →
+# stdin/prompt). A FROM_FILE that is already age-encrypted is verified and copied
+# as-is; anything else is treated as plaintext and encrypted. Modules must
+# already be sourced.
 secrets::put() {
   local target_arg="$1" from_file="$2" target dest
   target="$(secrets::put::_target "$target_arg")"
   if [ -z "$target" ]; then
     input::is_interactive \
-      || lifecycle::fail "secrets: no target — give a <path> argument or set MACHINEKIT_SECRETS_PATH."
+      || lifecycle::fail "secrets: no target — give a <name> argument or set MACHINEKIT_SECRETS_PATH."
     # resolve_inputs fetches the blueprint and arms an EXIT cleanup trap, so it
     # MUST run in this shell — never inside the $() that captures the pick, where
     # the subshell's exit would fire the whole cleanup chain (context store, the
     # fetched blueprint) and tear down state the rest of put needs.
     preflight::resolve_inputs
+    # Ready any active secrets manager (a network loop, possibly an interactive
+    # login) so the picker shows each secret's true source: knowing what the
+    # manager already holds is essential here, so a secret meant to be fetched from
+    # the manager isn't mistakenly re-filed into the pool.
+    secrets_manager::ensure_ready
+    secrets::assert_age_key_not_pooled
+    age::assert_key_source_type
     target="$(secrets::put::_pick)"
   fi
-  dest="$(secrets::dest_path "$target")"
+  # The age identity key is never a pool secret (it can't decrypt itself), so
+  # refuse to file it — whether named explicitly or somehow selected. The picker
+  # also excludes it, so this catches the explicit-target path (which skips the
+  # picker entirely). Source the age key via [module.age] key_source_type instead.
+  [ "$target" = "$_MK_SECRETS_AGE_KEY_NAME" ] && lifecycle::fail \
+    "secrets: '$_MK_SECRETS_AGE_KEY_NAME' is the age identity key and can't be filed into the pool — it can't decrypt itself. Source it via [module.age] key_source_type = secrets_manager, or provide it with --existing-age-key-file / --generate-age-key."
+  # The target is a bare logical name (secrets list's own format); _pool_path
+  # derives secrets/<name>.age from it. A relative target already carrying the
+  # secrets/ prefix or a .age suffix would double-wrap into a silent wrong-path
+  # write, so reject it here in the main shell (a lifecycle::fail from inside
+  # _pool_path's own $() would be swallowed). An absolute path is the deliberate
+  # place-anywhere escape hatch and passes through.
+  case "$target" in
+    /*) ;;
+    secrets/*|*.age) lifecycle::fail "secrets: '$target' looks like a pool path — put takes a bare <name> (e.g. 'tailscale/default', not 'secrets/tailscale/default.age'); it derives the secrets/<name>.age path itself." ;;
+  esac
+  dest="$(secrets::dest_path "$(secrets::put::_pool_path "$target")")"
   secrets::put::_confirm_overwrite "$dest"
   if [ -n "$from_file" ] && age::is_encrypted_file "$from_file"; then
     secrets::put::_from_encrypted "$from_file" "$dest"
@@ -76,7 +101,8 @@ secrets::put::_recipient() {
   age::recipient
 }
 
-# The target path from the positional argument or MACHINEKIT_SECRETS_PATH, or empty
+# The target — a bare logical name, or an absolute path to place a secret
+# anywhere — from the positional argument or MACHINEKIT_SECRETS_PATH, or empty
 # when neither is given (the caller then drives the interactive picker). Picking is
 # NOT done here — it must not be wrapped in the $() that captures this output.
 secrets::put::_target() {
@@ -84,25 +110,39 @@ secrets::put::_target() {
   context::get "secrets.path" || true
 }
 
+# secrets::put::_pool_path NAME — the pool-relative .age path for a bare
+# logical name (exactly as `secrets list` prints it); an absolute path is an
+# explicit escape hatch to place a secret anywhere and is passed through
+# unchanged.
+secrets::put::_pool_path() {
+  case "$1" in
+    /*) printf '%s\n' "$1" ;;
+    *)  secrets::pool_path "$1.age" ;;
+  esac
+}
+
 # Interactive picker: present the inventory as a numbered menu on stderr and read a
-# choice from the tty; the chosen pool path is the only thing on stdout. Read only
+# choice from the tty; the chosen bare name is the only thing on stdout. Read only
 # — the caller resolves inputs first (in the main shell), so this is safe in $().
 secrets::put::_pick() {
   local rows; rows="$(secrets::inventory)"
-  [ -n "$rows" ] || lifecycle::fail "secrets: no declared secrets to choose from — give a <path> argument."
-  local -a paths=()
-  local count=0 path state
-  while IFS=$'\t' read -r path _ _ state; do
-    [ -n "$path" ] || continue
-    count=$((count + 1)); paths+=("$path")
-    printf '%3d) %s  [%s]\n' "$count" "$path" "$state" >&2
+  [ -n "$rows" ] || lifecycle::fail "secrets: no declared secrets to choose from — give a <name> argument."
+  local -a names=()
+  local count=0 name state
+  while IFS=$'\t' read -r name _ _ state; do
+    [ -n "$name" ] || continue
+    # The age key is manager-/file-sourced, never pool-filed — don't offer it.
+    [ "$name" = "$_MK_SECRETS_AGE_KEY_NAME" ] && continue
+    count=$((count + 1)); names+=("$name")
+    printf '%3d) %s  [%s]\n' "$count" "$name" "$state" >&2
   done <<< "$rows"
+  [ "$count" -gt 0 ] || lifecycle::fail "secrets: no pool-fileable secrets to choose from — give a <name> argument."
   local choice
   printf 'Select a secret to provide [1-%d]: ' "$count" >&2
   read -r choice < "${MACHINEKIT_TTY:-/dev/tty}"
   { [ "$choice" -ge 1 ] && [ "$choice" -le "$count" ]; } 2>/dev/null \
     || lifecycle::fail "secrets: invalid selection: $choice"
-  printf '%s\n' "${paths[$((choice - 1))]}"
+  printf '%s\n' "${names[$((choice - 1))]}"
 }
 
 # Require confirmation before replacing an existing secret. The confirm flows
