@@ -15,6 +15,11 @@ preflight::run() {
   logging::step "Preflight: resolving inputs"
 
   preflight::resolve_inputs
+  # Ready any active secrets manager (install its CLI, authenticate, so presence
+  # is knowable) before module preflights, which ask whether their secrets exist.
+  secrets_manager::ensure_ready
+  secrets::assert_age_key_not_pooled
+  age::assert_key_source_type
   home::transforms::register_from_modules
   home::staging::build
 

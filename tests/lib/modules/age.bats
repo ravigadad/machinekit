@@ -7,8 +7,40 @@ setup() {
   # shellcheck source=../../../lib/modules/age.sh
   source "$MACHINEKIT_DIR/lib/modules/age.sh"
   AGE_KEY_PATH="$BATS_TEST_TMPDIR/age/key.txt"
+  # Reserved name owned by secrets.sh (not sourced here); the age module reads it.
+  _MK_SECRETS_AGE_KEY_NAME="age_key"
   unset OPT_EXISTING_AGE_KEY_FILE
   unset MACHINEKIT_EXISTING_AGE_KEY_FILE # hi
+}
+
+# --- age::requires ---
+
+@test "requires the secrets_manager capability when the key is manager-sourced" {
+  mktest::stub_function age::_manager_sources_key
+  run age::requires
+  [ "$output" = "secrets_manager" ]
+}
+
+@test "requires nothing when the key is not manager-sourced" {
+  STUB_RETURN=1 mktest::stub_function age::_manager_sources_key
+  run age::requires
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+# --- age::declared_secrets ---
+
+@test "declared_secrets emits the age_key row (required, not generatable) when manager-sourced" {
+  mktest::stub_function age::_manager_sources_key
+  run age::declared_secrets
+  [ "$output" = $'age_key\ttrue\tfalse' ]
+}
+
+@test "declared_secrets emits nothing when the key is not manager-sourced" {
+  STUB_RETURN=1 mktest::stub_function age::_manager_sources_key
+  run age::declared_secrets
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
 }
 
 # --- age::preflight ---
@@ -89,6 +121,8 @@ setup() {
   printf -v generate_prompt "$_AGE_GENERATE_PROMPT" "$AGE_KEY_PATH"
   STUB_OUTPUT="$AGE_KEY_PATH" mktest::stub_function config::get "module.age.key_path" "--default" "$AGE_KEY_PATH" "--store-default"
   STUB_RETURN=1 mktest::stub_function context::get "existing_age_key_file"
+  STUB_RETURN=1 mktest::stub_function age::_manager_sources_key
+  STUB_OUTPUT="false" mktest::stub_function context::get "age.key_generate" "--coerce" "boolean" "--default" "false"
   STUB_OUTPUT="true" mktest::stub_function context::get "age.key_generate" "--required" "--coerce" "boolean" "--prompt" "$generate_prompt"
   mktest::stub_function logging::info
   age::preflight
@@ -101,10 +135,47 @@ setup() {
   printf -v generate_prompt "$_AGE_GENERATE_PROMPT" "$AGE_KEY_PATH"
   STUB_OUTPUT="$AGE_KEY_PATH" mktest::stub_function config::get "module.age.key_path" "--default" "$AGE_KEY_PATH" "--store-default"
   STUB_RETURN=1 mktest::stub_function context::get "existing_age_key_file"
+  STUB_RETURN=1 mktest::stub_function age::_manager_sources_key
+  STUB_OUTPUT="false" mktest::stub_function context::get "age.key_generate" "--coerce" "boolean" "--default" "false"
   STUB_OUTPUT="false" mktest::stub_function context::get "age.key_generate" "--required" "--coerce" "boolean" "--prompt" "$generate_prompt"
   STUB_EXIT=1 mktest::stub_function lifecycle::fail
   run ! age::preflight
   MATCH="No age key" mktest::assert_stub_called lifecycle::fail
+}
+
+@test "preflight resolves via the secrets manager when no key file exists, the manager sources the key, and holds it" {
+  STUB_OUTPUT="$AGE_KEY_PATH" mktest::stub_function config::get "module.age.key_path" "--default" "$AGE_KEY_PATH" "--store-default"
+  STUB_RETURN=1 mktest::stub_function context::get "existing_age_key_file"
+  STUB_OUTPUT="false" mktest::stub_function context::get "age.key_generate" "--coerce" "boolean" "--default" "false"
+  mktest::stub_function age::_manager_sources_key
+  mktest::stub_function secrets::present "age_key"
+  STUB_EXIT=1 mktest::stub_function lifecycle::fail
+  mktest::stub_function logging::info
+  age::preflight
+  MATCH="secrets manager" mktest::assert_stub_called logging::info
+  mktest::assert_stub_not_called lifecycle::fail
+}
+
+@test "preflight fails fast when the manager sources the key but does not actually hold it" {
+  STUB_OUTPUT="$AGE_KEY_PATH" mktest::stub_function config::get "module.age.key_path" "--default" "$AGE_KEY_PATH" "--store-default"
+  STUB_RETURN=1 mktest::stub_function context::get "existing_age_key_file"
+  STUB_OUTPUT="false" mktest::stub_function context::get "age.key_generate" "--coerce" "boolean" "--default" "false"
+  mktest::stub_function age::_manager_sources_key
+  STUB_RETURN=1 mktest::stub_function secrets::present "age_key"
+  STUB_EXIT=1 mktest::stub_function lifecycle::fail
+  run ! age::preflight
+  MATCH="the manager has no 'age_key'" mktest::assert_stub_called lifecycle::fail
+}
+
+@test "preflight prefers generation over the manager when generation is requested and no key exists" {
+  STUB_OUTPUT="$AGE_KEY_PATH" mktest::stub_function config::get "module.age.key_path" "--default" "$AGE_KEY_PATH" "--store-default"
+  STUB_RETURN=1 mktest::stub_function context::get "existing_age_key_file"
+  STUB_OUTPUT="true" mktest::stub_function context::get "age.key_generate" "--coerce" "boolean" "--default" "false"
+  mktest::stub_function age::_manager_sources_key
+  mktest::stub_function logging::info
+  age::preflight
+  MATCH="will generate" mktest::assert_stub_called logging::info
+  mktest::assert_stub_not_called age::_manager_sources_key
 }
 
 # --- age::_confirm_overwrite ---
@@ -130,6 +201,7 @@ setup() {
   STUB_OUTPUT="false" mktest::stub_function context::get "age.key_generate" "--coerce" "boolean" "--default" "false"
   mktest::stub_function logging::step
   mktest::stub_function brew::install_formula "age"
+  mktest::stub_function age::_warn_source_override
   mktest::stub_function input::is_dry_run
   mktest::stub_function age::_report_dry_run
   run age::install
@@ -144,6 +216,7 @@ setup() {
   STUB_OUTPUT="false" mktest::stub_function context::get "age.key_generate" "--coerce" "boolean" "--default" "false"
   mktest::stub_function logging::step
   mktest::stub_function brew::install_formula "age"
+  mktest::stub_function age::_warn_source_override
   STUB_RETURN=1 mktest::stub_function input::is_dry_run
   mktest::stub_function age::_install_copy
   age::install
@@ -160,22 +233,58 @@ setup() {
   STUB_OUTPUT="true" mktest::stub_function context::get "age.key_generate" "--coerce" "boolean" "--default" "false"
   mktest::stub_function logging::step
   mktest::stub_function brew::install_formula "age"
+  mktest::stub_function age::_warn_source_override
   STUB_RETURN=1 mktest::stub_function input::is_dry_run
   mktest::stub_function age::_install_generate
   age::install
   mktest::assert_stub_called age::_install_generate "$AGE_KEY_PATH"
 }
 
-@test "install with no key file and generate=false delegates to _install_use_existing" {
+@test "install with no key file, generate=false, and no secrets manager active delegates to _install_use_existing" {
+  STUB_OUTPUT="$AGE_KEY_PATH" mktest::stub_function config::get "module.age.key_path"
+  STUB_RETURN=1 mktest::stub_function context::get "existing_age_key_file"
+  STUB_OUTPUT="false" mktest::stub_function context::get "age.key_generate" "--coerce" "boolean" "--default" "false"
+  STUB_RETURN=1 mktest::stub_function age::_manager_sources_key
+  mktest::stub_function logging::step
+  mktest::stub_function brew::install_formula "age"
+  mktest::stub_function age::_warn_source_override
+  STUB_RETURN=1 mktest::stub_function input::is_dry_run
+  mktest::stub_function age::_install_use_existing
+  age::install
+  mktest::assert_stub_called age::_install_use_existing "$AGE_KEY_PATH"
+}
+
+@test "install with no key file, generate=false, and a secrets manager active installs from it" {
+  STUB_OUTPUT="$AGE_KEY_PATH" mktest::stub_function config::get "module.age.key_path"
+  STUB_RETURN=1 mktest::stub_function context::get "existing_age_key_file"
+  STUB_OUTPUT="false" mktest::stub_function context::get "age.key_generate" "--coerce" "boolean" "--default" "false"
+  mktest::stub_function age::_manager_sources_key
+  mktest::stub_function logging::step
+  mktest::stub_function brew::install_formula "age"
+  mktest::stub_function age::_warn_source_override
+  STUB_RETURN=1 mktest::stub_function input::is_dry_run
+  mktest::stub_function age::_install_from_manager
+  mktest::stub_function age::_install_use_existing
+  age::install
+  mktest::assert_stub_called age::_install_from_manager "$AGE_KEY_PATH"
+  mktest::assert_stub_not_called age::_install_use_existing
+}
+
+@test "install does not consult the secrets manager when the key already exists on disk" {
+  mkdir -p "$(dirname "$AGE_KEY_PATH")"
+  printf 'existing key\n' > "$AGE_KEY_PATH"
   STUB_OUTPUT="$AGE_KEY_PATH" mktest::stub_function config::get "module.age.key_path"
   STUB_RETURN=1 mktest::stub_function context::get "existing_age_key_file"
   STUB_OUTPUT="false" mktest::stub_function context::get "age.key_generate" "--coerce" "boolean" "--default" "false"
   mktest::stub_function logging::step
   mktest::stub_function brew::install_formula "age"
+  mktest::stub_function age::_warn_source_override
   STUB_RETURN=1 mktest::stub_function input::is_dry_run
+  mktest::stub_function age::_manager_sources_key
   mktest::stub_function age::_install_use_existing
   age::install
   mktest::assert_stub_called age::_install_use_existing "$AGE_KEY_PATH"
+  mktest::assert_stub_not_called age::_manager_sources_key
 }
 
 # --- age::_report_dry_run ---
@@ -192,10 +301,28 @@ setup() {
   MATCH="generate" mktest::assert_stub_called logging::dry_run
 }
 
-@test "_report_dry_run with no file and generate=false logs no change" {
+@test "_report_dry_run with an existing on-disk key and generate=false logs no change" {
+  local key="$BATS_TEST_TMPDIR/key.txt"
+  printf 'existing\n' > "$key"
   mktest::stub_function logging::info
-  age::_report_dry_run "" "false" "/dest/key.txt"
+  age::_report_dry_run "" "false" "$key"
   MATCH="no change" mktest::assert_stub_called logging::info
+}
+
+@test "_report_dry_run with no key on disk and a manager-sourced key reports the manager fetch" {
+  mktest::stub_function age::_manager_sources_key
+  mktest::stub_function logging::dry_run
+  age::_report_dry_run "" "false" "$BATS_TEST_TMPDIR/absent.txt"
+  MATCH="secrets manager" mktest::assert_stub_called logging::dry_run
+}
+
+@test "_report_dry_run with no key on disk and a file source (manager does not source the key) reports no change" {
+  STUB_RETURN=1 mktest::stub_function age::_manager_sources_key
+  mktest::stub_function logging::info
+  mktest::stub_function logging::dry_run
+  age::_report_dry_run "" "false" "$BATS_TEST_TMPDIR/absent.txt"
+  MATCH="no change" mktest::assert_stub_called logging::info
+  mktest::assert_stub_not_called logging::dry_run
 }
 
 # --- age::_install_copy ---
@@ -237,6 +364,25 @@ setup() {
   age::_install_use_existing "$AGE_KEY_PATH"
   [ "$(mktest::file_mode "$AGE_KEY_PATH")" = "600" ]
   mktest::assert_stub_called logging::success
+}
+
+# --- age::_install_from_manager ---
+
+@test "_install_from_manager installs the key via secrets::install_secret_file and logs success" {
+  STUB_OUTPUT="age_key" mktest::stub_function age::_reference_for_key
+  mktest::stub_function secrets::install_secret_file "$AGE_KEY_PATH" secrets_manager::fetch "age_key"
+  mktest::stub_function logging::success
+  age::_install_from_manager "$AGE_KEY_PATH"
+  mktest::assert_stub_called secrets::install_secret_file "$AGE_KEY_PATH" secrets_manager::fetch "age_key"
+  mktest::assert_stub_called logging::success
+}
+
+@test "_install_from_manager fails when the manager returns no value" {
+  STUB_OUTPUT="age_key" mktest::stub_function age::_reference_for_key
+  STUB_RETURN=1 mktest::stub_function secrets::install_secret_file
+  STUB_EXIT=1 mktest::stub_function lifecycle::fail
+  run ! age::_install_from_manager "$AGE_KEY_PATH"
+  MATCH="returned no value" mktest::assert_stub_called lifecycle::fail
 }
 
 # --- age::file_transforms ---
@@ -354,4 +500,90 @@ setup() {
   STUB_OUTPUT="$AGE_KEY_PATH" mktest::stub_function config::get "module.age.key_path" "--default" "$AGE_KEY_PATH"
   STUB_RETURN=1 mktest::stub_function age "--decrypt" "--identity" "$AGE_KEY_PATH" "$file"
   run ! age::can_decrypt "$file"
+}
+
+# --- age::_key_source_type ---
+
+@test "_key_source_type reads module.age.key_source_type, defaulting to file" {
+  STUB_OUTPUT="file" mktest::stub_function config::get "module.age.key_source_type" --default "file"
+  run age::_key_source_type
+  [ "$output" = "file" ]
+}
+
+@test "_key_source_type returns the configured value" {
+  STUB_OUTPUT="secrets_manager" mktest::stub_function config::get "module.age.key_source_type" --default "file"
+  run age::_key_source_type
+  [ "$output" = "secrets_manager" ]
+}
+
+# --- age::_reference_for_key ---
+
+@test "_reference_for_key resolves the age_key reference as a normal secrets consumer" {
+  STUB_OUTPUT="RESOLVED-REF" mktest::stub_function secrets::_reference_for "age_key"
+  run age::_reference_for_key
+  [ "$output" = "RESOLVED-REF" ]
+}
+
+# --- age::_manager_sources_key ---
+
+@test "_manager_sources_key is true when key_source_type is secrets_manager" {
+  STUB_OUTPUT="secrets_manager" mktest::stub_function age::_key_source_type
+  run age::_manager_sources_key
+  [ "$status" -eq 0 ]
+}
+
+@test "_manager_sources_key is false when key_source_type is file" {
+  STUB_OUTPUT="file" mktest::stub_function age::_key_source_type
+  run age::_manager_sources_key
+  [ "$status" -ne 0 ]
+}
+
+# --- age::assert_key_source_type ---
+
+@test "assert_key_source_type accepts file" {
+  STUB_OUTPUT="file" mktest::stub_function age::_key_source_type
+  age::assert_key_source_type
+}
+
+@test "assert_key_source_type accepts secrets_manager" {
+  STUB_OUTPUT="secrets_manager" mktest::stub_function age::_key_source_type
+  age::assert_key_source_type
+}
+
+@test "assert_key_source_type aborts on an unrecognized value — fires in the main shell" {
+  STUB_OUTPUT="vault" mktest::stub_function age::_key_source_type
+  STUB_EXIT=1 mktest::stub_function lifecycle::fail
+  run age::assert_key_source_type
+  [ "$status" -ne 0 ]
+  MATCH="invalid module.age.key_source_type 'vault'" mktest::assert_stub_called lifecycle::fail
+}
+
+# --- age::_warn_source_override ---
+
+@test "_warn_source_override warns when a manager source is overridden by an existing-key file" {
+  mktest::stub_function age::_manager_sources_key
+  mktest::stub_function logging::warn
+  age::_warn_source_override "/some/key.txt" "false"
+  MATCH="--existing-age-key-file" mktest::assert_stub_called logging::warn
+}
+
+@test "_warn_source_override warns when a manager source is overridden by --generate-age-key" {
+  mktest::stub_function age::_manager_sources_key
+  mktest::stub_function logging::warn
+  age::_warn_source_override "" "true"
+  MATCH="--generate-age-key" mktest::assert_stub_called logging::warn
+}
+
+@test "_warn_source_override is silent when the key source is not the manager (nothing to override)" {
+  STUB_RETURN=1 mktest::stub_function age::_manager_sources_key
+  mktest::stub_function logging::warn
+  age::_warn_source_override "/some/key.txt" "true"
+  mktest::assert_stub_not_called logging::warn
+}
+
+@test "_warn_source_override is silent when a manager source is used with no overriding flag" {
+  mktest::stub_function age::_manager_sources_key
+  mktest::stub_function logging::warn
+  age::_warn_source_override "" "false"
+  mktest::assert_stub_not_called logging::warn
 }

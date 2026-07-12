@@ -8,9 +8,9 @@ setup() {
   source "$MACHINEKIT_DIR/lib/machinekit/resolver.sh"
   unset _MK_RESOLVER_LOADED
 
-  # Prevent real module files from loading in resolver tests; capability
-  # functions are defined inline per-test.
-  mktest::stub_function modules::source_all
+  # The resolver no longer sources modules itself (lib/machinekit.sh does that
+  # eagerly for real runs); each test defines the module ::requires/::after hooks
+  # it needs inline.
 }
 
 # --- load guard ---

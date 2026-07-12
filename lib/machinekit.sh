@@ -50,3 +50,12 @@ source "$_mk_core_dir/hooks.sh"
 source "$_mk_core_dir/postflight.sh"
 
 unset _mk_core_dir
+
+# Source every module now, in the main shell of whichever entry point sourced us,
+# so their functions are defined once and inherited by every subshell it later
+# forks (process/command substitutions, pipes). Modules only define functions at
+# source time — no context, prerequisites, or config is touched — so this is
+# side-effect-free and safe this early. It means no downstream code has to
+# source_all itself, and nothing can be stranded in a subshell where the sourcing
+# wouldn't reach the parent.
+modules::source_all

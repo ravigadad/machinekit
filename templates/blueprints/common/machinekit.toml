@@ -22,6 +22,40 @@
 #
 # [module.age]
 # key_path = "~/.config/age/key.txt"  # default; override only if needed
+# # Where the age key itself comes from: "file" (copied via --existing-age-key-file
+# # or generated via --generate-age-key; the default) or "secrets_manager" (fetched
+# # from the active manager — see [module.infisical] below). Under "secrets_manager"
+# # the key is just the "age_key" secret: give it an explicit reference in
+# # [secrets.manager_refs] below, or rely on the convention name "age_key".
+# key_source_type = "file"
+#
+# [module.infisical]
+# # Source any named secret (a tailscale key, a hindsight key, a git_backup
+# # ssh_key, even the age key) from Infisical Cloud instead of the age pool. See
+# # docs/modules.md for the one-time account + machine-identity setup. Listing
+# # this makes machinekit authenticate to Infisical during preflight, `secrets
+# # list`, and an interactive `secrets put` — a network call, and for `user` auth
+# # a browser login when your (~10-day) session has lapsed.
+# auth_method = "universal"       # "universal" (machine identity, headless) or
+#                                 # "user" (browser/SSO, interactive only) —
+#                                 # typically set per machine_type
+# client_id = "..."               # universal auth only; non-sensitive, safe to commit.
+#                                 # The client SECRET is provided at apply time via
+#                                 # MACHINEKIT_INFISICAL_CLIENT_SECRET, never here.
+# default_project_id = "..."      # fallback project for by-convention names; an
+#                                 # explicit reference below may point elsewhere
+# environment = "prod"            # default environment for by-convention names
+#
+# [secrets.manager_refs]
+# # Map a specific secret to an explicit Infisical reference
+# # (infisical://<projectId>/<env>/<name>). Unmapped names fall back to a
+# # convention key — the name upcased with slashes→underscores — looked up in
+# # default_project_id/environment; machinekit verifies the manager actually holds
+# # it, so a name in neither the pool nor the manager reads as missing.
+# "tailscale/default" = "infisical://<projectId>/prod/tailscale/default"
+# # The age key (when [module.age] key_source_type = "secrets_manager") is the
+# # "age_key" secret — reference it explicitly here, or rely on its convention key.
+# "age_key" = "infisical://<projectId>/prod/age_key"
 #
 # [module.postgres]
 # # By default (no config) postgres manages the host's port-5432 instance,
@@ -56,24 +90,26 @@
 # # api_port  = "8888"   # host port for the memory API
 # # ui_port   = "9999"   # host port for the control-plane web UI
 # #
-# # Secrets come from the blueprint pool (secrets/hindsight/*.age), one raw value
-# # per file — not the home pipeline:
-# #   secrets/hindsight/llm_api_key.age     (required — machinekit can't make one)
-# #   secrets/hindsight/tenant_api_key.age  (optional — generated if absent)
-# #   secrets/hindsight/db_password.age     (optional — generated if absent)
-# #   secrets/hindsight/cp_access_key.age   (optional — password gating the web UI;
-# #                                          see below)
+# # Secrets are named hindsight/* — an age-encrypted pool file at
+# # secrets/hindsight/<name>.age, or a secrets-manager reference (see
+# # [module.infisical]), whichever backend holds each — not the home pipeline:
+# #   hindsight/llm_api_key     (required — machinekit can't make one)
+# #   hindsight/tenant_api_key  (optional — generated if absent)
+# #   hindsight/db_password     (optional — generated if absent)
+# #   hindsight/cp_access_key   (optional — password gating the web UI; see below)
 # # machinekit assembles them into a create-once ~/.config/hindsight/hindsight.env
 # # (mode 600): the container's env_file and the record of any generated values.
 # # To regenerate, delete that file and re-apply. When the tenant key is generated
-# # it is announced — save it into secrets/hindsight/tenant_api_key.age and share
-# # it with your other boxes (every hindsight machine must use the same one).
+# # it is announced — persist it as the hindsight/tenant_api_key secret (into the
+# # pool or your manager) and share it with your other boxes (every hindsight
+# # machine must use the same one).
 # #
 # # The control-plane web UI is always password-gated (HINDSIGHT_CP_ACCESS_KEY).
-# # The password resolves to: the cp_access_key.age pool secret if present, else a
-# # password you type at an interactive apply (blank to generate), else a generated
-# # one on a non-interactive run. A generated one is announced so you can retrieve
-# # it from hindsight.env to sign in.
+# # The password resolves to: the hindsight/cp_access_key secret if whichever
+# # backend holds it (pool file or manager reference) has it, else a password you
+# # type at an interactive apply (blank to generate), else a generated one on a
+# # non-interactive run. A generated one is announced so you can retrieve it from
+# # hindsight.env to sign in.
 #
 # [module.hindsight_integration]
 # # Wires this machine's coding agents to a Hindsight memory server. List
@@ -101,9 +137,9 @@
 # # additional_banks.auto_recall = ["shared", "reference"]
 # # additional_banks.tool_use = ["shared"]
 # #
-# # The fleet-shared tenant key comes from the same pool secret the server uses,
-# # secrets/hindsight/tenant_api_key.age (generated if absent — this box may be
-# # the first). machinekit assembles it, with the server URL, into each agent's
+# # The fleet-shared tenant key is the same hindsight/tenant_api_key secret the
+# # server uses (pool or manager; generated if absent — this box may be the
+# # first). machinekit assembles it, with the server URL, into each agent's
 # # config (e.g. ~/.hindsight/claude-code.json, mode 600), create-once. To repoint
 # # at a different server or regenerate, delete the config(s) and re-apply.
 #
@@ -151,7 +187,8 @@
 # # Omit `tag` on a user device (laptop): installs the client (GUI app on
 # # macOS); you sign in yourself.
 # # Set `tag` on a headless service device: installs the daemon and joins the
-# # tailnet itself using an age-encrypted OAuth secret. Requires the age module.
+# # tailnet itself using an OAuth secret — an age-encrypted pool file or a secrets
+# # manager (see [module.infisical]); machinekit pulls in whichever backend holds it.
 # tag = "server"
 # # `hostname` pins this device's tailnet (MagicDNS) name when machinekit joins it
 # # (tagged devices only). Set it to the name other machines will use to reach
@@ -159,9 +196,9 @@
 # # [module.hindsight_integration] server_host. Omit to keep the OS hostname.
 # hostname = "memory-server"
 # # `tailnet` is your label for which tailnet's secret to use; omit it for the
-# # default tailnet. The secret lives in the blueprint-global secrets pool — a
-# # sibling of common/ and machine_types/, not inside either:
-# #   secrets/tailscale/<tailnet>.age
+# # default tailnet. The secret is named tailscale/<tailnet> — an age-encrypted
+# # pool file at secrets/tailscale/<tailnet>.age (a sibling of common/ and
+# # machine_types/), or a manager reference (see [module.infisical]).
 # tailnet = "work"
 #
 # [module.syncthing]
@@ -170,6 +207,13 @@
 # # (typically tailnet MagicDNS names) on the same tailnet. Set discovery =
 # # "default" to keep Syncthing's own discovery for LAN or relay topologies.
 # discovery = "tailnet"
+# #
+# # Syncthing can leave *.sync-conflict-* files when two machines edit the same
+# # file; machinekit runs a periodic scan that surfaces them. `interval` is the
+# # scan period in seconds; `notify` is a command run with a message when
+# # conflicts are found (default: logger/journald).
+# # interval = 300
+# # notify = "/path/to/notify-hook"
 # #
 # # Hub-and-spoke. Mark ONE always-on machine `hub = true`: it accepts joiners that
 # # connect (discovering their device IDs) instead of pre-listing them. Every other
@@ -208,10 +252,12 @@
 # # all folders. Each folder is single-writer: back a given folder up from EXACTLY
 # # ONE machine (usually the always-on server), or the machines race its branch.
 # #
-# # `ssh_key` (module default; per-folder override below) names an age-encrypted
-# # key in the pool at secrets/git_backup/ssh_keys/<name>.age — any key with push
-# # access (a deploy key, your own key). machinekit decrypts it and pushes with it,
-# # pulling in the age module automatically. Omit it to push over ambient SSH.
+# # `ssh_key` (module default; per-folder override below) names a secret at
+# # git_backup/ssh_keys/<name> — an age-encrypted pool file
+# # (secrets/git_backup/ssh_keys/<name>.age) or a secrets-manager reference (see
+# # [module.infisical]) — any key with push access (a deploy key, your own key).
+# # machinekit resolves it (pulling in whichever backend holds it) and pushes with
+# # it. Omit it to push over ambient SSH.
 # ssh_key = "agents"
 # # interval = 300                  # seconds between backup runs
 # # notify = "/path/to/notify-hook" # run with a message on trouble; default: logger/journald

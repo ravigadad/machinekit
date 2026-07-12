@@ -15,7 +15,7 @@ secrets::render() {
   orphans="$(secrets::orphans)"
 
   if [ -z "$rows" ] && [ -z "$orphans" ]; then
-    logging::info "No pool secrets are needed or present for the active modules."
+    logging::info "No secrets are needed or present for the active modules."
     return 0
   fi
 
@@ -26,10 +26,11 @@ secrets::render() {
 
 # A blank-prefixed table with bold headers, hand-aligned (column -t can't be used
 # — the per-row ANSI codes would throw off its width math). Each row is colored by
-# how it stands: green when already in the pool, yellow when absent but machinekit
-# will generate it, red when it is a blocker (absent, required, not generated).
+# how it stands: green when a backend resolves it (pool or manager), yellow when
+# missing but machinekit will generate it, red when it is a blocker (missing,
+# required, not generated).
 secrets::render::_table() {
-  local rows="$1" path required can_be_generated state in_pool req_col gen_col color line
+  local rows="$1" name required can_be_generated state req_col gen_col color line
   # Decide color here, where stdout is the command's real stdout — never inside a
   # $() (there fd 1 is the capture pipe, so [ -t 1 ] would always be false).
   local bold="" reset="" green="" yellow="" red=""
@@ -39,23 +40,23 @@ secrets::render::_table() {
   fi
 
   local secret_width=6 # len("SECRET")
-  while IFS=$'\t' read -r path _; do
-    [ "${#path}" -gt "$secret_width" ] && secret_width="${#path}"
+  while IFS=$'\t' read -r name _; do
+    [ "${#name}" -gt "$secret_width" ] && secret_width="${#name}"
   done <<< "$rows"
 
   printf '\n'
   printf -v line '%-*s  %-7s  %-8s  %-19s' \
-    "$secret_width" SECRET "IN POOL" REQUIRED "GENERATE IF MISSING"
+    "$secret_width" SECRET "SOURCE" REQUIRED "GENERATE IF MISSING"
   printf '%s%s%s\n' "$bold" "$line" "$reset"
 
-  while IFS=$'\t' read -r path required can_be_generated state; do
-    [ -n "$path" ] || continue
-    if [ "$state" = provided ]; then in_pool=yes; else in_pool=no; fi
+  while IFS=$'\t' read -r name required can_be_generated state; do
+    [ -n "$name" ] || continue
     if [ "$required" = true ]; then req_col=yes; else req_col=no; fi
     if [ "$can_be_generated" = true ]; then gen_col=yes; else gen_col=no; fi
-    # Green once it's in the pool; otherwise yellow if machinekit will generate it,
-    # red if it's a required blocker, and uncolored if it's merely optional.
-    if [ "$state" = provided ]; then
+    # Green once a backend resolves it (pool or manager); otherwise yellow if
+    # machinekit will generate it, red if it's a required blocker, and
+    # uncolored if it's merely optional.
+    if [ "$state" != missing ]; then
       color="$green"
     elif [ "$can_be_generated" = true ]; then
       color="$yellow"
@@ -65,7 +66,7 @@ secrets::render::_table() {
       color=""
     fi
     printf -v line '%-*s  %-7s  %-8s  %-19s' \
-      "$secret_width" "$path" "$in_pool" "$req_col" "$gen_col"
+      "$secret_width" "$name" "$state" "$req_col" "$gen_col"
     printf '%s%s%s\n' "$color" "$line" "$reset"
   done <<< "$rows"
 }

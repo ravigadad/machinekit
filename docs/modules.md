@@ -13,7 +13,7 @@ This is the machinekit-specific quick start, not a replacement for each tool's o
 These aren't modules, but everything else assumes them.
 
 - **A blueprints repo.** Scaffold one with `machinekit generate <path>`, customize, and commit. See the [README quick start](../README.md#quick-start). A private repo cloned over SSH is handled by machinekit (it can install or generate the key and walk you through registering it); HTTPS uses git's own credentials.
-- **An age key**, if any blueprint content is encrypted (the `secrets/` pool or `home/**.age` dotfiles). machinekit installs the key on first apply — from a file you point at (`--existing-age-key-file`) or generated with explicit consent (`--generate-age-key`). The **public** key is what you encrypt secrets *to*; print it with:
+- **An age key**, if any blueprint content is encrypted (the `secrets/` pool or `home/**.age` dotfiles) and you're not sourcing every one of those secrets from a secrets manager instead (see the `infisical` section below — in that case the age module and this whole section don't apply). machinekit installs the key on first apply — from a file you point at (`--existing-age-key-file`), fetched from a secrets manager when the age module is directed to source it (`[module.age] key_source_type = "secrets_manager"`, not merely an active manager), or generated with explicit consent (`--generate-age-key`). The **public** key is what you encrypt secrets *to*; print it with:
 
   ```bash
   age-keygen -y ~/.config/age/key.txt
@@ -27,14 +27,33 @@ These aren't modules, but everything else assumes them.
 
   (`printf` without a trailing newline matters for secrets consumed verbatim.) See [architecture.md § Secrets and key management](./architecture.md#secrets-and-key-management) for the two secret channels.
 
-  To see which pool secrets your active modules actually need — which are required, which machinekit will generate if missing, and which you've already provided — run `machinekit secrets list` (read-only; it changes nothing). To create one without hand-rolling the `age -r …` pipe (right recipient, right path), use `machinekit secrets put` — the value comes from stdin, a file, or a hidden prompt, and it lands in your local blueprint working tree for you to commit:
+  To see which secrets your active modules actually need — which are required, which machinekit will generate if missing, and which are resolved (from the pool or a secrets manager) already — run `machinekit secrets list` (it applies nothing to the machine; when a secrets manager is active it authenticates to answer truthfully — see the infisical note below). To put one in the pool without hand-rolling the `age -r …` pipe (right recipient, right path), use `machinekit secrets put <name>` — the value comes from stdin, a file, or a hidden prompt, and it lands in your local blueprint working tree for you to commit:
 
   ```bash
-  printf '%s' '<secret-value>' | machinekit secrets put secrets/<service>/<name>.age \
+  printf '%s' '<secret-value>' | machinekit secrets put <service>/<name> \
     --blueprints-dir <your-blueprints-checkout>
   ```
 
   If you already have the *encrypted* `.age` file (and your key can decrypt it), pass it with `--from-file` — machinekit verifies it and copies it in as-is rather than re-encrypting it.
+
+---
+
+## infisical — an alternative to the age pool for individual secrets
+
+`infisical` is the `secrets_manager` capability's first satisfier: any secret a module declares (a tailscale OAuth secret, a hindsight key, a git_backup ssh_key, or the age key itself) can be sourced from [Infisical Cloud](https://infisical.com) instead of an age-encrypted pool file. Self-hosting Infisical is out of scope for this module — it always talks to Infisical's hosted API.
+
+This section is the out-of-band setup — the Infisical account, identity, and secret values you create *outside* machinekit. The blueprint keys themselves (`auth_method`, `client_id`, `default_project_id`, `environment`, and per-secret `[secrets.manager_refs]`) are documented inline in the commented `[module.infisical]` block that `machinekit generate` writes into `common/machinekit.toml` — configure them there.
+
+1. **Create an Infisical Cloud account and project** at [infisical.com](https://infisical.com), and note the project's ID (it becomes `default_project_id`).
+2. **Choose an auth method** — typically machine-type layered (an attended personal machine wants `user`, a headless server wants `universal`):
+   - `universal` (machine identity) — the only method that works non-interactively. In the Infisical dashboard, create a machine identity (Access Control → Identities), grant it at least Viewer on your project, and note its `client_id`/`client_secret`.
+   - `user` (browser/SSO) — interactive only. No account setup beyond having a login (including via GitHub/Google/SSO if your org federates); `infisical login` opens a browser and the resulting session lives in your OS keyring.
+3. **Provide the client secret at apply time** (universal auth) — never in the blueprint. Set the `MACHINEKIT_INFISICAL_CLIENT_SECRET` env var (there's no dedicated flag; env var or, on an interactive apply, a hidden prompt). This is root-of-trust material, the same tier as the age key's own bootstrap inputs.
+4. **File the actual secret values in Infisical** (Secrets Manager → your project → the environment/name a `[secrets.manager_refs]` entry points at, or the upcased/underscored convention name in your `default_project_id`/`environment` when relying on the fallback), the same way you'd otherwise `age -r ... -o secrets/<service>/<name>.age` them into the pool.
+
+`machinekit secrets list` shows each secret's resolved source (`pool`, `manager`, or `missing`) regardless of backend — it doesn't matter which one actually holds a given secret.
+
+Because presence is checked against the manager itself, **listing infisical means machinekit authenticates to Infisical during preflight, during `secrets list`, and during an interactive `secrets put`** — a network round trip, and for `user` auth a browser login when your keyring session has lapsed (Infisical Cloud sessions last ~10 days, so this is occasional, not every run). This also happens under `apply --dry-run`: the login is the one outward action a dry run takes, and machinekit says so — nothing else is mutated. If you can't reach Infisical or complete the login, preflight fails rather than guessing a secret's source.
 
 ---
 
@@ -53,7 +72,7 @@ No setup is needed if you only clone public repos over HTTPS.
 
 A **user device** (a laptop you sit at — no `tag` in `[module.tailscale]`) needs **no pre-setup**: machinekit installs the client and you sign in yourself afterward (the GUI app on macOS, `sudo tailscale up` on Linux).
 
-A **tagged device** (a headless server — `tag = "..."`) is joined by machinekit itself using an age-encrypted OAuth client secret, so you set that up once in the Tailscale admin console:
+A **tagged device** (a headless server — `tag = "..."`) is joined by machinekit itself using an OAuth client secret — an age-encrypted pool file (below) or a secrets-manager reference (see `infisical`) — so you set that up once in the Tailscale admin console:
 
 1. Sign in at [login.tailscale.com](https://login.tailscale.com) — the account owns your tailnet.
 2. **Access Controls** (policy file): declare the tag's owner, e.g. `"tagOwners": { "tag:server": ["autogroup:admin"] }`.
@@ -78,7 +97,7 @@ No out-of-band account or secret. machinekit installs the platform default — O
 
 ## hindsight_server — an LLM provider key, and the shared tenant key
 
-`hindsight_server` runs a self-hosted [Hindsight](https://github.com/vectorize-io/hindsight) memory API as a container against the host postgres (the container runtime and postgres are pulled in automatically). List it in `modules` only on the machine that should be the memory server. Its secrets come from the blueprint pool (`secrets/hindsight/*.age` — one raw value per file, the same channel tailscale uses):
+`hindsight_server` runs a self-hosted [Hindsight](https://github.com/vectorize-io/hindsight) memory API as a container against the host postgres (the container runtime and postgres are pulled in automatically). List it in `modules` only on the machine that should be the memory server. Its secrets are named `hindsight/*` (resolved from the blueprint pool or, if configured, a secrets manager — see `infisical`):
 
 1. **Pick an LLM provider and supply its API key (required — machinekit can't make one).** Set `[module.hindsight_server] llm_provider = "..."` (no default) and encrypt the matching key into the pool:
 
@@ -99,7 +118,7 @@ machinekit assembles these into a create-once `~/.config/hindsight/hindsight.env
 `hindsight_integration` wires this machine's coding agents (chosen with `integrations = [...]`) to a Hindsight server. Setup is just connectivity:
 
 1. **Point at the server.** Set either `server_host` (a reachable host — typically its tailnet MagicDNS name) or `server_url` (a full URL, for https, a path, or a hosted Hindsight) in `[module.hindsight_integration]`.
-2. **Share the tenant key.** The same `secrets/hindsight/tenant_api_key.age` the server uses — every box must match (see hindsight_server above). If this machine is provisioned before the server, machinekit generates and announces the key here; carry it to the server too.
+2. **Share the tenant key.** The same `hindsight/tenant_api_key` secret the server uses — every box must match (see hindsight_server above). If this machine is provisioned before the server, machinekit generates and announces the key here; carry it to the server too.
 
 Everything else (which banks to auto-recall or expose as tools) is plain config in the commented block in [`templates/blueprints/common/machinekit.toml`](../templates/blueprints/common/machinekit.toml). No accounts to create; an agent's own sign-in (e.g. `claude` on first run) is separate and yours to do.
 
@@ -210,12 +229,13 @@ path = "~/notes"
 remote = "git@github.com:you/notes.git"
 ```
 
-**The push key.** A folder pushes over whatever SSH key you name. `ssh_key` is the name of an age-encrypted key in the blueprint pool — set it module-wide and/or override it per folder. machinekit decrypts it on the server (never the home pipeline) to a private key file the push uses:
+**The push key.** A folder pushes over whatever SSH key you name. `ssh_key` is the name of a secret in the pool (or a secrets manager, if configured — see `infisical`) — set it module-wide and/or override it per folder. machinekit resolves it on the server (never the home pipeline) to a private key file the push uses:
 
 ```
-secrets/git_backup/ssh_keys/<name>.age   # an SSH private key authorized to push to that folder's remote
+git_backup/ssh_keys/<name>       # an SSH private key authorized to push to that folder's remote
+                                  # as a pool file: secrets/git_backup/ssh_keys/<name>.age
 ```
 
-Any key with write access works — a GitHub deploy key, your own key, whatever. Generate one (`ssh-keygen -t ed25519 -f <name> -N ""`), authorize its public half on the remote, then age-encrypt the private half into the pool path above. **Omit `ssh_key` entirely** to push over ambient SSH (an agent or an on-disk default key) — then no secret is needed. When any `ssh_key` is named, preflight requires its secret and pulls in the `age` module automatically.
+Any key with write access works — a GitHub deploy key, your own key, whatever. Generate one (`ssh-keygen -t ed25519 -f <name> -N ""`), authorize its public half on the remote, then age-encrypt the private half into the pool path above (or file it in your secrets manager under that name). **Omit `ssh_key` entirely** to push over ambient SSH (an agent or an on-disk default key) — then no secret is needed. When any `ssh_key` is named, preflight requires it and pulls in whichever backend actually resolves it (`age` and/or `secrets_manager`) automatically.
 
 **Ignore patterns.** Each folder gets a machinekit-managed `.gitignore` by default, so the backup repo never carries junk — `.DS_Store` and, notably, `.stversions/` (Syncthing's version buffer), which git would otherwise commit. So pairing a `syncthing` folder with a `git_backup` folder for the same path just works; you don't list `.stversions/` yourself. The same three knobs apply per folder: `ignore_patterns = [...]` (your patterns, above the defaults), `add_default_ignores = false`, and `manage_gitignore = false` (leave the file to you). machinekit rewrites only its own delimited block; as with any `.gitignore` it affects only untracked files, so anything already committed needs a manual `git rm --cached`. The `.gitignore` is written only if the folder already exists — git_backup never creates a folder another module is meant to seed.

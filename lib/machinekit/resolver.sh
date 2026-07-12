@@ -19,7 +19,6 @@ _resolver_active=""
 _resolver_apply_after=0
 
 resolver::resolve() {
-  modules::source_all
   _resolver_requested=("$@")
 
   # Pass 1 — the active set (requires only).

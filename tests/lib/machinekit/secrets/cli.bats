@@ -16,7 +16,6 @@ setup() {
   mktest::stub_function context::load_user_config
   mktest::stub_function input::detect_mode
   mktest::stub_function preflight::resolve_inputs
-  mktest::stub_function modules::source_all
 }
 
 # --- secrets::cli::dispatch ---
@@ -45,23 +44,28 @@ setup() {
 
 # --- secrets::cli::list ---
 
-@test "list bootstraps, resolves inputs, then renders, in order" {
+@test "list bootstraps, resolves inputs, readies the secrets manager, asserts the age-key invariant, then renders, in order" {
   mktest::stub_function secrets::cli::_bootstrap
+  mktest::stub_function secrets_manager::ensure_ready
+  mktest::stub_function secrets::assert_age_key_not_pooled
+  mktest::stub_function age::assert_key_source_type
   mktest::stub_function secrets::render
   secrets::cli::list
   mktest::assert_stub_called_in_order secrets::cli::_bootstrap
   mktest::assert_stub_called_in_order preflight::resolve_inputs
+  mktest::assert_stub_called_in_order secrets_manager::ensure_ready
+  mktest::assert_stub_called_in_order secrets::assert_age_key_not_pooled
+  mktest::assert_stub_called_in_order age::assert_key_source_type
   mktest::assert_stub_called_in_order secrets::render
 }
 
 # --- secrets::cli::put ---
 
-@test "put bootstraps, sources modules, then runs the put use-case with its args" {
+@test "put bootstraps, then runs the put use-case with its args" {
   mktest::stub_function secrets::cli::_bootstrap
   mktest::stub_function secrets::put "secrets/x.age" "/tmp/val"
   secrets::cli::put "secrets/x.age" "/tmp/val"
   mktest::assert_stub_called_in_order secrets::cli::_bootstrap
-  mktest::assert_stub_called_in_order modules::source_all
   mktest::assert_stub_called_in_order secrets::put "secrets/x.age" "/tmp/val"
 }
 

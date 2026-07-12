@@ -46,8 +46,8 @@ machinekit ships a single user-facing command, `machinekit`, that dispatches to 
 |---|---|
 | `machinekit apply [flags]`     | Apply a blueprint to this machine (the workhorse) |
 | `machinekit generate <path>`   | Scaffold a fresh blueprint repo from the template |
-| `machinekit secrets list`      | Show which encrypted secrets the active modules need, and which are already in the pool (read-only) |
-| `machinekit secrets put [<path>]` | Age-encrypt a value and place it as a pool secret, or file an already-encrypted `.age` as-is (value via stdin/file/prompt, never an argument); writes to a working tree, never git |
+| `machinekit secrets list`      | List each secret the active modules need with its resolved source (pool, secrets manager, or missing); applies nothing, but readies an active secrets manager (which may authenticate) |
+| `machinekit secrets put [<name>]` | Age-encrypt a value and place it as a pool secret, or file an already-encrypted `.age` as-is (value via stdin/file/prompt, never an argument); writes to a working tree, never git |
 
 Run any subcommand with `--help` for its full flag list.
 

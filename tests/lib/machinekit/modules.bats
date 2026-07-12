@@ -74,12 +74,10 @@ setup() {
 }
 
 @test "_call_function_per_module calls given function for all modules that declare it" {
-  mktest::stub_function modules::source_all
   mktest::stub_function foo_module::test
   mktest::stub_function bar_module::test
   STUB_OUTPUT=$'foo_module\nbar_module\nbaz_module' mktest::stub_function context::get_array "modules.active"
   modules::_call_function_per_module "test"
-  mktest::assert_stub_called modules::source_all
   mktest::assert_stub_called foo_module::test
   mktest::assert_stub_called bar_module::test
 }
@@ -88,27 +86,44 @@ setup() {
 
 @test "collect runs the named hook across modules and forwards their output" {
   STUB_OUTPUT=$'the_result' \
-    mktest::stub_function modules::_call_function_per_module "pool_secrets"
-  run modules::collect pool_secrets
+    mktest::stub_function modules::_call_function_per_module "declared_secrets"
+  run modules::collect declared_secrets
   [ "$status" -eq 0 ]
   [ "$output" = $'the_result' ]
 }
 
 # --- modules::capability_active ---
 
-@test "capability_active is true when an active module provides the capability" {
-  fake_runtime::provides() { printf 'container_manager\n'; }
-  STUB_OUTPUT="fake_runtime" mktest::stub_function context::get_array "modules.active"
+@test "capability_active is true when capability_satisfier finds a satisfier" {
+  STUB_OUTPUT="fake_runtime" mktest::stub_function modules::capability_satisfier container_manager
   modules::capability_active container_manager
 }
 
-@test "capability_active is false when an active provider offers a different capability" {
-  fake_runtime::provides() { printf 'something_else\n'; }
-  STUB_OUTPUT="fake_runtime" mktest::stub_function context::get_array "modules.active"
+@test "capability_active is false when capability_satisfier finds none" {
+  STUB_RETURN=1 mktest::stub_function modules::capability_satisfier container_manager
   run ! modules::capability_active container_manager
 }
 
-@test "capability_active is false when no active module declares provides" {
+# --- modules::capability_satisfier ---
+
+@test "capability_satisfier returns the name of the active module providing the capability" {
+  fake_runtime::provides() { printf 'secrets_manager\n'; }
+  STUB_OUTPUT="fake_runtime" mktest::stub_function context::get_array "modules.active"
+  run modules::capability_satisfier secrets_manager
+  [ "$output" = "fake_runtime" ]
+}
+
+@test "capability_satisfier is empty when no active module provides the capability" {
   STUB_OUTPUT="plain_module" mktest::stub_function context::get_array "modules.active"
-  run ! modules::capability_active container_manager
+  run modules::capability_satisfier secrets_manager
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+}
+
+@test "capability_satisfier skips an active module that provides a different capability" {
+  fake_runtime::provides() { printf 'container_manager\n'; }
+  STUB_OUTPUT="fake_runtime" mktest::stub_function context::get_array "modules.active"
+  run modules::capability_satisfier secrets_manager
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
 }

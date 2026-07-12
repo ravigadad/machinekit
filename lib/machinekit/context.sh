@@ -54,8 +54,10 @@ context::set() {
 # per-user defaults file (loaded by context::load_user_config). With
 # --required, an unresolved key prompts interactively and then fails; without
 # it, an unresolved key returns 1 silently. --secret reads the prompt response
-# without echoing it and never persists it to the store — for secrets, since the
-# store is plaintext and handed to gomplate at apply time.
+# without echoing it and, whichever cascade tier resolves the value (env var and
+# per-user defaults included, not just the prompt), never persists it to the
+# store — for secrets, since the store is plaintext and handed to gomplate at
+# apply time.
 context::get() {
   local key="$1"; shift
   local required=0
@@ -91,10 +93,16 @@ context::get() {
   [ -n "$coerce" ] && _prompt_call+=(--type "$coerce")
   [ "$is_secret" = 1 ] && _prompt_call+=(--secret)
 
+  # A secret must not be cached to the plaintext store by the env/user-config
+  # readers (the prompt reader already honors --secret itself); pass the flag
+  # only when set, so non-secret call sites stay single-arg.
+  local secret_flag=()
+  [ "$is_secret" = 1 ] && secret_flag=(--secret)
+
   local val
   if   val=$(context::_from_store "$key"); then :
-  elif val=$(context::_from_env   "$key"); then :
-  elif val=$(context::_from_user_config "$key"); then :
+  elif val=$(context::_from_env   "$key" "${secret_flag[@]}"); then :
+  elif val=$(context::_from_user_config "$key" "${secret_flag[@]}"); then :
   elif [ "$should_prompt" = 1 ] && val=$(context::_prompt "${_prompt_call[@]}"); then :
   elif [ "$has_default" = 1 ]; then
     [ "$store_default" = 1 ] && context::set "$key" "$default"
@@ -229,6 +237,15 @@ context::_var_key() {
   printf '%s' "$1" | tr '.' '_' | tr '[:lower:]' '[:upper:]'
 }
 
+# context::env_var_name KEY
+# The environment variable that backs a dotted context key:
+# "infisical.client_secret" -> "MACHINEKIT_INFISICAL_CLIENT_SECRET". The single
+# home of that convention, shared by the env resolver and callers that need to
+# name the raw variable directly (e.g. to scrub a secret from the environment).
+context::env_var_name() {
+  printf 'MACHINEKIT_%s\n' "$(context::_var_key "$1")"
+}
+
 # context::_from_store KEY
 # Print the stored value for KEY, or return 1 if unset.
 context::_from_store() {
@@ -241,30 +258,35 @@ context::_from_store() {
   printf '%s\n' "$val"
 }
 
-# context::_from_env KEY
+# context::_from_env KEY [--secret]
 # Resolve from the MACHINEKIT_<KEY> env var. Writes the value back to the store
-# so subsequent reads are served from the cache rather than repeating the lookup.
+# so subsequent reads are served from the cache rather than repeating the lookup
+# — except under --secret, where the value must never reach the plaintext store.
 # Returns 1 if the var is unset.
 context::_from_env() {
-  local env_var
-  env_var="MACHINEKIT_$(context::_var_key "$1")"
+  local env_var is_secret=0
+  [ "${2:-}" = "--secret" ] && is_secret=1
+  env_var="$(context::env_var_name "$1")"
   local env_val="${!env_var:-}"
   [ -z "$env_val" ] && return 1
-  context::set "$1" "$env_val"
+  [ "$is_secret" = 1 ] || context::set "$1" "$env_val"
   printf '%s\n' "$env_val"
 }
 
-# context::_from_user_config KEY
+# context::_from_user_config KEY [--secret]
 # Resolve KEY (a dotted path) from the per-user defaults loaded by
 # context::load_user_config. Writes the hit back to the store so later reads are
-# served from the cache. Returns 1 when no defaults are loaded or KEY is unset.
+# served from the cache — except under --secret, where the value must never
+# reach the plaintext store. Returns 1 when no defaults are loaded or KEY is unset.
 context::_from_user_config() {
+  local is_secret=0
+  [ "${2:-}" = "--secret" ] && is_secret=1
   [ -n "$_MK_CONTEXT_USER_CONFIG_JSON" ] || return 1
   local val
   val=$(printf '%s' "$_MK_CONTEXT_USER_CONFIG_JSON" \
     | jq -r --arg path "$1" '($path | split(".")) as $p | getpath($p)')
   [ "$val" = "null" ] && return 1
-  context::set "$1" "$val"
+  [ "$is_secret" = 1 ] || context::set "$1" "$val"
   printf '%s\n' "$val"
 }
 
@@ -340,7 +362,7 @@ context::_prompt_hint() {
 # Report an unresolved required key with flag/env hints, then exit.
 context::_fail_required() {
   local env_var
-  env_var="MACHINEKIT_$(context::_var_key "$1")"
+  env_var="$(context::env_var_name "$1")"
   logging::error "Required value not provided: $1"
   logging::error "  ${env_var}=<value>"
   logging::error "  (some values can also be set via --opt-flags; see --help for details)"

@@ -18,16 +18,16 @@ setup() {
   mktest::stub_function secrets::render::_orphans
   secrets::render
   mktest::assert_stub_not_called secrets::render::_table
-  MATCH="No pool secrets" mktest::assert_stub_called logging::info
+  MATCH="No secrets" mktest::assert_stub_called logging::info
 }
 
 @test "render delegates to the table when secrets are declared" {
-  STUB_OUTPUT=$'secrets/x.age\ttrue\tfalse\tprovided' mktest::stub_function secrets::inventory
+  STUB_OUTPUT=$'tailscale/default\ttrue\tfalse\tpool' mktest::stub_function secrets::inventory
   STUB_OUTPUT="" mktest::stub_function secrets::orphans
   mktest::stub_function secrets::render::_table
   mktest::stub_function secrets::render::_orphans
   secrets::render
-  mktest::assert_stub_called secrets::render::_table $'secrets/x.age\ttrue\tfalse\tprovided'
+  mktest::assert_stub_called secrets::render::_table $'tailscale/default\ttrue\tfalse\tpool'
   mktest::assert_stub_not_called secrets::render::_orphans
 }
 
@@ -43,30 +43,44 @@ setup() {
 
 # --- secrets::render::_table ---
 
-@test "_table prints a blank line, a header, and yes/no columns from the booleans" {
+@test "_table prints a blank line, a header, and the resolved source/yes-no columns" {
   STUB_RETURN=1 mktest::stub_function secrets::render::_color_enabled   # color off: assert layout, not ANSI
-  run secrets::render::_table $'secrets/a.age\ttrue\tfalse\tprovided\nsecrets/bb.age\ttrue\ttrue\tmissing'
+  run secrets::render::_table $'tailscale/a\ttrue\tfalse\tpool\ngit_backup/bb\ttrue\ttrue\tmissing'
   [ "$status" -eq 0 ]
   [[ "$output" == $'\n'* ]]   # blank line above the table
-  [[ "$output" == *"SECRET"*"IN POOL"*"REQUIRED"*"GENERATE IF MISSING"* ]]
-  # provided + required + not-generatable -> yes / yes / no
-  [[ "${lines[1]}" == "secrets/a.age"*" yes "*" yes "*" no"* ]]
-  # missing + required + generatable -> no / yes / yes
-  [[ "${lines[2]}" == "secrets/bb.age"*" no "*" yes "*" yes"* ]]
+  [[ "$output" == *"SECRET"*"SOURCE"*"REQUIRED"*"GENERATE IF MISSING"* ]]
+  # pool-backed + required + not-generatable -> pool / yes / no
+  [[ "${lines[1]}" == "tailscale/a"*"pool"*" yes "*" no"* ]]
+  # missing + required + generatable -> missing / yes / yes
+  [[ "${lines[2]}" == "git_backup/bb"*"missing"*" yes "*" yes"* ]]
+}
+
+@test "_table shows manager-backed secrets with a manager source" {
+  STUB_RETURN=1 mktest::stub_function secrets::render::_color_enabled
+  run secrets::render::_table $'hindsight/tenant_api_key\ttrue\ttrue\tmanager'
+  [ "$status" -eq 0 ]
+  [[ "${lines[1]}" == "hindsight/tenant_api_key"*"manager"* ]]
 }
 
 @test "_table colors each row by its disposition when color is enabled" {
   mktest::stub_function secrets::render::_color_enabled  # default STUB_RETURN 0 = enabled
-  run secrets::render::_table $'secrets/p.age\ttrue\tfalse\tprovided\nsecrets/g.age\ttrue\ttrue\tmissing\nsecrets/b.age\ttrue\tfalse\tmissing'
+  run secrets::render::_table $'tailscale/p\ttrue\tfalse\tpool\nhindsight/g\ttrue\ttrue\tmissing\ngit_backup/b\ttrue\tfalse\tmissing'
   [ "$status" -eq 0 ]
-  [[ "$output" == *$'\033[32msecrets/p.age'* ]]   # in pool -> green
-  [[ "$output" == *$'\033[33msecrets/g.age'* ]]   # absent, generatable -> yellow
-  [[ "$output" == *$'\033[31msecrets/b.age'* ]]   # absent, required, not generatable -> red blocker
+  [[ "$output" == *$'\033[32mtailscale/p'* ]]   # resolved (pool) -> green
+  [[ "$output" == *$'\033[33mhindsight/g'* ]]   # absent, generatable -> yellow
+  [[ "$output" == *$'\033[31mgit_backup/b'* ]]  # absent, required, not generatable -> red blocker
+}
+
+@test "_table colors a manager-backed secret green like a pool-backed one" {
+  mktest::stub_function secrets::render::_color_enabled
+  run secrets::render::_table $'hindsight/tenant_api_key\ttrue\ttrue\tmanager'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *$'\033[32mhindsight/tenant_api_key'* ]]
 }
 
 @test "_table emits no color when color is disabled" {
   STUB_RETURN=1 mktest::stub_function secrets::render::_color_enabled
-  run secrets::render::_table $'secrets/a.age\ttrue\tfalse\tprovided'
+  run secrets::render::_table $'tailscale/a\ttrue\tfalse\tpool'
   [ "$status" -eq 0 ]
   [[ "$output" != *$'\033['* ]]
 }

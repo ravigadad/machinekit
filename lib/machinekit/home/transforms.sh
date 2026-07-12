@@ -60,7 +60,6 @@ home::transforms::register() {
 # so any directly-registered framework transforms are preserved. Each hook emits
 # "ext tier fn" lines; modules without the hook contribute nothing.
 home::transforms::register_from_modules() {
-  modules::source_all
   local mod line fields
   while IFS= read -r mod; do
     [ -z "$mod" ] && continue

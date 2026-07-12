@@ -21,19 +21,23 @@ secrets::cli::dispatch() {
 }
 
 # Read-only: bootstrap, resolve inputs (no lock, installs, or staging — none of
-# which a listing needs), then render the pool inventory.
+# which a listing needs), ready any active secrets manager so its secrets show a
+# truthful source (a network loop, possibly an interactive login), then render.
 secrets::cli::list() {
   secrets::cli::_bootstrap
   preflight::resolve_inputs
+  secrets_manager::ensure_ready
+  secrets::assert_age_key_not_pooled
+  age::assert_key_source_type
   secrets::render
 }
 
-# Bootstrap, make the module functions available (age::recipient / age::encrypt),
-# then run the put use-case with the parsed target and --from-file.
+# Bootstrap, then run the put use-case with the parsed target and --from-file.
+# Module functions (age::recipient / age::encrypt, the secrets-manager satisfier)
+# are already sourced eagerly by lib/machinekit.sh.
 secrets::cli::put() {
   local target="$1" from_file="$2"
   secrets::cli::_bootstrap
-  modules::source_all
   secrets::put "$target" "$from_file"
 }
 

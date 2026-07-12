@@ -71,7 +71,6 @@ setup() {
 
 @test "register_from_modules registers each active module's declared transforms" {
   mktest::stub_function home::transforms::register
-  mktest::stub_function modules::source_all
   STUB_OUTPUT=$'mod_a\nmod_b\nmod_c' mktest::stub_function context::get_array "modules.active"
   mod_a::file_transforms() {
     printf '%s\n' "gz   decode zip::decompress"
@@ -90,7 +89,6 @@ setup() {
 
 @test "register_from_modules hard-fails on a malformed file_transforms line" {
   mktest::stub_function home::transforms::register
-  mktest::stub_function modules::source_all
   STUB_EXIT=1 mktest::stub_function lifecycle::fail
   STUB_OUTPUT="mod_a" mktest::stub_function context::get_array "modules.active"
   mod_a::file_transforms() { printf '%s\n' "gz decode zip::decompress extra"; }

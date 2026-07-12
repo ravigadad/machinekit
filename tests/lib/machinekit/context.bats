@@ -195,6 +195,16 @@ setup() {
   [ "$result" = "secret-val" ]
 }
 
+@test "get --secret threads --secret to both the env and user-config readers" {
+  STUB_RETURN=1 mktest::stub_function context::_from_store "test.key"
+  STUB_RETURN=1 mktest::stub_function context::_from_env "test.key" "--secret"
+  STUB_OUTPUT="secret-val" mktest::stub_function context::_from_user_config "test.key" "--secret"
+  result=$(context::get "test.key" --secret)
+  [ "$result" = "secret-val" ]
+  mktest::assert_stub_called context::_from_env "test.key" "--secret"
+  mktest::assert_stub_called context::_from_user_config "test.key" "--secret"
+}
+
 @test "get --default + --prompt prompts and returns default on empty response" {
   STUB_RETURN=1 mktest::stub_function context::_from_store "test.key"
   STUB_RETURN=1 mktest::stub_function context::_from_env "test.key"
@@ -416,6 +426,12 @@ setup() {
   [ "$(context::_var_key "verbose")" = "VERBOSE" ]
 }
 
+# --- context::env_var_name ---
+
+@test "env_var_name maps a dotted key to its MACHINEKIT_ environment variable" {
+  [ "$(context::env_var_name "infisical.client_secret")" = "MACHINEKIT_INFISICAL_CLIENT_SECRET" ]
+}
+
 # --- context::_from_store ---
 
 @test "_from_store prints a stored value" {
@@ -432,15 +448,24 @@ setup() {
 
 @test "_from_env resolves the MACHINEKIT_ variable and writes it back to the store" {
   export MACHINEKIT_TEST_KEY="from-env"
-  STUB_OUTPUT="TEST_KEY" mktest::stub_function context::_var_key "test.key"
+  STUB_OUTPUT="MACHINEKIT_TEST_KEY" mktest::stub_function context::env_var_name "test.key"
   mktest::stub_function context::set "test.key" "from-env"
   result=$(context::_from_env "test.key")
   [ "$result" = "from-env" ]
   mktest::assert_stub_called context::set "test.key" "from-env"
 }
 
+@test "_from_env with --secret returns the value but never writes it to the store" {
+  export MACHINEKIT_TEST_KEY="hunter2"
+  STUB_OUTPUT="MACHINEKIT_TEST_KEY" mktest::stub_function context::env_var_name "test.key"
+  mktest::stub_function context::set
+  result=$(context::_from_env "test.key" --secret)
+  [ "$result" = "hunter2" ]
+  mktest::assert_stub_not_called context::set
+}
+
 @test "_from_env returns 1 when the MACHINEKIT_ variable is unset" {
-  STUB_OUTPUT="TEST_KEY" mktest::stub_function context::_var_key "test.key"
+  STUB_OUTPUT="MACHINEKIT_TEST_KEY" mktest::stub_function context::env_var_name "test.key"
   run ! context::_from_env "test.key"
 }
 
@@ -452,6 +477,14 @@ setup() {
   result=$(context::_from_user_config "machine_type")
   [ "$result" = "personal" ]
   mktest::assert_stub_called context::set "machine_type" "personal"
+}
+
+@test "_from_user_config with --secret returns the value but never writes it to the store" {
+  _MK_CONTEXT_USER_CONFIG_JSON='{"infisical":{"client_secret":"hunter2"}}'
+  mktest::stub_function context::set
+  result=$(context::_from_user_config "infisical.client_secret" --secret)
+  [ "$result" = "hunter2" ]
+  mktest::assert_stub_not_called context::set
 }
 
 @test "_from_user_config resolves a nested dotted key" {
