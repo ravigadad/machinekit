@@ -173,6 +173,27 @@ setup() {
   [ "$count" -eq 1 ]
 }
 
+# --- resolver::_find_explicit_satisfier ---
+
+@test "_find_explicit_satisfier prints the requested module that provides the capability" {
+  wanted_sat::provides() { printf 'wanted_cap\n'; }
+  _resolver_requested=(alpha wanted_sat)
+  run resolver::_find_explicit_satisfier wanted_cap
+  [ "$status" -eq 0 ]
+  [ "$output" = "wanted_sat" ]
+}
+
+@test "_find_explicit_satisfier reports success when no requested module provides the capability" {
+  # A requested module that provides a *different* capability must not leak the
+  # loop's nonzero exit: _visit assigns satisfier=$(...) under set -e, where a
+  # nonzero status aborts resolution mid-flight before any module is emitted.
+  other_sat::provides() { printf 'other_cap\n'; }
+  _resolver_requested=(alpha other_sat)
+  run resolver::_find_explicit_satisfier wanted_cap
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
 # --- conflict detection ---
 
 @test "resolve fails when two satisfiers claim the same capability" {

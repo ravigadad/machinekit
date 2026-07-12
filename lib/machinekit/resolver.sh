@@ -110,6 +110,11 @@ resolver::_find_explicit_satisfier() {
       [ "$provided" = "$capability" ] && printf '%s\n' "$req" && return 0
     done < <("${req}::provides")
   done
+  # "No explicit satisfier" is a normal answer, signalled by empty stdout — not a
+  # failure. Return success explicitly so the loop's trailing nonzero (a false
+  # provides-match on the last requested module) can't leak out: _visit assigns
+  # this via satisfier=$(...) under set -e, where a nonzero status aborts resolve.
+  return 0
 }
 
 # Scans resolved modules for ::provides declarations. Fails if two modules
