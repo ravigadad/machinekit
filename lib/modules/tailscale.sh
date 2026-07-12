@@ -4,8 +4,8 @@
 # Tailscale draws a hard line: a device is either owned by a user OR carries a
 # tag, never both. The [module.tailscale] `tag` key is the discriminator:
 #   tag set   → headless service device. brew formula (daemon, no GUI);
-#               machinekit joins the tailnet itself via an age-encrypted OAuth
-#               client secret, advertising the tag. Set-and-forget.
+#               machinekit joins the tailnet itself via an OAuth client
+#               secret, advertising the tag. Set-and-forget.
 #   tag unset → user device. On macOS, the brew cask (menu-bar GUI app); on
 #               Linux the formula (no brew GUI app exists). The human signs in.
 #
@@ -16,34 +16,39 @@
 # Joining is an outside-world mutation, so it is consent-gated: interactive
 # confirmation, or MACHINEKIT_TAILSCALE_JOIN=1 for unattended runs.
 
-# Encrypted secrets live in the blueprint-global secrets pool — a sibling of
-# common/ and machine_types/, outside the machine-type cascade — namespaced by
-# service then tenancy: secrets/<service>/<tenancy>.age. For tailscale the
-# tenancy is the tailnet (config key `tailnet`, default "default"), so the path
-# is secrets/tailscale/<tailnet>.age. Outside home/, so it bypasses the home
-# transform pipeline; the module decrypts in memory at join time, keeping the
-# plaintext off disk. This holds only tailscale's own namespace under the pool;
-# the "secrets" prefix comes from secrets::pool_path.
-_TAILSCALE_POOL_NAMESPACE="tailscale"
+# A tagged device's join secret is a named secret, resolved by secrets::resolve
+# — an age-encrypted pool file or a secrets-manager reference, whichever backend
+# actually holds it; this module never knows or cares which. The name is
+# namespaced by service then tenancy: tailscale/<tailnet> (the tenancy is the
+# tailnet, config key `tailnet`, default "default"). Resolved in memory at join
+# time, keeping the plaintext off disk.
+_TAILSCALE_SECRET_NAMESPACE="tailscale"
 
-tailscale::requires() { printf 'age\n'; }
+# Depends on whichever backend resolves this device's secret: age for a pool
+# file, secrets_manager for an explicit manager reference. Derived from the
+# declared secret (declared_secrets), so a convention-backed name — resolved from an
+# already-listed manager during preflight readiness — correctly adds no edge,
+# and an untagged device (which declares no secret) declares no dependency.
+tailscale::requires() {
+  tailscale::declared_secrets | secrets::declared_backend_requirements
+}
 
-# Tagged devices can only join if their encrypted secret is present; fail early
-# and clearly rather than at join time. Untagged devices need no secret.
+# Tagged devices can only join if their secret is present; fail early and
+# clearly rather than at join time. Untagged devices need no secret.
 tailscale::preflight() {
   local tag
   tag=$(tailscale::_tag)
   [ -n "$tag" ] || return 0
-  [ -f "$(tailscale::_secret_path)" ] || lifecycle::fail \
-    "tailscale: tagged device (tag:$tag) needs an encrypted secret at $(tailscale::_secret_rel) — see docs/modules.md (tailscale) to create it."
+  secrets::present "$(tailscale::_secret_name)" || lifecycle::fail \
+    "tailscale: tagged device (tag:$tag) needs a secret named $(tailscale::_secret_name) — see docs/modules.md (tailscale) to provide it."
 }
 
-# Declares the pool secret this device will use, given current config. Only a
+# Declares the secret this device will use, given current config. Only a
 # tagged device joins the tailnet itself, so only it draws on the encrypted
 # secret; an untagged (user) device signs in by hand and declares nothing.
-tailscale::pool_secrets() {
+tailscale::declared_secrets() {
   [ -n "$(tailscale::_tag)" ] || return 0
-  printf '%s\ttrue\tfalse\n' "$(tailscale::_secret_rel)"
+  printf '%s\ttrue\tfalse\n' "$(tailscale::_secret_name)"
 }
 
 # The cask token is `tailscale-app` (the GUI app); the formula is `tailscale`
@@ -156,7 +161,7 @@ tailscale::_join() {
     return 0
   fi
   local secret
-  secret=$(age::decrypt "$(tailscale::_secret_path)")
+  secret=$(secrets::resolve "$(tailscale::_secret_name)")
   tailscale::_up "$secret" "$tag"
   logging::success "tailscale: joined the tailnet as tag:$tag."
 }
@@ -215,12 +220,9 @@ tailscale::_tailnet() {
   config::get "module.tailscale.tailnet" --default "default"
 }
 
-# Blueprint-relative secret path, e.g. secrets/tailscale/default.age — the
-# single source of the path structure; preflight's error message reuses it.
-tailscale::_secret_rel() {
-  secrets::pool_path "$_TAILSCALE_POOL_NAMESPACE/$(tailscale::_tailnet).age"
-}
-
-tailscale::_secret_path() {
-  printf '%s/%s\n' "$(blueprints::dir)" "$(tailscale::_secret_rel)"
+# The bare logical secret name, e.g. tailscale/default — the single source of
+# it; every other function asks secrets::resolve/present/backend_for for the
+# rest, so this module never knows which backend actually holds the value.
+tailscale::_secret_name() {
+  printf '%s/%s\n' "$_TAILSCALE_SECRET_NAMESPACE" "$(tailscale::_tailnet)"
 }

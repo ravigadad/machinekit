@@ -18,15 +18,20 @@ setup() {
 
 # --- requires ---
 
-@test "requires age when a folder references an ssh_key" {
-  STUB_OUTPUT="agents" mktest::stub_function git_backup::_referenced_key_names
+@test "requires pipes its declared key secrets through the backend-requirements helper and emits the result" {
+  STUB_OUTPUT=$'git_backup/ssh_keys/deploy\ttrue\tfalse\ngit_backup/ssh_keys/mirror\ttrue\tfalse' \
+    mktest::stub_function git_backup::declared_secrets
+  secrets::declared_backend_requirements() { cat > "$BATS_TEST_TMPDIR/br.stdin"; printf 'age\nsecrets_manager\n'; }
   run git_backup::requires
   [ "$status" -eq 0 ]
-  [ "$output" = "age" ]
+  [ "$output" = $'age\nsecrets_manager' ]
+  # The module hands its declared-secret rows to the shared classifier verbatim.
+  [ "$(cat "$BATS_TEST_TMPDIR/br.stdin")" = $'git_backup/ssh_keys/deploy\ttrue\tfalse\ngit_backup/ssh_keys/mirror\ttrue\tfalse' ]
 }
 
-@test "requires nothing when no ssh_key is referenced" {
-  STUB_OUTPUT="" mktest::stub_function git_backup::_referenced_key_names
+@test "requires nothing when no ssh_key is referenced (no secrets declared)" {
+  mktest::stub_function git_backup::declared_secrets
+  secrets::declared_backend_requirements() { cat > /dev/null; }
   run git_backup::requires
   [ "$status" -eq 0 ]
   [ -z "$output" ]
@@ -59,24 +64,24 @@ setup() {
   mktest::assert_stub_not_called lifecycle::fail
 }
 
-# --- pool_secrets ---
+# --- declared_secrets ---
 
-@test "pool_secrets declares each referenced ssh key required and not generatable" {
+@test "declared_secrets declares each referenced ssh key required and not generatable" {
   STUB_OUTPUT=$'deploy\nmirror' mktest::stub_function git_backup::_referenced_key_names
-  STUB_OUTPUT="secrets/git_backup/ssh_keys/deploy.age" mktest::stub_function git_backup::_secret_rel deploy
-  STUB_OUTPUT="secrets/git_backup/ssh_keys/mirror.age" mktest::stub_function git_backup::_secret_rel mirror
-  run git_backup::pool_secrets
+  STUB_OUTPUT="git_backup/ssh_keys/deploy" mktest::stub_function git_backup::_secret_name deploy
+  STUB_OUTPUT="git_backup/ssh_keys/mirror" mktest::stub_function git_backup::_secret_name mirror
+  run git_backup::declared_secrets
   [ "$status" -eq 0 ]
-  [ "$output" = $'secrets/git_backup/ssh_keys/deploy.age\ttrue\tfalse\nsecrets/git_backup/ssh_keys/mirror.age\ttrue\tfalse' ]
+  [ "$output" = $'git_backup/ssh_keys/deploy\ttrue\tfalse\ngit_backup/ssh_keys/mirror\ttrue\tfalse' ]
 }
 
-@test "pool_secrets emits nothing when no folder references an ssh key" {
+@test "declared_secrets emits nothing when no folder references an ssh key" {
   STUB_OUTPUT="" mktest::stub_function git_backup::_referenced_key_names
-  mktest::stub_function git_backup::_secret_rel
-  run git_backup::pool_secrets
+  mktest::stub_function git_backup::_secret_name
+  run git_backup::declared_secrets
   [ "$status" -eq 0 ]
   [ -z "$output" ]
-  mktest::assert_stub_not_called git_backup::_secret_rel
+  mktest::assert_stub_not_called git_backup::_secret_name
 }
 
 # --- install ---
@@ -166,9 +171,9 @@ setup() {
 # --- _validate_keys ---
 
 @test "_validate_keys passes when the referenced key secret exists" {
-  local secret="$BATS_TEST_TMPDIR/agents.age"; touch "$secret"
   STUB_OUTPUT="agents" mktest::stub_function git_backup::_referenced_key_names
-  STUB_OUTPUT="$secret" mktest::stub_function git_backup::_secret_path "agents"
+  STUB_OUTPUT="git_backup/ssh_keys/agents" mktest::stub_function git_backup::_secret_name "agents"
+  mktest::stub_function secrets::present "git_backup/ssh_keys/agents"
   STUB_EXIT=1 mktest::stub_function lifecycle::fail
   git_backup::_validate_keys
   mktest::assert_stub_not_called lifecycle::fail
@@ -176,8 +181,8 @@ setup() {
 
 @test "_validate_keys fails when a referenced key secret is missing" {
   STUB_OUTPUT="agents" mktest::stub_function git_backup::_referenced_key_names
-  STUB_OUTPUT="$BATS_TEST_TMPDIR/absent.age" mktest::stub_function git_backup::_secret_path "agents"
-  STUB_OUTPUT="secrets/git_backup/ssh_keys/agents.age" mktest::stub_function git_backup::_secret_rel "agents"
+  STUB_OUTPUT="git_backup/ssh_keys/agents" mktest::stub_function git_backup::_secret_name "agents"
+  STUB_RETURN=1 mktest::stub_function secrets::present "git_backup/ssh_keys/agents"
   STUB_EXIT=1 mktest::stub_function lifecycle::fail
   run ! git_backup::_validate_keys
   MATCH="ssh_key 'agents'" mktest::assert_stub_called lifecycle::fail
@@ -196,15 +201,24 @@ setup() {
 
 # --- _install_key ---
 
-@test "_install_key decrypts the named key to a 600 file under a 700 dir" {
+@test "_install_key creates a 700 dir and installs the resolved key via secrets::install_secret_file" {
   local key="$BATS_TEST_TMPDIR/keys/agents"
   STUB_OUTPUT="$key" mktest::stub_function git_backup::_key_path "agents"
-  STUB_OUTPUT="/bp/secrets/git_backup/ssh_keys/agents.age" mktest::stub_function git_backup::_secret_path "agents"
-  STUB_OUTPUT="KEYDATA" mktest::stub_function age::decrypt
+  STUB_OUTPUT="git_backup/ssh_keys/agents" mktest::stub_function git_backup::_secret_name "agents"
+  mktest::stub_function secrets::install_secret_file "$key" secrets::resolve "git_backup/ssh_keys/agents"
   git_backup::_install_key "agents"
-  [ "$(cat "$key")" = "KEYDATA" ]
-  [ "$(mktest::file_mode "$key")" = "600" ]
   [ "$(mktest::file_mode "$BATS_TEST_TMPDIR/keys")" = "700" ]
+  mktest::assert_stub_called secrets::install_secret_file "$key" secrets::resolve "git_backup/ssh_keys/agents"
+}
+
+@test "_install_key fails when no value resolves for the key secret" {
+  local key="$BATS_TEST_TMPDIR/keys/agents"
+  STUB_OUTPUT="$key" mktest::stub_function git_backup::_key_path "agents"
+  STUB_OUTPUT="git_backup/ssh_keys/agents" mktest::stub_function git_backup::_secret_name "agents"
+  STUB_RETURN=1 mktest::stub_function secrets::install_secret_file
+  STUB_EXIT=1 mktest::stub_function lifecycle::fail
+  run ! git_backup::_install_key "agents"
+  MATCH="no value resolved" mktest::assert_stub_called lifecycle::fail
 }
 
 # --- _write_manifest ---
@@ -411,17 +425,9 @@ setup() {
   [ -z "$output" ]
 }
 
-@test "_secret_rel builds the pool-relative path for a key name" {
-  STUB_OUTPUT="fake-pool/git_backup/ssh_keys/agents.age" mktest::stub_function secrets::pool_path "git_backup/ssh_keys/agents.age"
-  run git_backup::_secret_rel "agents"
-  [ "$output" = "fake-pool/git_backup/ssh_keys/agents.age" ]
-}
-
-@test "_secret_path roots the relative path under the blueprint dir" {
-  STUB_OUTPUT="/bp" mktest::stub_function blueprints::dir
-  STUB_OUTPUT="secrets/git_backup/ssh_keys/agents.age" mktest::stub_function git_backup::_secret_rel "agents"
-  run git_backup::_secret_path "agents"
-  [ "$output" = "/bp/secrets/git_backup/ssh_keys/agents.age" ]
+@test "_secret_name builds the bare logical secret name for a key name" {
+  run git_backup::_secret_name "agents"
+  [ "$output" = "git_backup/ssh_keys/agents" ]
 }
 
 @test "_key_path locates the decrypted key under the default config dir" {

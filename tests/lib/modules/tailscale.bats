@@ -18,58 +18,70 @@ setup() {
 
 # --- tailscale::requires ---
 
-@test "requires declares the age dependency" {
+@test "requires pipes its declared secret through the backend-requirements helper and emits the result" {
+  STUB_OUTPUT=$'tailscale/fake\ttrue\tfalse' mktest::stub_function tailscale::declared_secrets
+  secrets::declared_backend_requirements() { cat > "$BATS_TEST_TMPDIR/br.stdin"; printf 'age\n'; }
   run tailscale::requires
   [ "$status" -eq 0 ]
   [ "$output" = "age" ]
+  # The module hands its declared-secret row to the shared classifier verbatim.
+  [ "$(cat "$BATS_TEST_TMPDIR/br.stdin")" = $'tailscale/fake\ttrue\tfalse' ]
+}
+
+@test "requires nothing when no secret is declared (untagged device)" {
+  mktest::stub_function tailscale::declared_secrets
+  secrets::declared_backend_requirements() { cat > /dev/null; }
+  run tailscale::requires
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
 }
 
 # --- tailscale::preflight ---
 
 @test "preflight is a no-op for an untagged (user) device" {
   STUB_OUTPUT="" mktest::stub_function tailscale::_tag
-  mktest::stub_function tailscale::_secret_path
+  mktest::stub_function secrets::present
   mktest::stub_function lifecycle::fail
   tailscale::preflight
-  mktest::assert_stub_not_called tailscale::_secret_path
+  mktest::assert_stub_not_called secrets::present
   mktest::assert_stub_not_called lifecycle::fail
 }
 
-@test "preflight passes when a tagged device has its encrypted secret" {
-  local secret; secret=$(mktemp); echo encrypted > "$secret"
+@test "preflight passes when a tagged device has its secret" {
   STUB_OUTPUT="server" mktest::stub_function tailscale::_tag
-  STUB_OUTPUT="$secret" mktest::stub_function tailscale::_secret_path
+  STUB_OUTPUT="tailscale/default" mktest::stub_function tailscale::_secret_name
+  mktest::stub_function secrets::present "tailscale/default"
   STUB_EXIT=1 mktest::stub_function lifecycle::fail
   tailscale::preflight
   mktest::assert_stub_not_called lifecycle::fail
 }
 
-@test "preflight fails when a tagged device is missing its encrypted secret" {
+@test "preflight fails when a tagged device is missing its secret" {
   STUB_OUTPUT="server" mktest::stub_function tailscale::_tag
-  STUB_OUTPUT="/nonexistent/secret.age" mktest::stub_function tailscale::_secret_path
-  STUB_OUTPUT="secrets/tailscale/default.age" mktest::stub_function tailscale::_secret_rel
+  STUB_OUTPUT="tailscale/default" mktest::stub_function tailscale::_secret_name
+  STUB_RETURN=1 mktest::stub_function secrets::present "tailscale/default"
   STUB_EXIT=1 mktest::stub_function lifecycle::fail
   run ! tailscale::preflight
-  MATCH="secrets/tailscale/default.age" mktest::assert_stub_called lifecycle::fail
+  MATCH="tailscale/default" mktest::assert_stub_called lifecycle::fail
 }
 
-# --- tailscale::pool_secrets ---
+# --- tailscale::declared_secrets ---
 
-@test "pool_secrets declares the tailnet secret required and not generatable on a tagged device" {
+@test "declared_secrets declares the tailnet secret required and not generatable on a tagged device" {
   STUB_OUTPUT="server" mktest::stub_function tailscale::_tag
-  STUB_OUTPUT="secrets/tailscale/fake.age" mktest::stub_function tailscale::_secret_rel
-  run tailscale::pool_secrets
+  STUB_OUTPUT="tailscale/fake" mktest::stub_function tailscale::_secret_name
+  run tailscale::declared_secrets
   [ "$status" -eq 0 ]
-  [ "$output" = $'secrets/tailscale/fake.age\ttrue\tfalse' ]
+  [ "$output" = $'tailscale/fake\ttrue\tfalse' ]
 }
 
-@test "pool_secrets emits nothing for an untagged (user) device" {
+@test "declared_secrets emits nothing for an untagged (user) device" {
   STUB_OUTPUT="" mktest::stub_function tailscale::_tag
-  mktest::stub_function tailscale::_secret_rel
-  run tailscale::pool_secrets
+  mktest::stub_function tailscale::_secret_name
+  run tailscale::declared_secrets
   [ "$status" -eq 0 ]
   [ -z "$output" ]
-  mktest::assert_stub_not_called tailscale::_secret_rel
+  mktest::assert_stub_not_called tailscale::_secret_name
 }
 
 # --- tailscale::install ---
@@ -263,13 +275,13 @@ setup() {
   mktest::assert_stub_not_called tailscale::_up
 }
 
-@test "_join decrypts the secret and brings tailscale up when consented" {
+@test "_join resolves the secret and brings tailscale up when consented" {
   STUB_RETURN=1 mktest::stub_function tailscale::_is_connected
   STUB_RETURN=1 mktest::stub_function input::is_dry_run
   STUB_OUTPUT="true" mktest::stub_function context::get "tailscale.join" --default false --coerce boolean \
     --prompt "Join the tailnet now as tagged device tag:server? (y/n)"
-  STUB_OUTPUT="/path/secret.age" mktest::stub_function tailscale::_secret_path
-  STUB_OUTPUT="fake-oauth-secret" mktest::stub_function age::decrypt "/path/secret.age"
+  STUB_OUTPUT="tailscale/default" mktest::stub_function tailscale::_secret_name
+  STUB_OUTPUT="fake-oauth-secret" mktest::stub_function secrets::resolve "tailscale/default"
   mktest::stub_function tailscale::_up "fake-oauth-secret" "server"
   tailscale::_join "server"
   mktest::assert_stub_called tailscale::_up "fake-oauth-secret" "server"
@@ -364,20 +376,10 @@ setup() {
   [ "$output" = "work" ]
 }
 
-# --- tailscale::_secret_rel ---
+# --- tailscale::_secret_name ---
 
-@test "_secret_rel builds the blueprint-relative path by service and tailnet" {
+@test "_secret_name builds the bare logical secret name by service and tailnet" {
   STUB_OUTPUT="work" mktest::stub_function tailscale::_tailnet
-  STUB_OUTPUT="fake-pool/tailscale/work.age" mktest::stub_function secrets::pool_path "tailscale/work.age"
-  run tailscale::_secret_rel
-  [ "$output" = "fake-pool/tailscale/work.age" ]
-}
-
-# --- tailscale::_secret_path ---
-
-@test "_secret_path prefixes the blueprints dir onto the relative secret path" {
-  STUB_OUTPUT="/blueprints" mktest::stub_function blueprints::dir
-  STUB_OUTPUT="secrets/tailscale/work.age" mktest::stub_function tailscale::_secret_rel
-  run tailscale::_secret_path
-  [ "$output" = "/blueprints/secrets/tailscale/work.age" ]
+  run tailscale::_secret_name
+  [ "$output" = "tailscale/work" ]
 }

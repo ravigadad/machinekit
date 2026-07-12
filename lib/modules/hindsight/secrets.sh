@@ -2,41 +2,38 @@
 # hindsight secrets — shared secret resolution for the hindsight modules.
 #
 # Both hindsight_server and the hindsight_integration::<agent> modules draw
-# secrets from one blueprint pool: secrets/hindsight/<name>.age (a sibling of
-# tailscale's pool, outside the home pipeline). Each secret is provide-or-
-# generate — the age-key idiom: a
-# provided .age is decrypted and used; an absent one is generated. The fleet's
-# shared secret is the tenant API key, which every box must match: whichever box
-# is provisioned first may generate it, and the rest provide the carried value.
+# secrets from one named-secret namespace: hindsight/<name> (a sibling of
+# tailscale's, resolved via secrets::resolve — an age-encrypted pool file or a
+# secrets-manager reference, whichever backend actually holds it; this file
+# never knows or cares which). Each secret is provide-or-generate — the
+# age-key idiom: a provided secret is used; an absent one is generated. The
+# fleet's shared secret is the tenant API key, which every box must match:
+# whichever box is provisioned first may generate it, and the rest provide the
+# carried value.
 
-# Holds only hindsight's own namespace; the "secrets" prefix comes from
-# secrets::pool_path.
-_HINDSIGHT_POOL_NAMESPACE="hindsight"
+# Holds only hindsight's own secret namespace.
+_HINDSIGHT_SECRET_NAMESPACE="hindsight"
 
-# Blueprint-relative path of a pool secret, e.g. secrets/hindsight/db_password.age.
-# Single source of the path shape; error messages and the path helper reuse it.
-hindsight::secrets::rel() {
-  secrets::pool_path "$_HINDSIGHT_POOL_NAMESPACE/$1.age"
+# The bare logical secret name, e.g. hindsight/db_password. Single source of
+# it; error messages and the other functions here reuse it.
+hindsight::secrets::name() {
+  printf '%s/%s\n' "$_HINDSIGHT_SECRET_NAMESPACE" "$1"
 }
 
-hindsight::secrets::path() {
-  printf '%s/%s\n' "$(blueprints::dir)" "$(hindsight::secrets::rel "$1")"
-}
-
-# True when the named secret is provided in the pool (vs. to be generated). The
-# caller asks this separately from resolve when it must distinguish a provided
-# value from a freshly generated one (e.g. to message about generation).
+# True when the named secret is provided (vs. to be generated). The caller
+# asks this separately from resolve when it must distinguish a provided value
+# from a freshly generated one (e.g. to message about generation).
 hindsight::secrets::provided() {
-  [ -f "$(hindsight::secrets::path "$1")" ]
+  secrets::present "$(hindsight::secrets::name "$1")"
 }
 
-# Resolves a pool secret to its value on stdout: the decrypted provided secret if
-# present, otherwise a freshly generated token. Plaintext goes to stdout only, so
-# the caller controls where (if anywhere) it lands on disk.
+# Resolves a secret to its value on stdout: the provided secret if present,
+# otherwise a freshly generated token. Plaintext goes to stdout only, so the
+# caller controls where (if anywhere) it lands on disk.
 hindsight::secrets::resolve() {
   local name="$1"
   if hindsight::secrets::provided "$name"; then
-    age::decrypt "$(hindsight::secrets::path "$name")"
+    secrets::resolve "$(hindsight::secrets::name "$name")"
   else
     hindsight::secrets::_generate_token
   fi
@@ -52,11 +49,12 @@ hindsight::secrets::_generate_token() {
 # server or an integration host — whichever box is provisioned first). The tenant
 # key is the one secret every box must share, so the user has to carry it to the
 # others. Never prints the value (age-key style). The optional FILE/FIELD note
-# where it landed locally; the call to action — save it to the pool — is constant.
+# where it landed locally; the call to action — provide it to the pool — is constant.
 hindsight::secrets::announce_generated_tenant() {
   local file="${1:-}" field="${2:-}" where=""
   [ -n "$file" ] && where=" in $file${field:+ ($field)}"
   logging::banner warn "Generated the fleet tenant API key${where}.
-Save it into $(hindsight::secrets::rel tenant_api_key) and copy it to your other
-machines — every hindsight box (server and integrations) must share this key."
+Provide it as the $(hindsight::secrets::name tenant_api_key) secret (see
+'machinekit secrets list') and copy it to your other machines — every
+hindsight box (server and integrations) must share this key."
 }

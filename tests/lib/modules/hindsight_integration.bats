@@ -14,7 +14,9 @@ setup() {
 
 # --- requires ---
 
-@test "requires declares age plus each active integration's tool module" {
+@test "requires the tenant key's backend plus each active integration's tool module" {
+  STUB_OUTPUT=$'hindsight/tenant_api_key\ttrue\ttrue' mktest::stub_function hindsight_integration::declared_secrets
+  secrets::declared_backend_requirements() { cat > "$BATS_TEST_TMPDIR/br.stdin"; printf 'age\n'; }
   STUB_OUTPUT=$'foo\nbar' mktest::stub_function hindsight_integration::_integrations
   STUB_OUTPUT="foo_tool" mktest::stub_function hindsight_integration::foo::requires
   STUB_OUTPUT="bar_tool" mktest::stub_function hindsight_integration::bar::requires
@@ -22,9 +24,13 @@ setup() {
   [ "${lines[0]}" = "age" ]
   [[ "$output" == *"foo_tool"* ]]
   [[ "$output" == *"bar_tool"* ]]
+  # The declared tenant-key row is piped to the shared backend classifier.
+  [ "$(cat "$BATS_TEST_TMPDIR/br.stdin")" = $'hindsight/tenant_api_key\ttrue\ttrue' ]
 }
 
 @test "requires skips an integration that declares no tool dependency" {
+  STUB_OUTPUT=$'hindsight/tenant_api_key\ttrue\ttrue' mktest::stub_function hindsight_integration::declared_secrets
+  secrets::declared_backend_requirements() { cat > /dev/null; printf 'age\n'; }
   STUB_OUTPUT="foo" mktest::stub_function hindsight_integration::_integrations
   run hindsight_integration::requires
   # Status 0 is the regression probe: a non-matching declare -F on the last
@@ -94,13 +100,13 @@ setup() {
   MATCH="unknown integration.*bar" mktest::assert_stub_called lifecycle::fail
 }
 
-# --- pool_secrets ---
+# --- declared_secrets ---
 
-@test "pool_secrets declares the fleet tenant key required and generatable" {
-  STUB_OUTPUT="secrets/hindsight/tenant_api_key.age" mktest::stub_function hindsight::secrets::rel tenant_api_key
-  run hindsight_integration::pool_secrets
+@test "declared_secrets declares the fleet tenant key required and generatable" {
+  STUB_OUTPUT="hindsight/tenant_api_key" mktest::stub_function hindsight::secrets::name tenant_api_key
+  run hindsight_integration::declared_secrets
   [ "$status" -eq 0 ]
-  [ "$output" = $'secrets/hindsight/tenant_api_key.age\ttrue\ttrue' ]
+  [ "$output" = $'hindsight/tenant_api_key\ttrue\ttrue' ]
 }
 
 # --- install ---

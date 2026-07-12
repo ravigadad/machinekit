@@ -6,8 +6,9 @@
 # share one config — server location, api port, bank prefix, and the fleet
 # tenant key — so this is a single module, not one per agent.
 #
-# The tenant API key is the one secret every box must share. It comes from the
-# blueprint pool (secrets/hindsight/tenant_api_key.age) — provide-or-generate,
+# The tenant API key is the one secret every box must share. It's the named
+# secret hindsight/tenant_api_key, resolved via secrets::resolve — an
+# age-encrypted pool file or a secrets-manager reference — provide-or-generate,
 # the same key the server uses. This module resolves it once and hands it, with
 # the server URL, to each selected agent's config writer.
 
@@ -24,11 +25,14 @@ for _hi_submodule in "$_HINDSIGHT_INTEGRATION_DIR/hindsight_integration"/*.sh; d
 done
 unset _hi_submodule
 
-# age decrypts the pool tenant key; each selected integration also pulls in its
-# own agent tool module. config::load runs before the resolver calls requires,
-# so reading the integrations array here is safe.
+# Depends on whichever backend resolves the shared tenant key: age for a pool
+# file, secrets_manager for an explicit manager reference — derived from the
+# declared secret (declared_secrets), so a convention-backed key resolved from an
+# already-listed manager during preflight readiness adds no edge. Each selected
+# integration also pulls in its own agent tool module. config::load runs before
+# the resolver calls requires, so reading the integrations array here is safe.
 hindsight_integration::requires() {
-  printf 'age\n'
+  hindsight_integration::declared_secrets | secrets::declared_backend_requirements
   local integration
   while IFS= read -r integration; do
     [ -n "$integration" ] || continue
@@ -63,10 +67,10 @@ hindsight_integration::preflight() {
   return 0
 }
 
-# Declares the one pool secret this module uses: the fleet tenant key, shared by
+# Declares the one secret this module uses: the fleet tenant key, shared by
 # every box, provide-or-generate (generated when this box is the first).
-hindsight_integration::pool_secrets() {
-  printf '%s\ttrue\ttrue\n' "$(hindsight::secrets::rel tenant_api_key)"
+hindsight_integration::declared_secrets() {
+  printf '%s\ttrue\ttrue\n' "$(hindsight::secrets::name tenant_api_key)"
 }
 
 # Install each selected agent's integration software, then assemble the configs

@@ -5,7 +5,8 @@
 # dependency. A machine is a memory server purely because its blueprint lists
 # hindsight_server — there is no machine-type branching here.
 #
-# Secrets come from the blueprint pool (secrets/hindsight/*.age), not the home
+# Secrets are named hindsight/* secrets resolved via secrets::resolve (an
+# age-encrypted pool file or a secrets-manager reference), not the home
 # pipeline. machinekit assembles them — provided-or-generated — into a create-
 # once ~/.config/hindsight/hindsight.env (mode 600): the container's env_file and
 # the readable record of any generated values. The LLM key must be provided; the
@@ -27,14 +28,15 @@ _HINDSIGHT_SERVER_DEFAULT_USER="hindsight"
 _HINDSIGHT_SERVER_DEFAULT_API_PORT="8888"
 _HINDSIGHT_SERVER_DEFAULT_UI_PORT="9999"
 
-# All unconditional: the resolver guarantees a container runtime, postgres, and
-# age land in modules.active whenever this module is requested. age is required
-# because the env file is assembled from the encrypted secrets pool — without it
-# active, the age key is never installed and llm_api_key.age can't be decrypted.
+# container_manager and postgres are unconditional. The secrets-backend
+# dependency (age and/or secrets_manager) is derived from the declared secrets
+# (declared_secrets), so a fully manager-sourced blueprint pulls in no age module,
+# and a convention-backed name — resolved from an already-listed manager during
+# preflight readiness — adds no edge.
 hindsight_server::requires() {
   printf 'container_manager\n'
   printf 'postgres\n'
-  printf 'age\n'
+  hindsight_server::declared_secrets | secrets::declared_backend_requirements
 }
 
 # Fail before any work if the blueprint hasn't supplied what the server can't run
@@ -45,24 +47,24 @@ hindsight_server::preflight() {
   [ -n "$(hindsight_server::_llm_provider)" ] || lifecycle::fail \
     "hindsight_server: set [module.hindsight_server] llm_provider in your blueprint config."
   hindsight_server::_llm_key_available || lifecycle::fail \
-    "hindsight_server: supply the LLM API key at $(hindsight::secrets::rel llm_api_key), or an already-assembled ~/$(hindsight_server::_env_rel)."
+    "hindsight_server: supply the $(hindsight::secrets::name llm_api_key) secret, or an already-assembled ~/$(hindsight_server::_env_rel)."
 }
 
 # The LLM key is the one secret machinekit cannot generate. It is satisfied
-# either by the provided pool secret or by an env file already assembled on a
+# either by the provided secret or by an env file already assembled on a
 # prior run (which we never rebuild).
 hindsight_server::_llm_key_available() {
   hindsight::secrets::provided llm_api_key || [ -f "$(hindsight_server::_env_path)" ]
 }
 
-# Declares the pool secrets this module assembles into the env file. The LLM key
+# Declares the secrets this module assembles into the env file. The LLM key
 # is provide-only (required); the tenant key, DB password, and control-plane
 # password are generated when absent.
-hindsight_server::pool_secrets() {
-  printf '%s\ttrue\tfalse\n' "$(hindsight::secrets::rel llm_api_key)"
-  printf '%s\ttrue\ttrue\n'  "$(hindsight::secrets::rel tenant_api_key)"
-  printf '%s\ttrue\ttrue\n'  "$(hindsight::secrets::rel db_password)"
-  printf '%s\ttrue\ttrue\n'  "$(hindsight::secrets::rel cp_access_key)"
+hindsight_server::declared_secrets() {
+  printf '%s\ttrue\tfalse\n' "$(hindsight::secrets::name llm_api_key)"
+  printf '%s\ttrue\ttrue\n'  "$(hindsight::secrets::name tenant_api_key)"
+  printf '%s\ttrue\ttrue\n'  "$(hindsight::secrets::name db_password)"
+  printf '%s\ttrue\ttrue\n'  "$(hindsight::secrets::name cp_access_key)"
 }
 
 # Engine-level prep plus the env file. The postgres primitives, brew, and the
@@ -154,13 +156,13 @@ hindsight_server::_assemble_env_file() {
 # (preflight already checks availability; this guards the assemble path directly.)
 hindsight_server::_resolve_llm_key() {
   hindsight::secrets::provided llm_api_key || lifecycle::fail \
-    "hindsight_server: the LLM API key ($(hindsight::secrets::rel llm_api_key)) is required to assemble the env file."
+    "hindsight_server: the LLM API key ($(hindsight::secrets::name llm_api_key)) is required to assemble the env file."
   hindsight::secrets::resolve llm_api_key
 }
 
 # The control-plane UI password (HINDSIGHT_CP_ACCESS_KEY) — gates the web UI.
 # Server-local, not fleet-shared, so it is NOT the tenant key. Resolution order:
-# a provided pool secret wins; otherwise an interactive operator may type one
+# a provided secret wins; otherwise an interactive operator may type one
 # (entered via the --secret prompt); a blank entry or a non-interactive run
 # generates one. The generate
 # path announces here (to stderr) because this runs in a $() subshell where a

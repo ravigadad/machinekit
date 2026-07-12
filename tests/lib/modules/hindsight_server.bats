@@ -18,12 +18,15 @@ setup() {
 
 # --- hindsight_server::requires ---
 
-@test "requires declares the container runtime, postgres, and age dependencies" {
+@test "requires container_manager, postgres, and the backends for its declared secrets" {
+  STUB_OUTPUT=$'hindsight/llm_api_key\ttrue\tfalse\nhindsight/tenant_api_key\ttrue\ttrue' \
+    mktest::stub_function hindsight_server::declared_secrets
+  secrets::declared_backend_requirements() { cat > "$BATS_TEST_TMPDIR/br.stdin"; printf 'age\n'; }
   run hindsight_server::requires
   [ "$status" -eq 0 ]
-  [ "${lines[0]}" = "container_manager" ]
-  [ "${lines[1]}" = "postgres" ]
-  [ "${lines[2]}" = "age" ]
+  [ "$output" = $'container_manager\npostgres\nage' ]
+  # The declared-secret rows are piped to the shared backend classifier.
+  [ "$(cat "$BATS_TEST_TMPDIR/br.stdin")" = $'hindsight/llm_api_key\ttrue\tfalse\nhindsight/tenant_api_key\ttrue\ttrue' ]
 }
 
 # --- hindsight_server::preflight ---
@@ -46,7 +49,7 @@ setup() {
 @test "preflight fails when the llm key is unavailable" {
   STUB_OUTPUT="anthropic" mktest::stub_function hindsight_server::_llm_provider
   STUB_RETURN=1 mktest::stub_function hindsight_server::_llm_key_available
-  STUB_OUTPUT="secrets/hindsight/llm_api_key.age" mktest::stub_function hindsight::secrets::rel "llm_api_key"
+  STUB_OUTPUT="hindsight/llm_api_key" mktest::stub_function hindsight::secrets::name "llm_api_key"
   STUB_OUTPUT=".config/hindsight/hindsight.env" mktest::stub_function hindsight_server::_env_rel
   STUB_EXIT=1 mktest::stub_function lifecycle::fail
   run ! hindsight_server::preflight
@@ -73,16 +76,16 @@ setup() {
   run ! hindsight_server::_llm_key_available
 }
 
-# --- hindsight_server::pool_secrets ---
+# --- hindsight_server::declared_secrets ---
 
-@test "pool_secrets declares the LLM key non-generatable and the generatable trio" {
-  STUB_OUTPUT="secrets/hindsight/llm_api_key.age"    mktest::stub_function hindsight::secrets::rel llm_api_key
-  STUB_OUTPUT="secrets/hindsight/tenant_api_key.age" mktest::stub_function hindsight::secrets::rel tenant_api_key
-  STUB_OUTPUT="secrets/hindsight/db_password.age"    mktest::stub_function hindsight::secrets::rel db_password
-  STUB_OUTPUT="secrets/hindsight/cp_access_key.age"  mktest::stub_function hindsight::secrets::rel cp_access_key
-  run hindsight_server::pool_secrets
+@test "declared_secrets declares the LLM key non-generatable and the generatable trio" {
+  STUB_OUTPUT="hindsight/llm_api_key"    mktest::stub_function hindsight::secrets::name llm_api_key
+  STUB_OUTPUT="hindsight/tenant_api_key" mktest::stub_function hindsight::secrets::name tenant_api_key
+  STUB_OUTPUT="hindsight/db_password"    mktest::stub_function hindsight::secrets::name db_password
+  STUB_OUTPUT="hindsight/cp_access_key"  mktest::stub_function hindsight::secrets::name cp_access_key
+  run hindsight_server::declared_secrets
   [ "$status" -eq 0 ]
-  [ "$output" = $'secrets/hindsight/llm_api_key.age\ttrue\tfalse\nsecrets/hindsight/tenant_api_key.age\ttrue\ttrue\nsecrets/hindsight/db_password.age\ttrue\ttrue\nsecrets/hindsight/cp_access_key.age\ttrue\ttrue' ]
+  [ "$output" = $'hindsight/llm_api_key\ttrue\tfalse\nhindsight/tenant_api_key\ttrue\ttrue\nhindsight/db_password\ttrue\ttrue\nhindsight/cp_access_key\ttrue\ttrue' ]
 }
 
 # --- hindsight_server::install ---
@@ -228,7 +231,7 @@ setup() {
 
 @test "_resolve_llm_key fails when the llm key is not provided" {
   STUB_RETURN=1 mktest::stub_function hindsight::secrets::provided "llm_api_key"
-  STUB_OUTPUT="secrets/hindsight/llm_api_key.age" mktest::stub_function hindsight::secrets::rel "llm_api_key"
+  STUB_OUTPUT="hindsight/llm_api_key" mktest::stub_function hindsight::secrets::name "llm_api_key"
   STUB_EXIT=1 mktest::stub_function lifecycle::fail
   mktest::stub_function hindsight::secrets::resolve
   run ! hindsight_server::_resolve_llm_key
@@ -237,7 +240,7 @@ setup() {
 
 # --- hindsight_server::_resolve_cp_access_key ---
 
-@test "_resolve_cp_access_key returns the provided pool secret without prompting" {
+@test "_resolve_cp_access_key returns the provided secret without prompting" {
   mktest::stub_function hindsight::secrets::provided "cp_access_key"
   STUB_OUTPUT="pool-pw" mktest::stub_function hindsight::secrets::resolve "cp_access_key"
   mktest::stub_function context::get

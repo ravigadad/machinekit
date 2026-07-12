@@ -9,10 +9,12 @@
 # a manifest this module writes. Each folder is single-writer — back a given folder
 # up from exactly one machine, or the machines race its one downstream branch.
 #
-# A folder may name an `ssh_key` (module-level default, per-folder override): the
-# name of an age-encrypted key in the pool at secrets/git_backup/ssh_keys/<name>.age,
-# which the install decrypts to a private key file the push uses. Omit it to push
-# over ambient SSH (an agent or an on-disk default key).
+# A folder may name an `ssh_key` (module-level default, per-folder override): a
+# named secret (git_backup/ssh_keys/<name>) resolved via secrets::resolve — an
+# age-encrypted pool file or a secrets-manager reference, whichever backend
+# actually holds it — which the install writes out to a private key file the
+# push uses. Omit it to push over ambient SSH (an agent or an on-disk default
+# key).
 #
 # The scheduled-service mechanics — launchd/systemd unit generation and load —
 # live in lib/machinekit/service.sh; git_backup hands it the push script, interval,
@@ -21,17 +23,20 @@
 
 _GIT_BACKUP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Encrypted ssh keys live in the blueprint-global secrets pool (sibling of
-# common/), namespaced by service then key name: secrets/git_backup/ssh_keys/<name>.age.
-# This holds only git_backup's own namespace; the "secrets" prefix comes from
-# secrets::pool_path.
-_GIT_BACKUP_POOL_NAMESPACE="git_backup/ssh_keys"
+# Ssh keys are named secrets, namespaced by service then key name:
+# git_backup/ssh_keys/<name>. Resolved via secrets::resolve — this module
+# never knows or cares whether that name is an age-encrypted pool file or a
+# secrets-manager reference.
+_GIT_BACKUP_SECRET_NAMESPACE="git_backup/ssh_keys"
 
-# Depends on age only when a folder names an ssh_key to decrypt; pushing over
-# ambient SSH needs no secret. Config loads before the resolver calls requires.
+# Depends on whichever backend(s) resolve the referenced keys: age for pool-file
+# keys, secrets_manager for explicitly-referenced ones (a blueprint may mix both
+# across keys). Derived from the declared secrets (declared_secrets), so a
+# convention-backed key — resolved from an already-listed manager during
+# preflight readiness — adds no edge, and ambient-SSH folders (no key, no
+# secret) declare nothing.
 git_backup::requires() {
-  [ -n "$(git_backup::_referenced_key_names)" ] && printf 'age\n'
-  return 0
+  git_backup::declared_secrets | secrets::declared_backend_requirements
 }
 
 # Fail early on a misconfigured folder set, and remind that each folder is
@@ -47,13 +52,13 @@ git_backup::preflight() {
   return 0
 }
 
-# Declares each referenced ssh key as a required pool secret — the push can't
+# Declares each referenced ssh key as a required secret — the push can't
 # decrypt a key that isn't there. A folder using ambient SSH references none.
-git_backup::pool_secrets() {
+git_backup::declared_secrets() {
   local name
   while IFS= read -r name; do
     [ -n "$name" ] || continue
-    printf '%s\ttrue\tfalse\n' "$(git_backup::_secret_rel "$name")"
+    printf '%s\ttrue\tfalse\n' "$(git_backup::_secret_name "$name")"
   done < <(git_backup::_referenced_key_names)
 }
 
@@ -117,8 +122,8 @@ git_backup::_validate_keys() {
   local name
   while IFS= read -r name; do
     [ -n "$name" ] || continue
-    [ -f "$(git_backup::_secret_path "$name")" ] || lifecycle::fail \
-      "git_backup: ssh_key '$name' is configured but no secret at $(git_backup::_secret_rel "$name") — see docs/modules.md (git_backup)."
+    secrets::present "$(git_backup::_secret_name "$name")" || lifecycle::fail \
+      "git_backup: ssh_key '$name' is configured but no secret named $(git_backup::_secret_name "$name") — see docs/modules.md (git_backup)."
   done < <(git_backup::_referenced_key_names)
   return 0
 }
@@ -131,16 +136,19 @@ git_backup::_install_keys() {
   done < <(git_backup::_referenced_key_names)
 }
 
-# Decrypt one named ssh key from the pool to a private (600) file under a private
-# (700) dir, where the push reads it via GIT_SSH_COMMAND.
+# Resolve one named ssh key to a private (600) file under a private (700) dir,
+# where the push reads it via GIT_SSH_COMMAND. secrets::install_secret_file does
+# the atomic non-empty temp+rename (secrets::resolve may be a network fetch), so a
+# failed or interrupted fetch never truncates the live key in place.
 git_backup::_install_key() {
-  local name="$1" key_path key_dir
+  local name="$1" secret_name key_path key_dir
+  secret_name="$(git_backup::_secret_name "$name")"
   key_path=$(git_backup::_key_path "$name")
   key_dir=$(dirname "$key_path")
   mkdir -p "$key_dir"
   chmod 700 "$key_dir"
-  age::decrypt "$(git_backup::_secret_path "$name")" > "$key_path"
-  chmod 600 "$key_path"
+  secrets::install_secret_file "$key_path" secrets::resolve "$secret_name" \
+    || lifecycle::fail "git_backup: no value resolved for ssh key secret $secret_name."
 }
 
 # Write the manifest the push script iterates: one tab-separated row per folder.
@@ -277,14 +285,10 @@ git_backup::_referenced_key_names() {
     | sort -u
 }
 
-# Blueprint-relative secret path for a key name — the single source of the path
-# structure; preflight's error message reuses it.
-git_backup::_secret_rel() {
-  secrets::pool_path "$_GIT_BACKUP_POOL_NAMESPACE/$1.age"
-}
-
-git_backup::_secret_path() {
-  printf '%s/%s\n' "$(blueprints::dir)" "$(git_backup::_secret_rel "$1")"
+# The bare logical secret name for a key name — the single source of it; every
+# other function asks secrets::resolve/present/backend_for for the rest.
+git_backup::_secret_name() {
+  printf '%s/%s\n' "$_GIT_BACKUP_SECRET_NAMESPACE" "$1"
 }
 
 git_backup::_key_path() {
