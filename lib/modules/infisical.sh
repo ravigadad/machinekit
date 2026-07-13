@@ -30,10 +30,9 @@ _INFISICAL_TOKEN=""
 _INFISICAL_SECRET_NAMES=""
 
 # The explicit infisical:// references (from [secrets.manager_refs]) confirmed to
-# resolve, captured once at readiness so backend_for can trust an explicit ref by
-# a local lookup rather than assuming it — an explicit ref may address any
-# project/env, so it can't be answered from the default-project key cache above
-# and gets its own per-reference probe. Empty before readiness.
+# exist, so a presence check is a local lookup, not a network call. Separate from
+# the default-project cache above because an explicit ref may point at any
+# project/env.
 _INFISICAL_VERIFIED_REFERENCES=""
 
 infisical::provides() { printf 'secrets_manager\n'; }
@@ -98,26 +97,29 @@ infisical::_load_secret_names() {
     _INFISICAL_SECRET_NAMES=""
     return 0
   fi
-  _INFISICAL_SECRET_NAMES="$(infisical::_export_secret_keys "$project_id" "$(infisical::_environment)")"
+  _INFISICAL_SECRET_NAMES="$(infisical::_export_secret_keys "$project_id" "$(infisical::_environment)" "/")"
 }
 
-# The root-path secret keys in a project/env, one per line. The Infisical CLI has
+# The secret keys at PATH in a project/env, one per line. The Infisical CLI has
 # no keys-only listing — `export` is the only inventory command — so the full
 # secret values are fetched to learn their names. They are never persisted: the
 # export lives in a single shell local for one shape-check and one jq reduction,
-# both in-process, and reach neither disk (no context::set, no temp file) nor a
-# log. Scoped to secretPath "/" to match the convention fetch's --path="/".
+# both in-process, and reach neither disk (no context::set, no temp file) nor a log.
 infisical::_export_secret_keys() {
-  local project_id="$1" env="$2" export_json
-  export_json="$(infisical::_run export --format=json --projectId="$project_id" --env="$env" --silent)"
+  local project_id="$1" env="$2" path="$3" export_json
+  export_json="$(infisical::_run export --format=json --projectId="$project_id" --env="$env" --path="$path" --silent)"
   # Guard the CLI's export shape before trusting it: every secret must carry both a
   # key and a value. A silently-incompatible schema (renamed/absent fields) would
-  # reduce to an empty key set, reading every convention secret as absent — and
-  # could then green-light generating a key we never meant to. Fail loudly rather
-  # than guess.
+  # reduce to an empty key set, reading every secret as absent — and could then
+  # green-light generating a key we never meant to. Fail loudly rather than guess.
   printf '%s' "$export_json" | jq -e 'all(.[]; has("key") and has("value"))' >/dev/null \
     || lifecycle::fail "infisical: unexpected export shape from the CLI — each secret must carry a 'key' and a 'value'. The installed infisical version may be incompatible."
-  printf '%s' "$export_json" | jq -r '.[] | select(.secretPath == "/") | .key'
+  # Keep only secrets at exactly PATH — export can return other folders too, and a
+  # match must mean the folder _get fetches from. Leading/trailing slashes are
+  # stripped both sides, since Infisical's secretPath spelling needn't match ours.
+  printf '%s' "$export_json" | jq -r --arg path "$path" '
+    ($path | ltrimstr("/") | rtrimstr("/")) as $want
+    | .[] | select(((.secretPath // "") | ltrimstr("/") | rtrimstr("/")) == $want) | .key'
 }
 
 # infisical::fetch REFERENCE — the secrets_manager contract function.
@@ -157,18 +159,29 @@ infisical::has_reference() {
   grep -Fxq -- "$1" <<< "$_INFISICAL_VERIFIED_REFERENCES"
 }
 
-# Probe each configured explicit reference once and cache the ones that resolve.
-# An explicit ref can point at any project/env, so the default-project export
-# can't vouch for it — each gets its own `secrets get`. A malformed ref fails
-# loudly here (it's user config); a well-formed but absent one is simply left out
-# of the cache, so backend_for later reports it missing rather than a false present.
+# Existence is a key lookup, not a value fetch: `secrets get` exits 0 with empty
+# output for a missing key, so a fetch can't tell missing from present.
 infisical::_verify_explicit_references() {
-  local reference
+  local reference project_id env path name cache_key default_project_id
+  declare -A key_sets_by_project_env_path
+  # _INFISICAL_SECRET_NAMES already holds the default project/env's root keys
+  # (loaded by _load_secret_names); reuse them so a root reference into that
+  # project/env doesn't export a second time. The "//" is the "$project/$env/$path"
+  # key with the root path "/".
+  default_project_id="$(infisical::_default_project_id)"
+  if [ -n "$default_project_id" ]; then
+    key_sets_by_project_env_path["$default_project_id/$(infisical::_environment)//"]="$_INFISICAL_SECRET_NAMES"
+  fi
   while IFS= read -r reference; do
     [ -n "$reference" ] || continue
     infisical::_reference_wellformed "$reference" \
-      || lifecycle::fail "infisical: malformed reference '$reference' in [secrets.manager_refs] — expected infisical://<projectId>/<env>/<name>."
-    if infisical::_fetch_explicit "$reference" >/dev/null 2>&1; then
+      || lifecycle::fail "infisical: malformed reference '$reference' in [secrets.manager_refs] — expected infisical://<projectId>/<env>/[<path>/]<name>."
+    { IFS= read -r project_id; IFS= read -r env; IFS= read -r path; IFS= read -r name; } < <(infisical::_reference_parts "$reference")
+    cache_key="$project_id/$env/$path"
+    if [ -z "${key_sets_by_project_env_path[$cache_key]+cached}" ]; then
+      key_sets_by_project_env_path[$cache_key]="$(infisical::_export_secret_keys "$project_id" "$env" "$path")"
+    fi
+    if grep -Fxq -- "$name" <<< "${key_sets_by_project_env_path[$cache_key]}"; then
       _INFISICAL_VERIFIED_REFERENCES+="${_INFISICAL_VERIFIED_REFERENCES:+$'\n'}$reference"
     fi
   done < <(infisical::_configured_references)
@@ -185,32 +198,42 @@ infisical::_configured_references() {
 }
 
 # infisical::_reference_wellformed REFERENCE — true when REFERENCE is a complete
-# infisical://<projectId>/<env>/<name> (three non-empty, slash-delimited parts;
-# name may itself contain slashes). A pure predicate: the callers phrase the
-# failure, so it stays reusable between resolve-time and readiness-time checks.
+# infisical://<projectId>/<env>/[<path>/]<name>: projectId, env, and a final name
+# segment, all non-empty (a trailing slash, i.e. an empty name, is malformed).
+# A pure predicate: the callers phrase the failure, so it stays reusable between
+# resolve-time and readiness-time checks.
 infisical::_reference_wellformed() {
-  local without_scheme="${1#infisical://}" rest
+  local without_scheme="${1#infisical://}" rest after_env
   [[ "$without_scheme" == */*/* ]] || return 1
-  [ -n "${without_scheme%%/*}" ] || return 1
+  [ -n "${without_scheme%%/*}" ] || return 1   # projectId
   rest="${without_scheme#*/}"
-  [ -n "${rest%%/*}" ] && [ -n "${rest#*/}" ]
+  [ -n "${rest%%/*}" ] || return 1             # env
+  after_env="${rest#*/}"
+  [ -n "${after_env##*/}" ]                    # name (the last segment)
+}
+
+# Split a reference into projectId, env, path, and name (one per line). The last
+# segment is the name; anything between env and it is the folder path, or "/" when
+# there is none.
+infisical::_reference_parts() {
+  local without_scheme="${1#infisical://}" rest after_env path
+  rest="${without_scheme#*/}"        # env/[path/]name
+  after_env="${rest#*/}"             # [path/]name
+  if [[ "$after_env" == */* ]]; then path="/${after_env%/*}"; else path="/"; fi
+  printf '%s\n%s\n%s\n%s\n' "${without_scheme%%/*}" "${rest%%/*}" "$path" "${after_env##*/}"
 }
 
 infisical::_fetch_explicit() {
-  local reference="$1" without_scheme rest project_id env name
+  local reference="$1" project_id env path name
   infisical::_reference_wellformed "$reference" \
-    || lifecycle::fail "infisical: malformed reference '$reference' — expected infisical://<projectId>/<env>/<name>."
-  without_scheme="${reference#infisical://}"
-  project_id="${without_scheme%%/*}"
-  rest="${without_scheme#*/}"
-  env="${rest%%/*}"
-  name="${rest#*/}"
-  infisical::_get "$project_id" "$env" "$name"
+    || lifecycle::fail "infisical: malformed reference '$reference' — expected infisical://<projectId>/<env>/[<path>/]<name>."
+  { IFS= read -r project_id; IFS= read -r env; IFS= read -r path; IFS= read -r name; } < <(infisical::_reference_parts "$reference")
+  infisical::_get "$project_id" "$env" "$path" "$name"
 }
 
 infisical::_fetch_by_convention() {
   local name="$1"
-  infisical::_get "$(infisical::_default_project_id)" "$(infisical::_environment)" "$(infisical::_convention_key "$name")"
+  infisical::_get "$(infisical::_default_project_id)" "$(infisical::_environment)" "/" "$(infisical::_convention_key "$name")"
 }
 
 # The env-var-style key a bare logical name maps to by convention: slashes to
@@ -221,25 +244,24 @@ infisical::_convention_key() {
   printf '%s' "$1" | tr '/' '_' | tr '[:lower:]' '[:upper:]'
 }
 
-# Run `infisical <args…>` with the access token — when this run holds one, from
-# universal auth — exported into its environment only, never argv, where it'd be
-# a live bearer credential readable by any local user via ps / /proc/<pid>/cmdline.
-# The export is subshell-scoped so it neither leaks into the rest of the run nor
-# forces the token onto the command line. A user-auth session carries no token
-# here and falls back to the CLI's keyring session. Every authenticated infisical
-# call routes through this — the one place the token touches the environment.
+# The one place the infisical binary is invoked. Disables the CLI's per-command
+# update check, which otherwise makes a network call on every command. When this
+# run holds a universal-auth access token, exports it into the environment only,
+# never argv — an argv credential is readable by any local user via ps. Both
+# exports are subshell-scoped so they don't leak into the rest of the run.
 infisical::_run() {
   (
-    # shellcheck disable=SC2030,SC2031  # export is deliberately subshell-scoped
+    # shellcheck disable=SC2030,SC2031  # exports are deliberately subshell-scoped
+    export INFISICAL_DISABLE_UPDATE_CHECK=true
     if [ -n "$_INFISICAL_TOKEN" ]; then export INFISICAL_TOKEN="$_INFISICAL_TOKEN"; fi
     infisical "$@"
   )
 }
 
-# Fetch NAME from the given project/env, plaintext to stdout.
+# Fetch NAME at PATH from the given project/env, plaintext to stdout.
 infisical::_get() {
-  local project_id="$1" env="$2" name="$3"
-  infisical::_run secrets get "$name" --path="/" --env="$env" --projectId="$project_id" --silent --plain
+  local project_id="$1" env="$2" path="$3" name="$4"
+  infisical::_run secrets get "$name" --path="$path" --env="$env" --projectId="$project_id" --silent --plain
 }
 
 # Exchange the machine-identity client id/secret for a short-lived access token.
@@ -255,17 +277,17 @@ infisical::_login_universal() {
   client_secret="$(infisical::_client_secret)"
   INFISICAL_UNIVERSAL_AUTH_CLIENT_ID="$client_id" \
   INFISICAL_UNIVERSAL_AUTH_CLIENT_SECRET="$client_secret" \
-    infisical login --method=universal-auth --silent --plain
+    infisical::_run login --method=universal-auth --silent --plain
 }
 
 infisical::_login_user() {
   infisical::_session_valid && return 0
   logging::info "infisical: no active session — opening your browser to sign in..."
-  infisical login
+  infisical::_run login
 }
 
 infisical::_session_valid() {
-  infisical login status >/dev/null 2>&1
+  infisical::_run login status >/dev/null 2>&1
 }
 
 infisical::_auth_method() {

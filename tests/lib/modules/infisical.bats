@@ -162,7 +162,7 @@ setup() {
 @test "_load_secret_names caches the exported keys for the default project/env" {
   STUB_OUTPUT="proj-123" mktest::stub_function infisical::_default_project_id
   STUB_OUTPUT="prod" mktest::stub_function infisical::_environment
-  STUB_OUTPUT=$'K_ONE\nK_TWO' mktest::stub_function infisical::_export_secret_keys "proj-123" "prod"
+  STUB_OUTPUT=$'K_ONE\nK_TWO' mktest::stub_function infisical::_export_secret_keys "proj-123" "prod" "/"
   infisical::_load_secret_names
   [ "$_INFISICAL_SECRET_NAMES" = $'K_ONE\nK_TWO' ]
 }
@@ -177,46 +177,64 @@ setup() {
 
 # --- infisical::_export_secret_keys ---
 
-@test "_export_secret_keys extracts the root-path keys from the JSON export" {
+@test "_export_secret_keys extracts the keys at the requested path from the JSON export" {
   STUB_OUTPUT='[{"key":"K_ONE","secretPath":"/","value":"v1"},{"key":"K_TWO","secretPath":"/","value":"v2"}]' \
-    mktest::stub_function infisical::_run export --format=json --projectId=proj-123 --env=prod --silent
-  run infisical::_export_secret_keys "proj-123" "prod"
+    mktest::stub_function infisical::_run export --format=json --projectId=proj-123 --env=prod --path=/ --silent
+  run infisical::_export_secret_keys "proj-123" "prod" "/"
   [ "$output" = $'K_ONE\nK_TWO' ]
 }
 
-@test "_export_secret_keys excludes secrets nested under a non-root path" {
+@test "_export_secret_keys excludes secrets that sit at a different path than requested" {
   STUB_OUTPUT='[{"key":"ROOT_KEY","secretPath":"/","value":"v"},{"key":"NESTED_KEY","secretPath":"/folder","value":"v"}]' \
-    mktest::stub_function infisical::_run export --format=json --projectId=proj-123 --env=prod --silent
-  run infisical::_export_secret_keys "proj-123" "prod"
+    mktest::stub_function infisical::_run export --format=json --projectId=proj-123 --env=prod --path=/ --silent
+  run infisical::_export_secret_keys "proj-123" "prod" "/"
   [ "$output" = "ROOT_KEY" ]
+}
+
+@test "_export_secret_keys returns the keys in a non-root folder" {
+  STUB_OUTPUT='[{"key":"ROOT_KEY","secretPath":"/","value":"v"},{"key":"NESTED_KEY","secretPath":"/foo/bar","value":"v"}]' \
+    mktest::stub_function infisical::_run export --format=json --projectId=proj-123 --env=prod --path=/foo/bar --silent
+  run infisical::_export_secret_keys "proj-123" "prod" "/foo/bar"
+  [ "$output" = "NESTED_KEY" ]
+}
+
+@test "_export_secret_keys matches a folder path regardless of trailing-slash spelling" {
+  STUB_OUTPUT='[{"key":"NESTED_KEY","secretPath":"/foo/bar/","value":"v"}]' \
+    mktest::stub_function infisical::_run export --format=json --projectId=proj-123 --env=prod --path=/foo/bar --silent
+  run infisical::_export_secret_keys "proj-123" "prod" "/foo/bar"
+  [ "$output" = "NESTED_KEY" ]
 }
 
 @test "_export_secret_keys fails when a secret in the export is missing its value (incompatible CLI shape)" {
   STUB_OUTPUT='[{"key":"K_ONE","secretPath":"/","value":"v1"},{"key":"K_TWO","secretPath":"/"}]' \
-    mktest::stub_function infisical::_run export --format=json --projectId=proj-123 --env=prod --silent
+    mktest::stub_function infisical::_run export --format=json --projectId=proj-123 --env=prod --path=/ --silent
   STUB_EXIT=1 mktest::stub_function lifecycle::fail
-  run ! infisical::_export_secret_keys "proj-123" "prod"
+  run ! infisical::_export_secret_keys "proj-123" "prod" "/"
   MATCH="unexpected export shape" mktest::assert_stub_called lifecycle::fail
 }
 
 @test "_export_secret_keys accepts an empty export (no secrets) without failing the shape check" {
-  STUB_OUTPUT='[]' mktest::stub_function infisical::_run export --format=json --projectId=proj-123 --env=prod --silent
-  run infisical::_export_secret_keys "proj-123" "prod"
+  STUB_OUTPUT='[]' mktest::stub_function infisical::_run export --format=json --projectId=proj-123 --env=prod --path=/ --silent
+  run infisical::_export_secret_keys "proj-123" "prod" "/"
   [ "$status" -eq 0 ]
   [ -z "$output" ]
 }
 
 # --- infisical::_fetch_explicit ---
 
-@test "_fetch_explicit parses projectId/env/name out of the reference and fetches" {
-  STUB_OUTPUT="fake-secret-value" mktest::stub_function infisical::_get "proj-123" "prod" "tailscale_default"
+@test "_fetch_explicit parses projectId/env/path/name out of the reference and fetches" {
+  STUB_OUTPUT=$'proj-123\nprod\n/\ntailscale_default' \
+    mktest::stub_function infisical::_reference_parts "infisical://proj-123/prod/tailscale_default"
+  STUB_OUTPUT="fake-secret-value" mktest::stub_function infisical::_get "proj-123" "prod" "/" "tailscale_default"
   run infisical::_fetch_explicit "infisical://proj-123/prod/tailscale_default"
   [ "$output" = "fake-secret-value" ]
 }
 
-@test "_fetch_explicit preserves internal slashes in a multi-segment name" {
-  STUB_OUTPUT="fake-secret-value" mktest::stub_function infisical::_get "proj-123" "prod" "tailscale/default"
-  run infisical::_fetch_explicit "infisical://proj-123/prod/tailscale/default"
+@test "_fetch_explicit fetches a secret addressed in a folder path" {
+  STUB_OUTPUT=$'proj-123\nprod\n/foo/bar\nBAZ' \
+    mktest::stub_function infisical::_reference_parts "infisical://proj-123/prod/foo/bar/BAZ"
+  STUB_OUTPUT="fake-secret-value" mktest::stub_function infisical::_get "proj-123" "prod" "/foo/bar" "BAZ"
+  run infisical::_fetch_explicit "infisical://proj-123/prod/foo/bar/BAZ"
   [ "$output" = "fake-secret-value" ]
 }
 
@@ -228,18 +246,39 @@ setup() {
   mktest::assert_stub_not_called infisical::_get
 }
 
+# --- infisical::_reference_parts ---
+
+@test "_reference_parts splits a rootless reference into projectId, env, root path, and name" {
+  run infisical::_reference_parts "infisical://proj-123/prod/tailscale_default"
+  [ "$output" = $'proj-123\nprod\n/\ntailscale_default' ]
+}
+
+@test "_reference_parts extracts a folder path from the middle segments" {
+  run infisical::_reference_parts "infisical://proj-123/prod/foo/bar/BAZ"
+  [ "$output" = $'proj-123\nprod\n/foo/bar\nBAZ' ]
+}
+
+@test "_reference_parts treats a single middle segment as a one-level path" {
+  run infisical::_reference_parts "infisical://proj-123/prod/foo/BAZ"
+  [ "$output" = $'proj-123\nprod\n/foo\nBAZ' ]
+}
+
 # --- infisical::_reference_wellformed ---
 
 @test "_reference_wellformed accepts a complete projectId/env/name reference" {
   infisical::_reference_wellformed "infisical://proj-123/prod/tailscale_default"
 }
 
-@test "_reference_wellformed accepts a multi-segment name" {
-  infisical::_reference_wellformed "infisical://proj-123/prod/tailscale/default"
+@test "_reference_wellformed accepts a reference with a folder path" {
+  infisical::_reference_wellformed "infisical://proj-123/prod/foo/bar/BAZ"
 }
 
 @test "_reference_wellformed rejects a reference missing the name segment" {
   run ! infisical::_reference_wellformed "infisical://proj-123/prod"
+}
+
+@test "_reference_wellformed rejects a trailing slash after a folder path (empty name)" {
+  run ! infisical::_reference_wellformed "infisical://proj-123/prod/foo/"
 }
 
 @test "_reference_wellformed rejects a reference with an empty project id" {
@@ -272,24 +311,40 @@ setup() {
 
 # --- infisical::_verify_explicit_references ---
 
-@test "_verify_explicit_references caches the references that resolve and drops the ones that do not" {
+@test "_verify_explicit_references caches references the manager holds and drops the ones it does not" {
   _INFISICAL_VERIFIED_REFERENCES=""
   STUB_OUTPUT=$'infisical://p/e/PRESENT\ninfisical://p/e/ABSENT' \
     mktest::stub_function infisical::_configured_references
   mktest::stub_function infisical::_reference_wellformed
-  STUB_OUTPUT="a-value" mktest::stub_function infisical::_fetch_explicit "infisical://p/e/PRESENT"
-  STUB_RETURN=1 mktest::stub_function infisical::_fetch_explicit "infisical://p/e/ABSENT"
+  STUB_OUTPUT="" mktest::stub_function infisical::_default_project_id
+  STUB_OUTPUT=$'p\ne\n/\nPRESENT' mktest::stub_function infisical::_reference_parts "infisical://p/e/PRESENT"
+  STUB_OUTPUT=$'p\ne\n/\nABSENT' mktest::stub_function infisical::_reference_parts "infisical://p/e/ABSENT"
+  STUB_OUTPUT=$'PRESENT\nOTHER' mktest::stub_function infisical::_export_secret_keys "p" "e" "/"
   infisical::_verify_explicit_references
   [ "$_INFISICAL_VERIFIED_REFERENCES" = "infisical://p/e/PRESENT" ]
 }
 
-@test "_verify_explicit_references newline-joins multiple resolving references so each is whole-line matchable" {
+@test "_verify_explicit_references verifies a reference addressed in a folder path" {
+  _INFISICAL_VERIFIED_REFERENCES=""
+  STUB_OUTPUT="infisical://p/e/foo/bar/BAZ" mktest::stub_function infisical::_configured_references
+  mktest::stub_function infisical::_reference_wellformed
+  STUB_OUTPUT="" mktest::stub_function infisical::_default_project_id
+  STUB_OUTPUT=$'p\ne\n/foo/bar\nBAZ' mktest::stub_function infisical::_reference_parts "infisical://p/e/foo/bar/BAZ"
+  STUB_OUTPUT=$'BAZ\nOTHER' mktest::stub_function infisical::_export_secret_keys "p" "e" "/foo/bar"
+  infisical::_verify_explicit_references
+  mktest::assert_stub_called infisical::_export_secret_keys "p" "e" "/foo/bar"
+  [ "$_INFISICAL_VERIFIED_REFERENCES" = "infisical://p/e/foo/bar/BAZ" ]
+}
+
+@test "_verify_explicit_references newline-joins multiple held references so each is whole-line matchable" {
   _INFISICAL_VERIFIED_REFERENCES=""
   STUB_OUTPUT=$'infisical://p/e/ONE\ninfisical://p/e/TWO' \
     mktest::stub_function infisical::_configured_references
   mktest::stub_function infisical::_reference_wellformed
-  STUB_OUTPUT="v1" mktest::stub_function infisical::_fetch_explicit "infisical://p/e/ONE"
-  STUB_OUTPUT="v2" mktest::stub_function infisical::_fetch_explicit "infisical://p/e/TWO"
+  STUB_OUTPUT="" mktest::stub_function infisical::_default_project_id
+  STUB_OUTPUT=$'p\ne\n/\nONE' mktest::stub_function infisical::_reference_parts "infisical://p/e/ONE"
+  STUB_OUTPUT=$'p\ne\n/\nTWO' mktest::stub_function infisical::_reference_parts "infisical://p/e/TWO"
+  STUB_OUTPUT=$'ONE\nTWO' mktest::stub_function infisical::_export_secret_keys "p" "e" "/"
   infisical::_verify_explicit_references
   [ "$_INFISICAL_VERIFIED_REFERENCES" = $'infisical://p/e/ONE\ninfisical://p/e/TWO' ]
   # A real newline separator is load-bearing: has_reference's whole-line grep must
@@ -298,14 +353,100 @@ setup() {
   infisical::has_reference "infisical://p/e/TWO"
 }
 
+@test "_verify_explicit_references exports a project/env/path inventory once even across many references" {
+  _INFISICAL_VERIFIED_REFERENCES=""
+  STUB_OUTPUT=$'infisical://p/e/ONE\ninfisical://p/e/TWO\ninfisical://p/e/THREE' \
+    mktest::stub_function infisical::_configured_references
+  mktest::stub_function infisical::_reference_wellformed
+  STUB_OUTPUT="" mktest::stub_function infisical::_default_project_id
+  STUB_OUTPUT=$'p\ne\n/\nONE' mktest::stub_function infisical::_reference_parts "infisical://p/e/ONE"
+  STUB_OUTPUT=$'p\ne\n/\nTWO' mktest::stub_function infisical::_reference_parts "infisical://p/e/TWO"
+  STUB_OUTPUT=$'p\ne\n/\nTHREE' mktest::stub_function infisical::_reference_parts "infisical://p/e/THREE"
+  STUB_OUTPUT=$'ONE\nTWO\nTHREE' mktest::stub_function infisical::_export_secret_keys "p" "e" "/"
+  infisical::_verify_explicit_references
+  TIMES=1 mktest::assert_stub_called infisical::_export_secret_keys "p" "e" "/"
+}
+
+@test "_verify_explicit_references re-exports when references share a project/env but differ by path" {
+  _INFISICAL_VERIFIED_REFERENCES=""
+  STUB_OUTPUT=$'infisical://p/e/KEY\ninfisical://p/e/foo/KEY' \
+    mktest::stub_function infisical::_configured_references
+  mktest::stub_function infisical::_reference_wellformed
+  STUB_OUTPUT="" mktest::stub_function infisical::_default_project_id
+  STUB_OUTPUT=$'p\ne\n/\nKEY' mktest::stub_function infisical::_reference_parts "infisical://p/e/KEY"
+  STUB_OUTPUT=$'p\ne\n/foo\nKEY' mktest::stub_function infisical::_reference_parts "infisical://p/e/foo/KEY"
+  STUB_OUTPUT="KEY" mktest::stub_function infisical::_export_secret_keys "p" "e" "/"
+  STUB_OUTPUT="KEY" mktest::stub_function infisical::_export_secret_keys "p" "e" "/foo"
+  infisical::_verify_explicit_references
+  mktest::assert_stub_called infisical::_export_secret_keys "p" "e" "/"
+  mktest::assert_stub_called infisical::_export_secret_keys "p" "e" "/foo"
+}
+
+@test "_verify_explicit_references still exports a project/env/path only once when its inventory is empty" {
+  _INFISICAL_VERIFIED_REFERENCES=""
+  STUB_OUTPUT=$'infisical://p/e/ONE\ninfisical://p/e/TWO' \
+    mktest::stub_function infisical::_configured_references
+  mktest::stub_function infisical::_reference_wellformed
+  STUB_OUTPUT="" mktest::stub_function infisical::_default_project_id
+  STUB_OUTPUT=$'p\ne\n/\nONE' mktest::stub_function infisical::_reference_parts "infisical://p/e/ONE"
+  STUB_OUTPUT=$'p\ne\n/\nTWO' mktest::stub_function infisical::_reference_parts "infisical://p/e/TWO"
+  STUB_OUTPUT="" mktest::stub_function infisical::_export_secret_keys "p" "e" "/"
+  infisical::_verify_explicit_references
+  TIMES=1 mktest::assert_stub_called infisical::_export_secret_keys "p" "e" "/"
+  [ -z "$_INFISICAL_VERIFIED_REFERENCES" ]
+}
+
 @test "_verify_explicit_references fails loudly on a malformed configured reference" {
   STUB_OUTPUT="infisical://p/e" mktest::stub_function infisical::_configured_references
+  STUB_OUTPUT="" mktest::stub_function infisical::_default_project_id
   STUB_RETURN=1 mktest::stub_function infisical::_reference_wellformed "infisical://p/e"
-  mktest::stub_function infisical::_fetch_explicit
+  mktest::stub_function infisical::_export_secret_keys
   STUB_EXIT=1 mktest::stub_function lifecycle::fail
   run ! infisical::_verify_explicit_references
   MATCH="malformed reference" mktest::assert_stub_called lifecycle::fail
-  mktest::assert_stub_not_called infisical::_fetch_explicit
+  mktest::assert_stub_not_called infisical::_export_secret_keys
+}
+
+@test "_verify_explicit_references reuses the default project/env root inventory already loaded, without re-exporting it" {
+  _INFISICAL_VERIFIED_REFERENCES=""
+  _INFISICAL_SECRET_NAMES=$'PRESENT\nOTHER'
+  STUB_OUTPUT="infisical://p/prod/PRESENT" mktest::stub_function infisical::_configured_references
+  mktest::stub_function infisical::_reference_wellformed
+  STUB_OUTPUT="p" mktest::stub_function infisical::_default_project_id
+  STUB_OUTPUT="prod" mktest::stub_function infisical::_environment
+  STUB_OUTPUT=$'p\nprod\n/\nPRESENT' mktest::stub_function infisical::_reference_parts "infisical://p/prod/PRESENT"
+  mktest::stub_function infisical::_export_secret_keys
+  infisical::_verify_explicit_references
+  mktest::assert_stub_not_called infisical::_export_secret_keys
+  [ "$_INFISICAL_VERIFIED_REFERENCES" = "infisical://p/prod/PRESENT" ]
+}
+
+@test "_verify_explicit_references still exports for a non-root reference in the default project/env" {
+  _INFISICAL_VERIFIED_REFERENCES=""
+  _INFISICAL_SECRET_NAMES="ROOT_KEY"
+  STUB_OUTPUT="infisical://p/prod/foo/KEY" mktest::stub_function infisical::_configured_references
+  mktest::stub_function infisical::_reference_wellformed
+  STUB_OUTPUT="p" mktest::stub_function infisical::_default_project_id
+  STUB_OUTPUT="prod" mktest::stub_function infisical::_environment
+  STUB_OUTPUT=$'p\nprod\n/foo\nKEY' mktest::stub_function infisical::_reference_parts "infisical://p/prod/foo/KEY"
+  STUB_OUTPUT="KEY" mktest::stub_function infisical::_export_secret_keys "p" "prod" "/foo"
+  infisical::_verify_explicit_references
+  mktest::assert_stub_called infisical::_export_secret_keys "p" "prod" "/foo"
+  [ "$_INFISICAL_VERIFIED_REFERENCES" = "infisical://p/prod/foo/KEY" ]
+}
+
+@test "_verify_explicit_references still exports for a reference outside the default project/env" {
+  _INFISICAL_VERIFIED_REFERENCES=""
+  _INFISICAL_SECRET_NAMES="DEFAULT_KEY"
+  STUB_OUTPUT="infisical://q/staging/KEY" mktest::stub_function infisical::_configured_references
+  mktest::stub_function infisical::_reference_wellformed
+  STUB_OUTPUT="p" mktest::stub_function infisical::_default_project_id
+  STUB_OUTPUT="prod" mktest::stub_function infisical::_environment
+  STUB_OUTPUT=$'q\nstaging\n/\nKEY' mktest::stub_function infisical::_reference_parts "infisical://q/staging/KEY"
+  STUB_OUTPUT="KEY" mktest::stub_function infisical::_export_secret_keys "q" "staging" "/"
+  infisical::_verify_explicit_references
+  mktest::assert_stub_called infisical::_export_secret_keys "q" "staging" "/"
+  [ "$_INFISICAL_VERIFIED_REFERENCES" = "infisical://q/staging/KEY" ]
 }
 
 # --- infisical::_fetch_by_convention ---
@@ -314,7 +455,7 @@ setup() {
   STUB_OUTPUT="proj-123" mktest::stub_function infisical::_default_project_id
   STUB_OUTPUT="prod" mktest::stub_function infisical::_environment
   STUB_OUTPUT="TAILSCALE_DEFAULT" mktest::stub_function infisical::_convention_key "tailscale/default"
-  STUB_OUTPUT="fake-secret-value" mktest::stub_function infisical::_get "proj-123" "prod" "TAILSCALE_DEFAULT"
+  STUB_OUTPUT="fake-secret-value" mktest::stub_function infisical::_get "proj-123" "prod" "/" "TAILSCALE_DEFAULT"
   run infisical::_fetch_by_convention "tailscale/default"
   [ "$output" = "fake-secret-value" ]
 }
@@ -352,12 +493,19 @@ setup() {
   [ "$(cat "$token_file")" = "UNSET" ]
 }
 
+@test "_run disables the CLI per-command update check so it never phones home for a version" {
+  local check_file="$BATS_TEST_TMPDIR/run.check"
+  infisical() { printf '%s' "${INFISICAL_DISABLE_UPDATE_CHECK:-UNSET}" > "$check_file"; }
+  infisical::_run secrets get NAME
+  [ "$(cat "$check_file")" = "true" ]
+}
+
 # --- infisical::_get ---
 
 @test "_get fetches via _run with the path/env/project flags and no token on the command line" {
   STUB_OUTPUT="fake-secret-value" \
-    mktest::stub_function infisical::_run secrets get NAME --path=/ --env=prod --projectId=proj-123 --silent --plain
-  run infisical::_get "proj-123" "prod" "NAME"
+    mktest::stub_function infisical::_run secrets get NAME --path=/foo --env=prod --projectId=proj-123 --silent --plain
+  run infisical::_get "proj-123" "prod" "/foo" "NAME"
   [ "$output" = "fake-secret-value" ]
 }
 
@@ -367,7 +515,7 @@ setup() {
   STUB_OUTPUT="cid-123" mktest::stub_function infisical::_client_id
   STUB_OUTPUT="csecret-456" mktest::stub_function infisical::_client_secret
   local env_file="$BATS_TEST_TMPDIR/infisical.env" args_file="$BATS_TEST_TMPDIR/infisical.args"
-  infisical() {
+  infisical::_run() {
     printf 'id=%s secret=%s' "${INFISICAL_UNIVERSAL_AUTH_CLIENT_ID:-}" "${INFISICAL_UNIVERSAL_AUTH_CLIENT_SECRET:-}" > "$env_file"
     printf '%s' "$*" > "$args_file"
     printf 'TOKEN123\n'
@@ -382,28 +530,28 @@ setup() {
 
 @test "_login_user does nothing when a session is already valid" {
   mktest::stub_function infisical::_session_valid
-  mktest::stub_function infisical
+  mktest::stub_function infisical::_run
   infisical::_login_user
-  mktest::assert_stub_not_called infisical
+  mktest::assert_stub_not_called infisical::_run
 }
 
 @test "_login_user opens the browser login when no session is valid" {
   STUB_RETURN=1 mktest::stub_function infisical::_session_valid
-  mktest::stub_function infisical "login"
+  mktest::stub_function infisical::_run "login"
   infisical::_login_user
-  mktest::assert_stub_called infisical "login"
+  mktest::assert_stub_called infisical::_run "login"
   mktest::assert_stub_called logging::info
 }
 
 # --- infisical::_session_valid ---
 
 @test "_session_valid reflects the infisical login status exit code" {
-  mktest::stub_function infisical "login" "status"
+  mktest::stub_function infisical::_run "login" "status"
   infisical::_session_valid
 }
 
 @test "_session_valid is false when no session is authenticated" {
-  STUB_RETURN=1 mktest::stub_function infisical "login" "status"
+  STUB_RETURN=1 mktest::stub_function infisical::_run "login" "status"
   run ! infisical::_session_valid
 }
 

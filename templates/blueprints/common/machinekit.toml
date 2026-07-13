@@ -47,12 +47,16 @@
 # environment = "prod"            # default environment for by-convention names
 #
 # [secrets.manager_refs]
-# # Map a specific secret to an explicit Infisical reference
-# # (infisical://<projectId>/<env>/<name>). Unmapped names fall back to a
-# # convention key — the name upcased with slashes→underscores — looked up in
-# # default_project_id/environment; machinekit verifies the manager actually holds
-# # it, so a name in neither the pool nor the manager reads as missing.
-# "tailscale/default" = "infisical://<projectId>/prod/tailscale/default"
+# # Map a specific secret to an explicit Infisical reference. The last segment is
+# # the secret name; any segments before it are its Infisical folder path, which
+# # defaults to the project root:
+# #   infisical://<projectId>/<env>/<name>         — a secret at the root
+# #   infisical://<projectId>/<env>/<path>/<name>  — a secret inside a folder
+# # Unmapped names fall back to a convention key — the name upcased with
+# # slashes→underscores — looked up in default_project_id/environment; machinekit
+# # verifies the manager actually holds it, so a name in neither the pool nor the
+# # manager reads as missing.
+# "tailscale/default" = "infisical://<projectId>/prod/TAILSCALE_DEFAULT"
 # # The age key (when [module.age] key_source_type = "secrets_manager") is the
 # # "age_key" secret — reference it explicitly here, or rely on its convention key.
 # "age_key" = "infisical://<projectId>/prod/age_key"
