@@ -291,6 +291,24 @@ setup() {
   [ -z "$output" ]
 }
 
+# --- context::get_json ---
+
+@test "get_json returns an object subtree as compact JSON" {
+  context::set "meta" '{"version":"1","nested":{"x":1}}' --json
+  run context::get_json "meta"
+  [ "$output" = '{"version":"1","nested":{"x":1}}' ]
+}
+
+@test "get_json preserves a scalar as valid JSON, not a bare word" {
+  context::set "greeting" "hello"
+  run context::get_json "greeting"
+  [ "$output" = '"hello"' ]
+}
+
+@test "get_json returns 1 for an unset key" {
+  run ! context::get_json "nonexistent.key"
+}
+
 # --- context::json ---
 
 @test "json returns a valid JSON object" {

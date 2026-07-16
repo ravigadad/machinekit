@@ -28,6 +28,21 @@ config::get_array() {
   context::get_array "config${1:+.$1}"
 }
 
+# config::get_json KEY [DEFAULT] — the config subtree at dotted KEY as compact
+# JSON, or DEFAULT (default "null") when KEY is unset. The object/array
+# counterpart to config::get (scalars), so a reader wanting a subtree doesn't
+# reach past config:: into the store's layout. Type-preserving: a scalar comes
+# back as valid JSON (a quoted string, a number), never a bare word — so callers
+# can validate the shape rather than choke on a misconfigured value.
+config::get_json() {
+  local key="$1" default="${2:-null}" val
+  if val="$(context::get_json "config${key:+.$key}")"; then
+    printf '%s\n' "$val"
+  else
+    printf '%s\n' "$default"
+  fi
+}
+
 config::_common_json() {
   local blueprints_dir="$1"
   config::_parse_toml "$blueprints_dir/common/machinekit.toml"

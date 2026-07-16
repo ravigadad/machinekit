@@ -122,6 +122,8 @@ machinekit assembles these into a create-once `~/.config/hindsight/hindsight.env
 
 Everything else (which banks to auto-recall or expose as tools) is plain config in the commented block in [`templates/blueprints/common/machinekit.toml`](../templates/blueprints/common/machinekit.toml). No accounts to create; an agent's own sign-in (e.g. `claude` on first run) is separate and yours to do.
 
+**Optional — bank missions/dispositions.** If you add `[module.hindsight_integration.additional_banks.<name>]` tables, machinekit applies each bank's mission/disposition config to the tenant on apply (an idempotent upsert, using Hindsight's own field names). Banks are tenant-scoped, so this runs from whichever box carries the config. Because it writes to the tenant, it is **consent-gated** — an interactive yes, or `MACHINEKIT_HINDSIGHT_INTEGRATION_CONFIGURE_BANKS=1` unattended — and it uses the shared `hindsight/tenant_api_key` read-only, so that key must already be shared (not just freshly generated on this box). If the server isn't reachable yet, the step is skipped and applies on the next run.
+
 ---
 
 ## agents_config_setup — a source for the agents-config directory

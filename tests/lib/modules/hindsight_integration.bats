@@ -10,6 +10,9 @@ setup() {
   # Allow-only logging collaborators — logging is mechanism, not contract.
   mktest::stub_function logging::step
   mktest::stub_function logging::dry_run
+  mktest::stub_function logging::info
+  mktest::stub_function logging::warn
+  mktest::stub_function logging::success
 }
 
 # --- requires ---
@@ -42,9 +45,10 @@ setup() {
 
 # --- preflight ---
 
-@test "preflight passes and runs each integration's own preflight" {
+@test "preflight validates bank configs and runs each integration's own preflight" {
   STUB_OUTPUT="" mktest::stub_function hindsight_integration::_server_url
   STUB_OUTPUT="memory-server" mktest::stub_function hindsight_integration::_server_host
+  mktest::stub_function hindsight_integration::_validate_bank_configs
   STUB_OUTPUT=$'foo\nbar' mktest::stub_function hindsight_integration::_integrations
   mktest::stub_function hindsight_integration::_is_available "foo"
   mktest::stub_function hindsight_integration::_is_available "bar"
@@ -53,6 +57,8 @@ setup() {
   STUB_EXIT=1 mktest::stub_function lifecycle::fail
   hindsight_integration::preflight
   mktest::assert_stub_not_called lifecycle::fail
+  # Bank-config validation is an unconditional step of the flow (no branch to skip).
+  mktest::assert_stub_called hindsight_integration::_validate_bank_configs
   mktest::assert_stub_called hindsight_integration::foo::preflight
   mktest::assert_stub_called hindsight_integration::bar::preflight
 }
@@ -60,6 +66,7 @@ setup() {
 @test "preflight returns success when an available integration has no preflight" {
   STUB_OUTPUT="" mktest::stub_function hindsight_integration::_server_url
   STUB_OUTPUT="memory-server" mktest::stub_function hindsight_integration::_server_host
+  mktest::stub_function hindsight_integration::_validate_bank_configs
   STUB_OUTPUT="foo" mktest::stub_function hindsight_integration::_integrations
   mktest::stub_function hindsight_integration::_is_available "foo"
   STUB_EXIT=1 mktest::stub_function lifecycle::fail
@@ -73,6 +80,7 @@ setup() {
 @test "preflight passes when only server_url is set" {
   STUB_OUTPUT="https://hindsight.example/api" mktest::stub_function hindsight_integration::_server_url
   STUB_OUTPUT="" mktest::stub_function hindsight_integration::_server_host
+  mktest::stub_function hindsight_integration::_validate_bank_configs
   STUB_OUTPUT="foo" mktest::stub_function hindsight_integration::_integrations
   mktest::stub_function hindsight_integration::_is_available "foo"
   mktest::stub_function hindsight_integration::foo::preflight
@@ -92,6 +100,7 @@ setup() {
 
 @test "preflight fails on an unknown integration" {
   STUB_OUTPUT="memory-server" mktest::stub_function hindsight_integration::_server_host
+  mktest::stub_function hindsight_integration::_validate_bank_configs
   STUB_OUTPUT="bogus" mktest::stub_function hindsight_integration::_integrations
   STUB_RETURN=1 mktest::stub_function hindsight_integration::_is_available "bogus"
   STUB_OUTPUT="bar" mktest::stub_function hindsight_integration::_available
@@ -277,9 +286,9 @@ setup() {
   [ "$output" = "work" ]
 }
 
-@test "_auto_recall_banks reads the additional_banks.auto_recall array" {
+@test "_auto_recall_banks reads the auto_recall_banks array" {
   STUB_OUTPUT=$'coding\npersonal' mktest::stub_function config::get_array \
-    "module.hindsight_integration.additional_banks.auto_recall"
+    "module.hindsight_integration.auto_recall_banks"
   run hindsight_integration::_auto_recall_banks
   [ "${lines[0]}" = "coding" ]
   [ "${lines[1]}" = "personal" ]
@@ -287,15 +296,15 @@ setup() {
 
 @test "_auto_recall_banks is empty when the key is unset" {
   STUB_RETURN=1 mktest::stub_function config::get_array \
-    "module.hindsight_integration.additional_banks.auto_recall"
+    "module.hindsight_integration.auto_recall_banks"
   run hindsight_integration::_auto_recall_banks
   [ "$status" -eq 0 ]
   [ -z "$output" ]
 }
 
-@test "_tool_use_banks reads the additional_banks.tool_use array" {
+@test "_tool_use_banks reads the tool_use_banks array" {
   STUB_OUTPUT=$'coding\nmusic' mktest::stub_function config::get_array \
-    "module.hindsight_integration.additional_banks.tool_use"
+    "module.hindsight_integration.tool_use_banks"
   run hindsight_integration::_tool_use_banks
   [ "${lines[0]}" = "coding" ]
   [ "${lines[1]}" = "music" ]
@@ -303,8 +312,195 @@ setup() {
 
 @test "_tool_use_banks is empty when the key is unset" {
   STUB_RETURN=1 mktest::stub_function config::get_array \
-    "module.hindsight_integration.additional_banks.tool_use"
+    "module.hindsight_integration.tool_use_banks"
   run hindsight_integration::_tool_use_banks
   [ "$status" -eq 0 ]
   [ -z "$output" ]
+}
+
+# --- post_apply (bank config) ---
+
+@test "post_apply is a no-op when no banks are configured" {
+  STUB_RETURN=1 mktest::stub_function hindsight_integration::_has_bank_configs
+  mktest::stub_function hindsight_integration::_configure_banks
+  run hindsight_integration::post_apply
+  [ "$status" -eq 0 ]
+  mktest::assert_stub_not_called hindsight_integration::_configure_banks
+}
+
+@test "post_apply reports without mutating or prompting under dry-run" {
+  mktest::stub_function hindsight_integration::_has_bank_configs
+  mktest::stub_function input::is_dry_run
+  STUB_OUTPUT=$'music\npersonal' mktest::stub_function hindsight_integration::_configured_bank_names
+  mktest::stub_function hindsight_integration::_configure_banks_consented
+  mktest::stub_function hindsight_integration::_configure_banks
+  run hindsight_integration::post_apply
+  [ "$status" -eq 0 ]
+  # The dry-run summary is the user-facing "what would happen" contract.
+  MATCH="would apply Hindsight bank config" mktest::assert_stub_called logging::dry_run
+  mktest::assert_stub_not_called hindsight_integration::_configure_banks_consented
+  mktest::assert_stub_not_called hindsight_integration::_configure_banks
+}
+
+@test "post_apply warns and does not mutate when consent is withheld" {
+  mktest::stub_function hindsight_integration::_has_bank_configs
+  STUB_RETURN=1 mktest::stub_function input::is_dry_run
+  STUB_RETURN=1 mktest::stub_function hindsight_integration::_configure_banks_consented
+  mktest::stub_function hindsight_integration::_configure_banks
+  run hindsight_integration::post_apply
+  [ "$status" -eq 0 ]
+  mktest::assert_stub_not_called hindsight_integration::_configure_banks
+}
+
+@test "post_apply configures the banks when consented" {
+  mktest::stub_function hindsight_integration::_has_bank_configs
+  STUB_RETURN=1 mktest::stub_function input::is_dry_run
+  mktest::stub_function hindsight_integration::_configure_banks_consented
+  mktest::stub_function hindsight_integration::_configure_banks
+  hindsight_integration::post_apply
+  mktest::assert_stub_called hindsight_integration::_configure_banks
+}
+
+# --- _validate_bank_configs ---
+
+@test "_validate_bank_configs hands the configured banks to validate_shape" {
+  STUB_OUTPUT='{"music":{"retain_mission":"m"}}' \
+    mktest::stub_function hindsight_integration::_bank_configs_json
+  mktest::stub_function hindsight::banks::validate_shape
+  hindsight_integration::_validate_bank_configs
+  mktest::assert_stub_called hindsight::banks::validate_shape '{"music":{"retain_mission":"m"}}'
+}
+
+# --- _configure_banks ---
+
+@test "_configure_banks upserts each bank once the fleet is ready" {
+  mktest::stub_function hindsight::secrets::provided "tenant_api_key"
+  STUB_OUTPUT="http://memory-server:8888" mktest::stub_function hindsight_integration::_api_url
+  mktest::stub_function hindsight::banks::server_reachable "http://memory-server:8888"
+  STUB_OUTPUT="tok-123" mktest::stub_function hindsight::secrets::resolve "tenant_api_key"
+  STUB_OUTPUT="default" mktest::stub_function hindsight_integration::_bank_config_tenant
+  STUB_OUTPUT=$'music\npersonal' mktest::stub_function hindsight_integration::_configured_bank_names
+  STUB_OUTPUT='{"retain_mission":"m"}' mktest::stub_function hindsight_integration::_bank_config_json "music"
+  STUB_OUTPUT='{"disposition_empathy":4}' mktest::stub_function hindsight_integration::_bank_config_json "personal"
+  mktest::stub_function hindsight::banks::configure
+  hindsight_integration::_configure_banks
+  mktest::assert_stub_called hindsight::banks::configure \
+    "http://memory-server:8888" "tok-123" "default" "music" '{"retain_mission":"m"}'
+  mktest::assert_stub_called hindsight::banks::configure \
+    "http://memory-server:8888" "tok-123" "default" "personal" '{"disposition_empathy":4}'
+}
+
+# A bank is stubbed present in the skip tests so the guard is the ONLY thing
+# keeping `configure` from firing — otherwise an empty bank list would pass the
+# assertion whether or not the guard held.
+@test "_configure_banks skips (no reachability probe, no resolve, no mutate) when the tenant key isn't shared" {
+  STUB_RETURN=1 mktest::stub_function hindsight::secrets::provided "tenant_api_key"
+  mktest::stub_function hindsight_integration::_api_url
+  mktest::stub_function hindsight::banks::server_reachable
+  mktest::stub_function hindsight::secrets::resolve
+  STUB_OUTPUT="music" mktest::stub_function hindsight_integration::_configured_bank_names
+  mktest::stub_function hindsight::banks::configure
+  run hindsight_integration::_configure_banks
+  [ "$status" -eq 0 ]
+  # The soft skip is gated on `provided` alone — it never probes, resolves, or mutates.
+  mktest::assert_stub_not_called hindsight::banks::server_reachable
+  mktest::assert_stub_not_called hindsight::secrets::resolve
+  mktest::assert_stub_not_called hindsight::banks::configure
+}
+
+@test "_configure_banks skips (no resolve, no mutate) when the server is unreachable" {
+  mktest::stub_function hindsight::secrets::provided "tenant_api_key"
+  STUB_OUTPUT="http://memory-server:8888" mktest::stub_function hindsight_integration::_api_url
+  STUB_RETURN=1 mktest::stub_function hindsight::banks::server_reachable "http://memory-server:8888"
+  mktest::stub_function hindsight::secrets::resolve
+  STUB_OUTPUT="music" mktest::stub_function hindsight_integration::_configured_bank_names
+  mktest::stub_function hindsight::banks::configure
+  run hindsight_integration::_configure_banks
+  [ "$status" -eq 0 ]
+  mktest::assert_stub_not_called hindsight::secrets::resolve
+  mktest::assert_stub_not_called hindsight::banks::configure
+}
+
+# Regression for the error-masking bug: with the key provided, a resolution
+# failure is NOT the "isn't shared yet" soft skip — that warning is reachable
+# only via a not-provided key, so it must never fire once `provided` is true.
+@test "_configure_banks does not report a resolution failure as the not-shared skip" {
+  mktest::stub_function hindsight::secrets::provided "tenant_api_key"
+  STUB_OUTPUT="http://memory-server:8888" mktest::stub_function hindsight_integration::_api_url
+  mktest::stub_function hindsight::banks::server_reachable "http://memory-server:8888"
+  STUB_RETURN=1 mktest::stub_function hindsight::secrets::resolve "tenant_api_key"
+  STUB_OUTPUT="default" mktest::stub_function hindsight_integration::_bank_config_tenant
+  STUB_OUTPUT="music" mktest::stub_function hindsight_integration::_configured_bank_names
+  STUB_OUTPUT='{"retain_mission":"m"}' mktest::stub_function hindsight_integration::_bank_config_json "music"
+  mktest::stub_function hindsight::banks::configure
+  run hindsight_integration::_configure_banks
+  MATCH="isn't shared yet" mktest::assert_stub_not_called logging::warn
+}
+
+# --- bank config readers ---
+
+@test "_bank_configs_json reads the additional_banks subtree via config::get_json, defaulting to {}" {
+  STUB_OUTPUT='{"music":{"retain_mission":"m"}}' mktest::stub_function config::get_json \
+    "module.hindsight_integration.additional_banks" "{}"
+  run hindsight_integration::_bank_configs_json
+  [ "$output" = '{"music":{"retain_mission":"m"}}' ]
+}
+
+@test "_configured_bank_names lists banks in blueprint order, not sorted" {
+  # Keys deliberately non-alphabetical so the test distinguishes keys_unsorted
+  # (blueprint order) from keys (sorted would be coding, music, personal).
+  STUB_OUTPUT='{"personal":{},"music":{},"coding":{}}' mktest::stub_function hindsight_integration::_bank_configs_json
+  run hindsight_integration::_configured_bank_names
+  [ "${lines[0]}" = "personal" ]
+  [ "${lines[1]}" = "music" ]
+  [ "${lines[2]}" = "coding" ]
+}
+
+@test "_bank_config_json returns one bank's table verbatim" {
+  STUB_OUTPUT='{"music":{"retain_mission":"m"},"personal":{"disposition_empathy":4}}' \
+    mktest::stub_function hindsight_integration::_bank_configs_json
+  run hindsight_integration::_bank_config_json personal
+  [ "$output" = '{"disposition_empathy":4}' ]
+}
+
+@test "_has_bank_configs is true when a config exists" {
+  STUB_OUTPUT="music" mktest::stub_function hindsight_integration::_configured_bank_names
+  hindsight_integration::_has_bank_configs
+}
+
+@test "_has_bank_configs is false when none exist" {
+  STUB_OUTPUT="" mktest::stub_function hindsight_integration::_configured_bank_names
+  run hindsight_integration::_has_bank_configs
+  [ "$status" -ne 0 ]
+}
+
+# --- _bank_config_tenant ---
+
+@test "_bank_config_tenant reads module.hindsight_integration.tenant, defaulting to 'default'" {
+  STUB_OUTPUT="default" mktest::stub_function config::get \
+    "module.hindsight_integration.tenant" --default "default"
+  run hindsight_integration::_bank_config_tenant
+  [ "$output" = "default" ]
+}
+
+# --- _configure_banks_consented ---
+
+@test "_configure_banks_consented reads the consent key with a no-consent default" {
+  STUB_OUTPUT="true" mktest::stub_function context::get \
+    "hindsight_integration.configure_banks" --default false --coerce boolean \
+    --prompt "$_HINDSIGHT_INTEGRATION_CONSENT_PROMPT"
+  hindsight_integration::_configure_banks_consented
+  # The safety contract is the arguments, not just the compare: an unset key must
+  # resolve to false (no consent), read from this exact key.
+  mktest::assert_stub_called context::get \
+    "hindsight_integration.configure_banks" --default false --coerce boolean \
+    --prompt "$_HINDSIGHT_INTEGRATION_CONSENT_PROMPT"
+}
+
+@test "_configure_banks_consented is false when consent resolves false" {
+  STUB_OUTPUT="false" mktest::stub_function context::get \
+    "hindsight_integration.configure_banks" --default false --coerce boolean \
+    --prompt "$_HINDSIGHT_INTEGRATION_CONSENT_PROMPT"
+  run hindsight_integration::_configure_banks_consented
+  [ "$status" -ne 0 ]
 }

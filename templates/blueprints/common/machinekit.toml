@@ -134,18 +134,43 @@
 # # (auto recall/retain). bank_id_prefix defaults to "coding".
 # # bank_id_prefix = "coding"
 # #
-# # Extra banks beyond the per-project one, by name. A bank in auto_recall is
-# # folded into every session's recall (read-only); a bank in tool_use is exposed
-# # as its own MCP server with read/write tools (a per-session context cost — opt
-# # in deliberately). List a bank in both for read-and-write.
-# # additional_banks.auto_recall = ["shared", "reference"]
-# # additional_banks.tool_use = ["shared"]
+# # Extra banks beyond the per-project one, by name. A bank in auto_recall_banks
+# # is folded into every session's recall (read-only); a bank in tool_use_banks is
+# # exposed as its own MCP server with read/write tools (a per-session context
+# # cost — opt in deliberately). List a bank in both for read-and-write.
+# # auto_recall_banks = ["shared", "reference"]
+# # tool_use_banks = ["shared"]
 # #
 # # The fleet-shared tenant key is the same hindsight/tenant_api_key secret the
 # # server uses (pool or manager; generated if absent — this box may be the
 # # first). machinekit assembles it, with the server URL, into each agent's
 # # config (e.g. ~/.hindsight/claude-code.json, mode 600), create-once. To repoint
 # # at a different server or regenerate, delete the config(s) and re-apply.
+# #
+# # Bank missions/dispositions — apply the tenant-wide config for named banks from
+# # this machine. Banks are tenant-scoped (not per-machine): any box carrying an
+# # additional_banks.<name> table re-asserts it on apply, and the upsert is
+# # idempotent — so list these on whichever box you want to own the config (a
+# # server that also runs this module, or any client). Each table is sent verbatim
+# # to the server's bank-config API using Hindsight's own field names:
+# # retain_mission / observations_mission / reflect_mission, and disposition traits
+# # disposition_skepticism / disposition_literalism / disposition_empathy (1–5).
+# # A bank named here is independent of the recall/tool_use lists above.
+# #
+# # This writes to the tenant (an upsert that can overwrite a bank's config), so it
+# # needs explicit consent: an interactive yes, or
+# # MACHINEKIT_HINDSIGHT_INTEGRATION_CONFIGURE_BANKS=1 unattended. Auth is the same
+# # fleet tenant key, read-only here — so it must already be shared (pool/manager),
+# # not just freshly generated. If the server isn't reachable yet, config is skipped
+# # and lands on the next apply.
+# # tenant = "default"       # the tenant path segment; override only for multi-tenant
+# #
+# # [module.hindsight_integration.additional_banks.music]
+# # retain_mission = "Extract creative direction, influences, works in progress. Ignore software details."
+# # reflect_mission = "You are a creative collaborator who knows my musical sensibility."
+# # disposition_skepticism = 2
+# # disposition_literalism = 1
+# # disposition_empathy = 5
 #
 # [module.agents_config_setup]
 # # Ensures the shared agents-config directory is on this machine, seeding it from

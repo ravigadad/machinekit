@@ -63,6 +63,26 @@ setup() {
   mktest::assert_stub_called context::get_array "config.modules"
 }
 
+# --- config::get_json ---
+
+@test "get_json returns the subtree at the config-prefixed key as JSON" {
+  STUB_OUTPUT='{"b":1}' mktest::stub_function context::get_json "config.module.x"
+  run config::get_json "module.x"
+  [ "$output" = '{"b":1}' ]
+}
+
+@test "get_json returns the given default when the key is unset" {
+  STUB_RETURN=1 mktest::stub_function context::get_json "config.module.x"
+  run config::get_json "module.x" "{}"
+  [ "$output" = "{}" ]
+}
+
+@test "get_json defaults to null when no default is given and the key is unset" {
+  STUB_RETURN=1 mktest::stub_function context::get_json "config.module.x"
+  run config::get_json "module.x"
+  [ "$output" = "null" ]
+}
+
 # --- config::_common_json ---
 
 @test "_common_json returns parsed machinekit toml file in common dir" {

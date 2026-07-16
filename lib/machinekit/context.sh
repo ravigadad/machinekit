@@ -141,6 +141,15 @@ context::get_array() {
   printf '%s' "$val" | jq -r '.[]'
 }
 
+# context::get_json KEY
+# The value at KEY as compact JSON, preserving its type (object, array, string,
+# number, …); returns 1 when unset. The type-preserving counterpart to
+# context::get, which -r-stringifies and so turns a JSON string into a bare word
+# a re-parse chokes on. A caller wanting a subtree as JSON reaches for this.
+context::get_json() {
+  context::_read_path -c "$1"
+}
+
 # context::json
 # Emit the full context as a JSON object.
 context::json() {
@@ -247,12 +256,22 @@ context::env_var_name() {
 }
 
 # context::_from_store KEY
-# Print the stored value for KEY, or return 1 if unset.
+# Print the stored value for KEY (scalars stringified), or return 1 if unset.
 context::_from_store() {
+  context::_read_path -r "$1"
+}
+
+# context::_read_path JQ_FLAG KEY
+# The store value at dotted KEY, rendered by jq with JQ_FLAG: -r stringifies a
+# scalar (the store-cache reader's contract), -c preserves JSON type (get_json's).
+# Returns 1 when unset — getpath yields null, our absent sentinel. The single home
+# of the dotted-key-to-tree mapping, shared by _from_store and get_json so the two
+# can never disagree on what a key means.
+context::_read_path() {
   context::init_storage
-  local store val
+  local flag="$1" key="$2" store val
   store=$(context::_internal_storage_file)
-  val=$(jq -r --arg path "$1" \
+  val=$(jq "$flag" --arg path "$key" \
     '($path | split(".")) as $p | getpath($p)' "$store")
   [ "$val" = "null" ] && return 1
   printf '%s\n' "$val"

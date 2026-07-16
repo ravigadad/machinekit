@@ -494,7 +494,7 @@ machinekit/                             ← this repo (public)
 │       ├── git/templates/              ← module-shipped dotfile defaults (dot_gitconfig.tmpl, xdg_config/git/ignore.tmpl)
 │       ├── git_backup.sh               ← git_backup::install (periodic push-only-with-abort backup of configured folders; one manifest-driven service); ships git_backup/push.sh
 │       ├── gomplate.sh                 ← gomplate::file_transforms + render + install (base module: the .tmpl handler)
-│       ├── hindsight_integration.sh    ← wires coding agents to a Hindsight server; sources hindsight_integration/<agent>.sh variants
+│       ├── hindsight_integration.sh    ← wires coding agents to a Hindsight server + applies tenant bank config; sources hindsight_integration/<agent>.sh variants and hindsight/banks.sh
 │       ├── hindsight_server.sh         ← self-hosted Hindsight memory API (container, against host postgres)
 │       ├── hindsight/secrets.sh        ← shared named-secret resolution for both hindsight modules
 │       ├── infisical.sh                ← secrets_manager satisfier backed by Infisical Cloud (universal + user auth)
