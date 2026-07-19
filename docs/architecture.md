@@ -432,90 +432,15 @@ The template ships with commented Brewfiles showing the conventions; your bluepr
 
 ---
 
-## File structure reference
+## Code organization
 
-```
-machinekit/                             ← this repo (public)
-├── README.md
-├── CLAUDE.md
-├── docs/
-│   ├── architecture.md                 ← this file
-│   └── roadmap.md
-├── bin/
-│   └── machinekit                      ← the one public entry: pure-3.2 dispatcher that resolves a >=5.3 bash and execs the libexec impl under it
-├── libexec/                            ← internal impls, not on PATH; run under the resolved modern bash (git-core style)
-│   ├── machinekit-apply                ← apply a blueprint
-│   ├── machinekit-generate             ← scaffold a fresh blueprint
-│   ├── machinekit-secrets              ← inspect the blueprint secrets pool (read-only)
-│   └── machinekit-ensure-on-path       ← installer-invoked: link the command into ~/.local/bin + onto PATH (not a subcommand)
-├── lib/                                ← all execution code lives here
-│   ├── common/                         ← pure-3.2 primitives shared across layers (sourced by the bootstrap and by lib/machinekit/)
-│   │   ├── bash_floor.sh               ← single source of the bash version floor (5.3): bash_floor::meets + ::guard
-│   │   └── brew_core.sh                ← opinion-free shared Homebrew primitives: brew_core::setup_path + ::run_official_installer
-│   ├── bootstrap/                      ← the pure-3.2 bootstrap island (sourced by bin/machinekit before any modern lib)
-│   │   ├── bash.sh                     ← bootstrap::bash::ensure_modern_bash — resolve a >=floor bash: a MACHINEKIT_BASH override, else the running one, else an existing or freshly installed brew bash
-│   │   └── brew.sh                     ← bootstrap::brew::* — ensure Homebrew / install bash, with island-local log/fail/interactive
-│   ├── machinekit.sh                   ← single aggregator: sources lib/machinekit/* eagerly
-│   ├── machinekit/                     ← core machinekit code
-│   │   ├── logging.sh                  ← logging::* (info, warn, error, success, step, attention, debug, dry_run, fail)
-│   │   ├── lifecycle.sh                ← lifecycle::* (cleanup chain, lock, fail)
-│   │   ├── sudo.sh                     ← sudo::* (credential probe + 60s keep-alive)
-│   │   ├── input.sh                    ← input::* (mode detection, confirm, dry-run, command_exists)
-│   │   ├── context.sh                  ← context::* (jq-backed runtime data store: set/get, arrays, json, seed_from_flags)
-│   │   ├── system.sh                   ← system::detect — populates os.family + os.arch into context
-│   │   ├── brew.sh                     ← brew::* (bootstrap, install_formula — low-level brew ops)
-│   │   ├── fetch.sh                    ← fetch::* (source-agnostic: resolve_protocol, into; git clone w/ SSH fallback + error classification, or cp)
-│   │   ├── managed_block.sh            ← managed_block::ensure (maintain a delimited machinekit-owned block in a file; shared by syncthing/git_backup ignore files)
-│   │   ├── service.sh                  ← service::* (install_interval / install_calendar — schedule a job on the OS-native scheduler: macOS system LaunchDaemon or Linux user systemd timer)
-│   │   ├── path.sh                     ← path::ensure_on_path (link the command into ~/.local/bin + add it to the shell rc's PATH; managed_block-backed)
-│   │   ├── blueprints.sh               ← blueprints::* (fetch, dir — orchestrates fetch:: into the cached blueprints location)
-│   │   ├── ssh.sh                      ← ssh::* (key install, generate, interactive discover)
-│   │   ├── config.sh                   ← config::* (parse + merge machinekit.toml via toml2json; stored in context)
-│   │   ├── resolver.sh                 ← resolver::resolve — DFS topological sort over ::requires (hard) + ::after (soft, order-only) declarations
-│   │   ├── modules.sh                  ← modules::* (source_all, run_preflights, run_installs, run_post_apply); MK_BASE_MODULES
-│   │   ├── home.sh                     ← home::* (sync, _apply — core home management); sources home/staging.sh, home/dry_run.sh, home/transforms.sh
-│   │   ├── home/
-│   │   │   ├── staging.sh              ← home::staging::* (build, dir, cleanup — staging dir construction)
-│   │   │   ├── dry_run.sh              ← home::dry_run::* (show_diff — diff generation and display)
-│   │   │   └── transforms.sh           ← home::transforms::* (content pipeline: register markers, resolve, execute)
-│   │   ├── prerequisites.sh            ← prerequisites::* (jq/toml2json/git via brew — gomplate is a base module)
-│   │   ├── preflight.sh                ← preflight::* (system detect, blueprints fetch, config load, module resolution)
-│   │   ├── hooks.sh                    ← hooks::* (post-apply hook runner; common + machine_type layers)
-│   │   ├── hook-support.sh             ← library blueprint hooks source via $MACHINEKIT_SUPPORT
-│   │   └── postflight.sh               ← postflight::* (end-of-apply summary: framework baseline + per-module postflight_info/postflight_instructions walks)
-│   └── modules/                        ← user-facing modules (representative — see lib/modules/ for the full set); each exposes ::install
-│       ├── age.sh                      ← age::preflight + age::install (file, secrets-manager, or generate) + age::decrypt (the .age decode handler) + age::file_transforms
-│       ├── agents_config_setup.sh      ← ensures the agents-config dir exists; seeds it via fetch::; owns the shared dir key
-│       ├── agents_config_harnesses.sh  ← projects the agents-config dir into coding agents; sources agents_config_harnesses/<harness>.sh variants
-│       ├── brewfile.sh                 ← brewfile::install (common + machine_type Brewfile layers)
-│       ├── claude_code.sh              ← claude_code::install (Claude Code CLI via the official installer)
-│       ├── docker_ce.sh                ← docker_ce::provides + docker_ce::install (Linux container runtime)
-│       ├── git.sh                      ← git::preflight + git::install (no-op; ships templates)
-│       ├── git/templates/              ← module-shipped dotfile defaults (dot_gitconfig.tmpl, xdg_config/git/ignore.tmpl)
-│       ├── git_backup.sh               ← git_backup::install (periodic push-only-with-abort backup of configured folders; one manifest-driven service); ships git_backup/push.sh
-│       ├── gomplate.sh                 ← gomplate::file_transforms + render + install (base module: the .tmpl handler)
-│       ├── hindsight_integration.sh    ← wires coding agents to a Hindsight server + applies tenant bank config; sources hindsight_integration/<agent>.sh variants and hindsight/banks.sh
-│       ├── hindsight_server.sh         ← self-hosted Hindsight memory API (container, against host postgres)
-│       ├── hindsight/secrets.sh        ← shared named-secret resolution for both hindsight modules
-│       ├── infisical.sh                ← secrets_manager satisfier backed by Infisical Cloud (universal + user auth)
-│       ├── mise.sh                     ← mise::requires + mise::provides + mise::install + mise::post_apply
-│       ├── mise/templates/             ← module-shipped dotfile defaults (xdg_config/mise/…, env.zsh.d/mise.zsh)
-│       ├── orbstack.sh                 ← orbstack::provides + orbstack::install (macOS container runtime)
-│       ├── postgres.sh                 ← postgres host provisioning; sources postgres/{introspect,access}.sh
-│       ├── syncthing.sh                ← syncthing::install (generic peer-to-peer folder sync; consent-gated mesh join; tailnet-only); ships syncthing/conflict_scan.sh
-│       ├── tailscale.sh                ← tailscale::install (client + headless tagged-device join)
-│       ├── zsh.sh                      ← zsh::install (installs zsh via brew; module ships templates)
-│       ├── zsh/templates/              ← framework zsh dotfiles (dot_zshrc, env.zsh w/ env.zsh.d loop)
-│       └── capabilities/               ← abstract capability modules; each exposes ::is_capability, and those with a fleet-wide default also ::default_satisfier
-│           ├── container_manager.sh    ← platform-defaulting capability (orbstack on macOS, docker_ce on Linux)
-│           ├── secrets_manager.sh      ← no-default capability (satisfied by infisical when listed); ::fetch dispatches to the active satisfier
-│           └── tool_version_manager.sh ← satisfied by mise (default)
-├── scripts/                            ← dev/maintainer tools (lint, test-vm)
-├── tests/                              ← bats test suite mirroring lib/ and bin/
-└── templates/blueprints/               ← starter content copied by `machinekit generate`
-```
+All execution code lives under `lib/`, with `bin/` and `libexec/` holding the entry points. The directories are the authoritative inventory — this section describes the boundaries between them and the conventions each follows, not a file-by-file catalogue. For the modules specifically, `lib/modules/` *is* the list, and each module's own header comment describes its role.
 
-**Convention**: `bin/` files are thin orchestrators (flag parsing, mode detection, the apply pipeline as a sequence of namespaced calls). All execution code lives in `lib/`. `lib/<name>.sh` is the aggregator for `lib/<name>/*.sh`; each file's namespace matches its filename (`brew::*` in `brew.sh`, `age::*` in `age.sh`, etc.).
+**The bash-floor split.** The two entry points — `bin/machinekit` (the public command) and `install.sh` (the `curl | bash` installer) — can't assume the running bash meets the floor, since macOS still ships 3.2. So `bin/machinekit` is a pure-3.2 dispatcher: it resolves a bash meeting the ≥5.3 floor — installing Homebrew's bash when the running one is too old — and re-execs the real implementation from `libexec/` under it (git-core style; the `libexec/` impls are internal, not on PATH). Those entry points and the `lib/common/` + `lib/bootstrap/` primitives they rely on make up the pure-3.2 island and stay 3.2-safe; everything the impls source afterward (`lib/machinekit/`, `lib/modules/`) runs under the modern bash and may use its features.
+
+**Framework vs. modules.** `lib/machinekit/` is the framework — the apply pipeline, home sync, the resolver, the context store, and the rest — and it names no concrete *opt-in* module (the always-active base modules it names via `MK_BASE_MODULES` are framework-owned by design). `lib/modules/` holds the opt-in modules the framework discovers and drives. `lib/machinekit.sh` is the single aggregator: it eagerly sources the framework and then every module, so module functions are inherited by the subshells the pipeline forks.
+
+**Convention**: the `libexec/` impls are thin orchestrators (flag parsing, mode detection, the apply pipeline as a sequence of namespaced calls). `lib/<name>.sh` is the aggregator for `lib/<name>/*.sh`; each file's namespace matches its filename (`brew::*` in `brew.sh`, `age::*` in `age.sh`, etc.).
 
 **Module API**: every file in `lib/modules/` exposes `<name>::install` as its main entry point. Modules that need to resolve user inputs before the apply pipeline runs also expose `<name>::preflight`. Modules that need to run after home files are applied expose `<name>::post_apply` — this runs after `home::sync` but before post-apply hooks, which is why `mise::post_apply` runs `mise install` (it needs `~/.config/mise/config.toml` placed by home sync). Modules with something to report once a real apply finishes expose `<name>::postflight_info` (what was set up — an endpoint, a device ID, a value to note) and/or `<name>::postflight_instructions` (a step the operator must still take — sign in, share a key, re-apply); each emits plain fact lines, and `postflight::run` walks the active modules twice (info, then instructions) and owns all presentation — a module never decides layout, it only emits facts. Modules with inter-module dependencies declare them via `<name>::requires` (returning one dependency name per line); `resolver.sh` sorts the active set into install order. A module may also declare `<name>::after` (same one-name-per-line shape) to be ordered after those modules *only when they are independently active* — a soft ordering edge that never activates its targets. Satisfier modules additionally declare `<name>::provides` (returning the capability name they satisfy); the resolver uses this for conflict detection. Modules that transform file content by extension declare `<name>::file_transforms` (emitting `extension tier handler` lines, `tier` ∈ {`decode`, `content`}); `home::transforms` registers these at preflight and runs the matching handlers during sync — see [home template system](#home-template-system). Modules may also ship a sibling directory `lib/modules/<name>/templates/` holding default dotfiles; `home::staging::build` picks these up automatically. Active modules are driven by `modules = [...]` in `machinekit.toml` (plus the always-active `MK_BASE_MODULES`), resolved at preflight time.
 
