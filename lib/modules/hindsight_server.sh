@@ -92,6 +92,27 @@ hindsight_server::post_apply() {
   hindsight_server::_health_check
 }
 
+# postflight: the server's endpoints and where its config/secrets live — none of
+# which is printed during apply. Emitted whenever this module is active (the
+# server was brought up in post_apply).
+hindsight_server::postflight_info() {
+  printf 'Hindsight API:    http://localhost:%s\n' "$(hindsight_server::_api_port)"
+  printf 'Hindsight web UI: http://localhost:%s\n' "$(hindsight_server::_ui_port)"
+  printf 'Config + secrets: ~/%s\n' "$(hindsight_server::_env_rel)"
+}
+
+# postflight: the secrets the operator still has to act on, each gated on the
+# value not being manager-provided (re-derived here, not tracked from install). A
+# control-plane password that was generated or typed lives only in the env file;
+# a generated tenant key must reach the manager so the rest of the fleet resolves
+# the same value.
+hindsight_server::postflight_instructions() {
+  hindsight::secrets::provided cp_access_key \
+    || printf 'Retrieve the web-UI password (HINDSIGHT_CP_ACCESS_KEY) from ~/%s to sign in.\n' "$(hindsight_server::_env_rel)"
+  hindsight::secrets::provided tenant_api_key \
+    || printf 'Copy HINDSIGHT_API_TENANT_API_KEY from ~/%s into your secrets manager — every hindsight box must share it.\n' "$(hindsight_server::_env_rel)"
+}
+
 # Order is the contract: the extension can only be created in a database that
 # already exists.
 hindsight_server::_provision_database() {
@@ -133,23 +154,19 @@ hindsight_server::_ensure_env_file() {
   hindsight_server::_assemble_env_file "$env_path"
 }
 
-# Resolve the three secrets (provide-or-generate), write the 600 env file, then
-# announce any that were generated. Standalone assignments, not `local x=$(…)`:
-# resolution can lifecycle::fail (missing LLM key or age key) and in local/
-# argument position the failing command substitution is swallowed by set -e.
+# Resolve the secrets (provide-or-generate) and write the 600 env file. What was
+# generated vs. provided is not announced here — postflight re-derives it
+# (secrets::present) and surfaces the operator-facing steps. Standalone
+# assignments, not `local x=$(…)`: resolution can lifecycle::fail (missing LLM
+# key or age key) and in local/argument position the failing command
+# substitution is swallowed by set -e.
 hindsight_server::_assemble_env_file() {
   local env_path="$1" llm tenant db_password cp_access
   llm="$(hindsight_server::_resolve_llm_key)"
   tenant="$(hindsight::secrets::resolve tenant_api_key)"
   db_password="$(hindsight::secrets::resolve db_password)"
-  # The cp access key self-announces when generated (see _resolve_cp_access_key):
-  # whether it was generated vs. typed isn't a re-derivable predicate like the
-  # others, and this runs in a $() subshell, so a flag set here wouldn't survive.
-  cp_access="$(hindsight_server::_resolve_cp_access_key "$env_path")"
+  cp_access="$(hindsight_server::_resolve_cp_access_key)"
   hindsight_server::_write_env_file "$env_path" "$llm" "$tenant" "$db_password" "$cp_access"
-  hindsight::secrets::provided tenant_api_key \
-    || hindsight::secrets::announce_generated_tenant "$env_path" "HINDSIGHT_API_TENANT_API_KEY"
-  hindsight::secrets::provided db_password || hindsight_server::_announce_db_password
 }
 
 # The LLM key is provide-only; fail loudly rather than generate a useless one.
@@ -162,13 +179,12 @@ hindsight_server::_resolve_llm_key() {
 
 # The control-plane UI password (HINDSIGHT_CP_ACCESS_KEY) — gates the web UI.
 # Server-local, not fleet-shared, so it is NOT the tenant key. Resolution order:
-# a provided secret wins; otherwise an interactive operator may type one
-# (entered via the --secret prompt); a blank entry or a non-interactive run
-# generates one. The generate
-# path announces here (to stderr) because this runs in a $() subshell where a
-# returned flag would be lost, and "generated vs. typed" isn't re-derivable.
+# a provided secret wins; otherwise an interactive operator may type one (entered
+# via the --secret prompt); a blank entry or a non-interactive run generates one.
+# No announcement here: whenever it isn't manager-provided it lands in the env
+# file, and postflight surfaces the retrieve-it step off that same predicate.
 hindsight_server::_resolve_cp_access_key() {
-  local env_path="$1" entered
+  local entered
   if hindsight::secrets::provided cp_access_key; then
     hindsight::secrets::resolve cp_access_key
     return 0
@@ -179,7 +195,6 @@ hindsight_server::_resolve_cp_access_key() {
     return 0
   fi
   hindsight::secrets::resolve cp_access_key
-  hindsight_server::_announce_cp_access "$env_path"
 }
 
 hindsight_server::_write_env_file() {
@@ -194,19 +209,6 @@ hindsight_server::_write_env_file() {
     printf 'MACHINEKIT_HINDSIGHT_DB_PASSWORD=%s\n' "$db_password"
   } > "$env_path"
   chmod 600 "$env_path"
-}
-
-# Quiet: the DB password is machine-local. Pointed at the file (never the value)
-# for the curious; not needed elsewhere, and regeneration reconciles the role.
-hindsight_server::_announce_db_password() {
-  logging::info "hindsight_server: generated a database password in $(hindsight_server::_env_path) (MACHINEKIT_HINDSIGHT_DB_PASSWORD). It is machine-local; regeneration reconciles the postgres role automatically."
-}
-
-# Loud: a generated control-plane password must be retrieved to sign in to the
-# web UI. Points at the file, never the value.
-hindsight_server::_announce_cp_access() {
-  logging::banner warn "Generated a control-plane UI password in $1 (HINDSIGHT_CP_ACCESS_KEY).
-Retrieve it from that file to sign in to the web UI; it is machine-local."
 }
 
 # Module-owned, not a home dotfile: the compose is operational runtime state, so

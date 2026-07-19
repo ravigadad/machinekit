@@ -122,25 +122,13 @@ tailscale::_use_cask() {
 }
 
 # Joining happens after home::sync (post_apply) so the daemon is in place first.
-# Only tagged devices auto-join; user devices get a one-line sign-in reminder.
+# Only tagged devices auto-join; a user device signs in by hand, surfaced as a
+# postflight instruction rather than a line buried mid-apply.
 tailscale::post_apply() {
   local tag
   tag=$(tailscale::_tag)
-  if [ -z "$tag" ]; then
-    tailscale::_signin_reminder
-    return 0
-  fi
+  [ -n "$tag" ] || return 0
   tailscale::_join "$tag"
-}
-
-# How a user signs in differs by platform: the GUI app on macOS, the CLI on
-# Linux (where no brew GUI app exists). A message only — no action to consent to.
-tailscale::_signin_reminder() {
-  if [ "$(tailscale::_os_family)" = "darwin" ]; then
-    logging::info "tailscale: open the Tailscale app and sign in to join your tailnet."
-  else
-    logging::info "tailscale: run 'sudo tailscale up' to sign in and join your tailnet."
-  fi
 }
 
 tailscale::_join() {
@@ -163,7 +151,54 @@ tailscale::_join() {
   local secret
   secret=$(secrets::resolve "$(tailscale::_secret_name)")
   tailscale::_up "$secret" "$tag"
-  logging::success "tailscale: joined the tailnet as tag:$tag."
+  logging::success "tailscale: $(tailscale::_membership_summary "$tag")"
+}
+
+# The one-line summary of a tagged device's tailnet membership. Single source for
+# both the live join confirmation (above) and postflight_info, so the wording —
+# and the pinned-hostname clause — lives in exactly one place.
+tailscale::_membership_summary() {
+  local tag="$1" hostname
+  hostname="$(tailscale::_hostname)"
+  if [ -n "$hostname" ]; then
+    printf 'joined the tailnet as tag:%s (hostname: %s).\n' "$tag" "$hostname"
+  else
+    printf 'joined the tailnet as tag:%s.\n' "$tag"
+  fi
+}
+
+# The platform-specific manual sign-in step for an untagged (user) device: the
+# GUI app on macOS, the CLI on Linux (where no brew GUI app exists).
+tailscale::_signin_instruction() {
+  if [ "$(tailscale::_os_family)" = "darwin" ]; then
+    printf 'Open the Tailscale app and sign in to join your tailnet.\n'
+  else
+    printf "Run 'sudo tailscale up' to sign in and join your tailnet.\n"
+  fi
+}
+
+# postflight: what this device ended up with on the tailnet. Only a tagged device
+# that actually connected has a "done" fact; an untagged one reports nothing here
+# (its next step lives in postflight_instructions).
+tailscale::postflight_info() {
+  local tag
+  tag="$(tailscale::_tag)"
+  [ -n "$tag" ] || return 0
+  tailscale::_is_connected || return 0
+  tailscale::_membership_summary "$tag"
+}
+
+# postflight: the tailnet step the user still has to take — sign in by hand on an
+# untagged device, or re-apply with consent on a tagged device that didn't join.
+tailscale::postflight_instructions() {
+  local tag
+  tag="$(tailscale::_tag)"
+  if [ -z "$tag" ]; then
+    tailscale::_signin_instruction
+    return 0
+  fi
+  tailscale::_is_connected && return 0
+  printf 'Not on the tailnet yet — re-apply with MACHINEKIT_TAILSCALE_JOIN=1 to join as tag:%s.\n' "$tag"
 }
 
 # Brings the tagged device up. Two non-obvious things:

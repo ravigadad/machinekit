@@ -27,8 +27,17 @@ openclaw::install() {
     return 0
   fi
   openclaw::_run_installer
+  context::set "openclaw.installed" true
   logging::success "openclaw: installed."
-  logging::info "openclaw: run 'openclaw' to finish onboarding — machinekit does not handle it."
+}
+
+# postflight: first-run onboarding (the gateway/agent setup) is a deliberate
+# hand-off. Surfaced only when the CLI was installed this run — there's no
+# reliable onboarded probe, so a fresh install stands in for "not set up yet"; an
+# already-present CLI stays quiet.
+openclaw::postflight_instructions() {
+  [ "$(context::get "openclaw.installed" --default false)" = "true" ] || return 0
+  printf "Run 'openclaw' to finish onboarding — machinekit does not handle it.\n"
 }
 
 # install.sh (not install-cli.sh) so a compliant Node on PATH is reused rather

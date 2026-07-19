@@ -187,37 +187,14 @@ setup() {
 
 # --- hindsight_server::_assemble_env_file ---
 
-@test "_assemble_env_file resolves the secrets and writes them, announcing generated ones" {
-  STUB_OUTPUT="llm-key" mktest::stub_function hindsight_server::_resolve_llm_key
-  STUB_OUTPUT="tenant-key" mktest::stub_function hindsight::secrets::resolve "tenant_api_key"
-  STUB_OUTPUT="db-pass" mktest::stub_function hindsight::secrets::resolve "db_password"
-  STUB_OUTPUT="ui-pass" mktest::stub_function hindsight_server::_resolve_cp_access_key "/path/env"
-  mktest::stub_function hindsight_server::_write_env_file "/path/env" "llm-key" "tenant-key" "db-pass" "ui-pass"
-  # Neither generated secret was provided, so both are announced.
-  STUB_RETURN=1 mktest::stub_function hindsight::secrets::provided "tenant_api_key"
-  STUB_RETURN=1 mktest::stub_function hindsight::secrets::provided "db_password"
-  mktest::stub_function hindsight::secrets::announce_generated_tenant "/path/env" "HINDSIGHT_API_TENANT_API_KEY"
-  mktest::stub_function hindsight_server::_announce_db_password
-  hindsight_server::_assemble_env_file "/path/env"
-  mktest::assert_stub_called hindsight_server::_write_env_file "/path/env" "llm-key" "tenant-key" "db-pass" "ui-pass"
-  mktest::assert_stub_called hindsight::secrets::announce_generated_tenant "/path/env" "HINDSIGHT_API_TENANT_API_KEY"
-  mktest::assert_stub_called hindsight_server::_announce_db_password
-}
-
-@test "_assemble_env_file does not announce secrets that were provided" {
+@test "_assemble_env_file resolves the secrets and writes them (announcements moved to postflight)" {
   STUB_OUTPUT="llm-key" mktest::stub_function hindsight_server::_resolve_llm_key
   STUB_OUTPUT="tenant-key" mktest::stub_function hindsight::secrets::resolve "tenant_api_key"
   STUB_OUTPUT="db-pass" mktest::stub_function hindsight::secrets::resolve "db_password"
   STUB_OUTPUT="ui-pass" mktest::stub_function hindsight_server::_resolve_cp_access_key
-  mktest::stub_function hindsight_server::_write_env_file
-  # Both provided → neither announced.
-  mktest::stub_function hindsight::secrets::provided "tenant_api_key"
-  mktest::stub_function hindsight::secrets::provided "db_password"
-  mktest::stub_function hindsight::secrets::announce_generated_tenant
-  mktest::stub_function hindsight_server::_announce_db_password
+  mktest::stub_function hindsight_server::_write_env_file "/path/env" "llm-key" "tenant-key" "db-pass" "ui-pass"
   hindsight_server::_assemble_env_file "/path/env"
-  mktest::assert_stub_not_called hindsight::secrets::announce_generated_tenant
-  mktest::assert_stub_not_called hindsight_server::_announce_db_password
+  mktest::assert_stub_called hindsight_server::_write_env_file "/path/env" "llm-key" "tenant-key" "db-pass" "ui-pass"
 }
 
 # --- hindsight_server::_resolve_llm_key ---
@@ -244,30 +221,66 @@ setup() {
   mktest::stub_function hindsight::secrets::provided "cp_access_key"
   STUB_OUTPUT="pool-pw" mktest::stub_function hindsight::secrets::resolve "cp_access_key"
   mktest::stub_function context::get
-  run hindsight_server::_resolve_cp_access_key "/path/env"
+  run hindsight_server::_resolve_cp_access_key
   [ "$output" = "pool-pw" ]
   mktest::assert_stub_not_called context::get
 }
 
-@test "_resolve_cp_access_key returns an interactively entered password, no generate or announce" {
+@test "_resolve_cp_access_key returns an interactively entered password without generating" {
   STUB_RETURN=1 mktest::stub_function hindsight::secrets::provided "cp_access_key"
   STUB_OUTPUT="typed-pw" mktest::stub_function context::get
   mktest::stub_function hindsight::secrets::resolve "cp_access_key"
-  mktest::stub_function hindsight_server::_announce_cp_access
-  run hindsight_server::_resolve_cp_access_key "/path/env"
+  run hindsight_server::_resolve_cp_access_key
   [ "$output" = "typed-pw" ]
   mktest::assert_stub_not_called hindsight::secrets::resolve
-  mktest::assert_stub_not_called hindsight_server::_announce_cp_access
 }
 
-@test "_resolve_cp_access_key generates and announces when neither provided nor entered" {
+@test "_resolve_cp_access_key generates when neither provided nor entered" {
   STUB_RETURN=1 mktest::stub_function hindsight::secrets::provided "cp_access_key"
   STUB_RETURN=1 mktest::stub_function context::get
   STUB_OUTPUT="gen-pw" mktest::stub_function hindsight::secrets::resolve "cp_access_key"
-  mktest::stub_function hindsight_server::_announce_cp_access "/path/env"
-  run hindsight_server::_resolve_cp_access_key "/path/env"
+  run hindsight_server::_resolve_cp_access_key
   [ "$output" = "gen-pw" ]
-  mktest::assert_stub_called hindsight_server::_announce_cp_access "/path/env"
+}
+
+# --- hindsight_server::postflight_info ---
+
+@test "postflight_info reports the API and web-UI URLs and the env-file location" {
+  STUB_OUTPUT="8888" mktest::stub_function hindsight_server::_api_port
+  STUB_OUTPUT="9999" mktest::stub_function hindsight_server::_ui_port
+  STUB_OUTPUT=".config/hindsight/hindsight.env" mktest::stub_function hindsight_server::_env_rel
+  run hindsight_server::postflight_info
+  [[ "$output" == *"http://localhost:8888"* ]]
+  [[ "$output" == *"http://localhost:9999"* ]]
+  [[ "$output" == *".config/hindsight/hindsight.env"* ]]
+}
+
+# --- hindsight_server::postflight_instructions ---
+
+@test "postflight_instructions surfaces both retrieve steps when neither secret is manager-provided" {
+  STUB_RETURN=1 mktest::stub_function hindsight::secrets::provided "cp_access_key"
+  STUB_RETURN=1 mktest::stub_function hindsight::secrets::provided "tenant_api_key"
+  STUB_OUTPUT=".config/hindsight/hindsight.env" mktest::stub_function hindsight_server::_env_rel
+  run hindsight_server::postflight_instructions
+  [[ "$output" == *"HINDSIGHT_CP_ACCESS_KEY"* ]]
+  [[ "$output" == *"HINDSIGHT_API_TENANT_API_KEY"* ]]
+}
+
+@test "postflight_instructions emits nothing when both secrets are manager-provided" {
+  mktest::stub_function hindsight::secrets::provided "cp_access_key"
+  mktest::stub_function hindsight::secrets::provided "tenant_api_key"
+  mktest::stub_function hindsight_server::_env_rel
+  run hindsight_server::postflight_instructions
+  [ -z "$output" ]
+}
+
+@test "postflight_instructions surfaces only the tenant step when the cp password is provided" {
+  mktest::stub_function hindsight::secrets::provided "cp_access_key"
+  STUB_RETURN=1 mktest::stub_function hindsight::secrets::provided "tenant_api_key"
+  STUB_OUTPUT=".config/hindsight/hindsight.env" mktest::stub_function hindsight_server::_env_rel
+  run hindsight_server::postflight_instructions
+  [[ "$output" != *"HINDSIGHT_CP_ACCESS_KEY"* ]]
+  [[ "$output" == *"HINDSIGHT_API_TENANT_API_KEY"* ]]
 }
 
 # --- hindsight_server::_write_env_file ---

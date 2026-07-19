@@ -26,11 +26,21 @@ _MK_HOME_IS_PRIVATE=0
 # The staging dir is built in preflight (so modules can query it via will_exist
 # before anything is installed); sync only applies it.
 home::sync() {
+  local files_synced
+  files_synced="$(home::_planned_count)"
+  context::set "home.files_synced" "$files_synced"
   if input::is_dry_run; then
     home::dry_run::show_diff
     return 0
   fi
   home::_apply
+}
+
+# home::_planned_count — how many home files sync lays down: the non-suppressed
+# planned files. Mode-independent — apply and the dry-run preview both act on
+# exactly this set — so the summary count matches what actually happens.
+home::_planned_count() {
+  home::_build_plan | jq '[.[] | select(.suppressed | not)] | length'
 }
 
 # home::will_exist DEST_PATH — true if the absolute DEST_PATH will exist after

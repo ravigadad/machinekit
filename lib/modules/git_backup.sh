@@ -84,6 +84,35 @@ git_backup::install() {
   logging::success "git_backup: backup service installed."
 }
 
+# postflight: what this machine backs up and how often — informational only. The
+# service runs on its own, so there is no next step to surface here (a bad deploy
+# key surfaces later through the push notifier, not at apply time).
+git_backup::postflight_info() {
+  local folders folder path remote cadence
+  folders=$(git_backup::_folders)
+  [ -n "$folders" ] || return 0
+  cadence="$(git_backup::_human_interval "$(git_backup::_interval)")"
+  while IFS= read -r folder; do
+    [ -n "$folder" ] || continue
+    path=$(printf '%s' "$folder" | jq -r '.path')
+    remote=$(printf '%s' "$folder" | jq -r '.remote')
+    printf 'Backing up %s → %s every %s.\n' "$path" "$remote" "$cadence"
+  done < <(printf '%s' "$folders" | jq -c '.[]')
+}
+
+# Render an interval in seconds as a friendly whole unit (3600 → 1h, 1800 → 30m,
+# else Ns). Display only, for the postflight line.
+git_backup::_human_interval() {
+  local seconds="$1"
+  if [ "$((seconds % 3600))" -eq 0 ]; then
+    printf '%dh\n' "$((seconds / 3600))"
+  elif [ "$((seconds % 60))" -eq 0 ]; then
+    printf '%dm\n' "$((seconds / 60))"
+  else
+    printf '%ds\n' "$seconds"
+  fi
+}
+
 # Each folder needs both a path and a remote; fail loudly on a malformed entry
 # rather than writing a half-usable manifest.
 git_backup::_validate_folders() {

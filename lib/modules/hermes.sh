@@ -25,8 +25,16 @@ hermes::install() {
     return 0
   fi
   hermes::_run_installer
+  context::set "hermes.installed" true
   logging::success "hermes: installed."
-  logging::info "hermes: run 'hermes' to finish setup — machinekit does not handle it."
+}
+
+# postflight: first-run setup is a deliberate hand-off. Surfaced only when the
+# CLI was installed this run — there's no reliable configured probe, so a fresh
+# install stands in for "not set up yet"; an already-present CLI stays quiet.
+hermes::postflight_instructions() {
+  [ "$(context::get "hermes.installed" --default false)" = "true" ] || return 0
+  printf "Run 'hermes' to finish setup — machinekit does not handle it.\n"
 }
 
 hermes::_run_installer() {

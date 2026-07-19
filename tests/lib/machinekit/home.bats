@@ -37,22 +37,36 @@ setup() {
 
 # --- home::sync ---
 
-@test "sync in dry-run shows the diff and does not apply" {
+@test "sync in dry-run records the planned file count, shows the diff, and does not apply" {
   mktest::stub_function input::is_dry_run
   mktest::stub_function home::dry_run::show_diff
   mktest::stub_function home::_apply
+  STUB_OUTPUT=7 mktest::stub_function home::_planned_count
+  mktest::stub_function context::set
   home::sync
+  mktest::assert_stub_called context::set home.files_synced 7
   mktest::assert_stub_called home::dry_run::show_diff
   mktest::assert_stub_not_called home::_apply
 }
 
-@test "sync in real mode applies the staging tree" {
+@test "sync in real mode records the planned file count and applies the staging tree" {
   STUB_RETURN=1 mktest::stub_function input::is_dry_run
   mktest::stub_function home::dry_run::show_diff
   mktest::stub_function home::_apply
+  STUB_OUTPUT=7 mktest::stub_function home::_planned_count
+  mktest::stub_function context::set
   home::sync
+  mktest::assert_stub_called context::set home.files_synced 7
   mktest::assert_stub_called home::_apply
   mktest::assert_stub_not_called home::dry_run::show_diff
+}
+
+@test "_planned_count counts the non-suppressed planned files" {
+  STUB_OUTPUT='[{"suppressed":false},{"suppressed":true},{"suppressed":false}]' \
+    mktest::stub_function home::_build_plan
+  run home::_planned_count
+  [ "$status" -eq 0 ]
+  [ "$output" = "2" ]
 }
 
 # --- home::will_exist ---

@@ -58,14 +58,3 @@ setup() {
   [ "$output" = "abc123" ]
   mktest::assert_stub_called openssl "rand" "-hex" "32"
 }
-
-# --- hindsight::secrets::announce_generated_tenant ---
-
-@test "announce_generated_tenant names the file, field, and the secret to provide — never the value" {
-  STUB_OUTPUT="hindsight/tenant_api_key" mktest::stub_function hindsight::secrets::name "tenant_api_key"
-  mktest::stub_function logging::banner
-  hindsight::secrets::announce_generated_tenant "/home/u/.config/hindsight/hindsight.env" "HINDSIGHT_API_TENANT_API_KEY"
-  MATCH="HINDSIGHT_API_TENANT_API_KEY" mktest::assert_stub_called logging::banner
-  MATCH="hindsight.env" mktest::assert_stub_called logging::banner
-  MATCH="hindsight/tenant_api_key" mktest::assert_stub_called logging::banner
-}

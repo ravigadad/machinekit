@@ -225,36 +225,96 @@ setup() {
 
 # --- tailscale::post_apply ---
 
-@test "post_apply gives a sign-in reminder instead of joining on a user device" {
+@test "post_apply does nothing on an untagged device (sign-in is a postflight instruction now)" {
   STUB_OUTPUT="" mktest::stub_function tailscale::_tag
-  mktest::stub_function tailscale::_signin_reminder
   mktest::stub_function tailscale::_join
   tailscale::post_apply
-  mktest::assert_stub_called tailscale::_signin_reminder
   mktest::assert_stub_not_called tailscale::_join
 }
 
 @test "post_apply joins with the configured tag on a tagged device" {
   STUB_OUTPUT="server" mktest::stub_function tailscale::_tag
-  mktest::stub_function tailscale::_signin_reminder
   mktest::stub_function tailscale::_join "server"
   tailscale::post_apply
   mktest::assert_stub_called tailscale::_join "server"
-  mktest::assert_stub_not_called tailscale::_signin_reminder
 }
 
-# --- tailscale::_signin_reminder ---
+# --- tailscale::_membership_summary (single source for the live + postflight line) ---
 
-@test "_signin_reminder points macOS users at the GUI app" {
+@test "_membership_summary names the tag and the pinned hostname" {
+  STUB_OUTPUT="server" mktest::stub_function tailscale::_hostname
+  run tailscale::_membership_summary "server"
+  [[ "$output" == *"tag:server"* ]]
+  [[ "$output" == *"hostname: server"* ]]
+}
+
+@test "_membership_summary omits the hostname clause when none is pinned" {
+  STUB_OUTPUT="" mktest::stub_function tailscale::_hostname
+  run tailscale::_membership_summary "server"
+  [[ "$output" == *"tag:server"* ]]
+  [[ "$output" != *"hostname"* ]]
+}
+
+# --- tailscale::_signin_instruction ---
+
+@test "_signin_instruction points macOS users at the GUI app" {
   STUB_OUTPUT="darwin" mktest::stub_function tailscale::_os_family
-  tailscale::_signin_reminder
-  MATCH="app" mktest::assert_stub_called logging::info
+  run tailscale::_signin_instruction
+  [[ "$output" == *"app"* ]]
 }
 
-@test "_signin_reminder points Linux users at the CLI" {
+@test "_signin_instruction points Linux users at the CLI" {
   STUB_OUTPUT="linux" mktest::stub_function tailscale::_os_family
-  tailscale::_signin_reminder
-  MATCH="tailscale up" mktest::assert_stub_called logging::info
+  run tailscale::_signin_instruction
+  [[ "$output" == *"tailscale up"* ]]
+}
+
+# --- tailscale::postflight_info ---
+
+@test "postflight_info reports tailnet membership on a connected tagged device" {
+  STUB_OUTPUT="server" mktest::stub_function tailscale::_tag
+  mktest::stub_function tailscale::_is_connected
+  STUB_OUTPUT="joined the tailnet as tag:server." \
+    mktest::stub_function tailscale::_membership_summary "server"
+  run tailscale::postflight_info
+  [[ "$output" == *"joined the tailnet as tag:server"* ]]
+}
+
+@test "postflight_info emits nothing on an untagged device" {
+  STUB_OUTPUT="" mktest::stub_function tailscale::_tag
+  run tailscale::postflight_info
+  [ -z "$output" ]
+}
+
+@test "postflight_info emits nothing when a tagged device is not connected" {
+  STUB_OUTPUT="server" mktest::stub_function tailscale::_tag
+  STUB_RETURN=1 mktest::stub_function tailscale::_is_connected
+  run tailscale::postflight_info
+  [ -z "$output" ]
+}
+
+# --- tailscale::postflight_instructions ---
+
+@test "postflight_instructions surfaces the manual sign-in step on an untagged device" {
+  STUB_OUTPUT="" mktest::stub_function tailscale::_tag
+  STUB_OUTPUT="SIGN IN HERE" mktest::stub_function tailscale::_signin_instruction
+  run tailscale::postflight_instructions
+  [[ "$output" == *"SIGN IN HERE"* ]]
+}
+
+@test "postflight_instructions emits nothing on a connected tagged device" {
+  STUB_OUTPUT="server" mktest::stub_function tailscale::_tag
+  mktest::stub_function tailscale::_is_connected
+  run tailscale::postflight_instructions
+  [ -z "$output" ]
+}
+
+@test "postflight_instructions tells a disconnected tagged device how to join" {
+  STUB_OUTPUT="server" mktest::stub_function tailscale::_tag
+  STUB_RETURN=1 mktest::stub_function tailscale::_is_connected
+  run tailscale::postflight_instructions
+  [[ "$output" == *"MACHINEKIT_TAILSCALE_JOIN=1"* ]]
+  [[ "$output" == *"tag:server"* ]]
 }
 
 # --- tailscale::_join ---
@@ -283,6 +343,7 @@ setup() {
   STUB_OUTPUT="tailscale/default" mktest::stub_function tailscale::_secret_name
   STUB_OUTPUT="fake-oauth-secret" mktest::stub_function secrets::resolve "tailscale/default"
   mktest::stub_function tailscale::_up "fake-oauth-secret" "server"
+  mktest::stub_function tailscale::_membership_summary "server"
   tailscale::_join "server"
   mktest::assert_stub_called tailscale::_up "fake-oauth-secret" "server"
 }

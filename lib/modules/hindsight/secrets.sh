@@ -44,17 +44,3 @@ hindsight::secrets::resolve() {
 hindsight::secrets::_generate_token() {
   openssl rand -hex 32
 }
-
-# Loud announcement, emitted every time the fleet tenant key is generated (on a
-# server or an integration host — whichever box is provisioned first). The tenant
-# key is the one secret every box must share, so the user has to carry it to the
-# others. Never prints the value (age-key style). The optional FILE/FIELD note
-# where it landed locally; the call to action — provide it to the pool — is constant.
-hindsight::secrets::announce_generated_tenant() {
-  local file="${1:-}" field="${2:-}" where=""
-  [ -n "$file" ] && where=" in $file${field:+ ($field)}"
-  logging::banner warn "Generated the fleet tenant API key${where}.
-Provide it as the $(hindsight::secrets::name tenant_api_key) secret (see
-'machinekit secrets list') and copy it to your other machines — every
-hindsight box (server and integrations) must share this key."
-}

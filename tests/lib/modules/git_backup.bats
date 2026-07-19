@@ -120,6 +120,50 @@ setup() {
   mktest::assert_stub_called git_backup::_install_service
 }
 
+# --- postflight_info ---
+
+@test "postflight_info reports each folder's destination and delegates cadence to _human_interval" {
+  STUB_OUTPUT='[{"path":"~/.agents","remote":"git@github.com:me/dotagents.git"}]' \
+    mktest::stub_function git_backup::_folders
+  STUB_OUTPUT="1800" mktest::stub_function git_backup::_interval
+  STUB_OUTPUT="CADENCE" mktest::stub_function git_backup::_human_interval 1800
+  run git_backup::postflight_info
+  [[ "$output" == *"~/.agents"* ]]
+  [[ "$output" == *"git@github.com:me/dotagents.git"* ]]
+  # The rendered cadence comes from the collaborator, not this unit — _human_interval
+  # owns the seconds→string mapping (tested directly below).
+  [[ "$output" == *"CADENCE"* ]]
+  mktest::assert_stub_called git_backup::_human_interval 1800
+}
+
+@test "postflight_info emits one line per backed-up folder" {
+  STUB_OUTPUT='[{"path":"/a","remote":"r1"},{"path":"/b","remote":"r2"}]' \
+    mktest::stub_function git_backup::_folders
+  STUB_OUTPUT="3600" mktest::stub_function git_backup::_interval
+  STUB_OUTPUT="CADENCE" mktest::stub_function git_backup::_human_interval 3600
+  run git_backup::postflight_info
+  [ "${#lines[@]}" -eq 2 ]
+  [[ "$output" == *"/a"* ]]
+  [[ "$output" == *"/b"* ]]
+}
+
+@test "postflight_info emits nothing when no folders are configured" {
+  STUB_OUTPUT="" mktest::stub_function git_backup::_folders
+  run git_backup::postflight_info
+  [ -z "$output" ]
+}
+
+# --- _human_interval ---
+
+@test "_human_interval renders whole hours, minutes, or falls back to seconds" {
+  run git_backup::_human_interval 3600
+  [ "$output" = "1h" ]
+  run git_backup::_human_interval 1800
+  [ "$output" = "30m" ]
+  run git_backup::_human_interval 90
+  [ "$output" = "90s" ]
+}
+
 # --- _validate_folders ---
 
 @test "_validate_folders passes a well-formed folder set" {

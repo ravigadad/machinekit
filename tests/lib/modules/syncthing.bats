@@ -60,7 +60,6 @@ setup() {
   mktest::stub_function brew::install_formula syncthing
   mktest::stub_function input::is_dry_run
   mktest::stub_function syncthing::_ensure_identity
-  mktest::stub_function syncthing::_announce_identity
   mktest::stub_function syncthing::_start
   mktest::stub_function syncthing::_ensure_folders
   mktest::stub_function syncthing::_wait_ready
@@ -70,7 +69,6 @@ setup() {
   mktest::assert_stub_called brew::install_formula syncthing
   mktest::assert_stub_called logging::dry_run
   mktest::assert_stub_not_called syncthing::_ensure_identity
-  mktest::assert_stub_not_called syncthing::_announce_identity
   mktest::assert_stub_not_called syncthing::_start
   mktest::assert_stub_not_called syncthing::_ensure_folders
   mktest::assert_stub_not_called syncthing::_wait_ready
@@ -82,18 +80,17 @@ setup() {
   mktest::stub_function brew::install_formula syncthing
   STUB_RETURN=1 mktest::stub_function input::is_dry_run
   mktest::stub_function syncthing::_ensure_identity
-  mktest::stub_function syncthing::_announce_identity
   mktest::stub_function syncthing::_start
   mktest::stub_function syncthing::_wait_ready
   mktest::stub_function syncthing::_apply_discovery
   mktest::stub_function syncthing::_join_consented
+  mktest::stub_function context::set
   STUB_OUTPUT=$'DEV1\nDEV2' mktest::stub_function syncthing::_join
   mktest::stub_function syncthing::_ensure_folders
   mktest::stub_function syncthing::_install_conflict_notifier
   syncthing::install
   mktest::assert_stub_called_in_order brew::install_formula syncthing
   mktest::assert_stub_called_in_order syncthing::_ensure_identity
-  mktest::assert_stub_called_in_order syncthing::_announce_identity
   mktest::assert_stub_called_in_order syncthing::_start
   mktest::assert_stub_called_in_order syncthing::_wait_ready
   mktest::assert_stub_called_in_order syncthing::_apply_discovery
@@ -101,17 +98,18 @@ setup() {
   mktest::assert_stub_called_in_order syncthing::_join
   mktest::assert_stub_called_in_order syncthing::_ensure_folders $'DEV1\nDEV2'
   mktest::assert_stub_called_in_order syncthing::_install_conflict_notifier
+  mktest::assert_stub_called context::set syncthing.joined true
 }
 
 @test "install warns and shares nothing when the join is declined" {
   mktest::stub_function brew::install_formula syncthing
   STUB_RETURN=1 mktest::stub_function input::is_dry_run
   mktest::stub_function syncthing::_ensure_identity
-  mktest::stub_function syncthing::_announce_identity
   mktest::stub_function syncthing::_start
   mktest::stub_function syncthing::_wait_ready
   mktest::stub_function syncthing::_apply_discovery
   STUB_RETURN=1 mktest::stub_function syncthing::_join_consented
+  mktest::stub_function context::set
   mktest::stub_function syncthing::_join
   mktest::stub_function syncthing::_ensure_folders
   mktest::stub_function syncthing::_install_conflict_notifier
@@ -122,6 +120,7 @@ setup() {
   MATCH="not consented" mktest::assert_stub_called logging::warn
   mktest::assert_stub_called_in_order syncthing::_ensure_folders ""
   mktest::assert_stub_called_in_order syncthing::_install_conflict_notifier
+  mktest::assert_stub_called context::set syncthing.joined false
 }
 
 # --- _validate_folders / _validate_peers (real jq) ---
@@ -204,20 +203,58 @@ setup() {
   mktest::assert_stub_not_called syncthing::_generate
 }
 
-# --- _announce_identity ---
+# --- postflight_info ---
 
-@test "_announce_identity tells the hub operator to share its id with clients" {
-  STUB_OUTPUT="HUB-ID" mktest::stub_function syncthing::_own_device_id
+@test "postflight_info reports the hub's device id" {
   mktest::stub_function syncthing::_is_hub
-  syncthing::_announce_identity
-  MATCH="Put it in" mktest::assert_stub_called logging::banner
+  STUB_OUTPUT="HUB-ID" mktest::stub_function syncthing::_own_device_id
+  run syncthing::postflight_info
+  [[ "$output" == *"hub device ID: HUB-ID"* ]]
 }
 
-@test "_announce_identity tells a client its id will be discovered by the hub" {
-  STUB_OUTPUT="CLIENT-ID" mktest::stub_function syncthing::_own_device_id
+@test "postflight_info reports mesh membership on a joined client" {
   STUB_RETURN=1 mktest::stub_function syncthing::_is_hub
-  syncthing::_announce_identity
-  MATCH="discovers it" mktest::assert_stub_called logging::banner
+  STUB_OUTPUT="true" mktest::stub_function syncthing::_joined
+  run syncthing::postflight_info
+  [[ "$output" == *"Joined the Syncthing mesh"* ]]
+}
+
+@test "postflight_info emits nothing on a client that did not join" {
+  STUB_RETURN=1 mktest::stub_function syncthing::_is_hub
+  STUB_OUTPUT="false" mktest::stub_function syncthing::_joined
+  run syncthing::postflight_info
+  [ -z "$output" ]
+}
+
+# --- postflight_instructions ---
+
+@test "postflight_instructions tells the hub operator to wire its id into clients" {
+  mktest::stub_function syncthing::_is_hub
+  run syncthing::postflight_instructions
+  [[ "$output" == *"module.syncthing.peers"* ]]
+  [[ "$output" == *"introducer = true"* ]]
+}
+
+@test "postflight_instructions tells a joined client to get approved on the hub" {
+  STUB_RETURN=1 mktest::stub_function syncthing::_is_hub
+  STUB_OUTPUT="true" mktest::stub_function syncthing::_joined
+  run syncthing::postflight_instructions
+  [[ "$output" == *"Approve this device on the hub"* ]]
+}
+
+@test "postflight_instructions tells an unjoined client how to join" {
+  STUB_RETURN=1 mktest::stub_function syncthing::_is_hub
+  STUB_OUTPUT="false" mktest::stub_function syncthing::_joined
+  run syncthing::postflight_instructions
+  [[ "$output" == *"MACHINEKIT_SYNCTHING_JOIN=1"* ]]
+}
+
+# --- _joined ---
+
+@test "_joined reads the recorded join outcome, defaulting to false" {
+  STUB_OUTPUT="true" mktest::stub_function context::get "syncthing.joined" --default false
+  run syncthing::_joined
+  [ "$output" = "true" ]
 }
 
 # --- _ensure_folders (orchestrator: iterates, delegates per folder) ---

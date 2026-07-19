@@ -32,12 +32,29 @@ setup() {
   mktest::assert_stub_not_called opencode::_run_installer
 }
 
-@test "install in real mode runs the installer" {
+@test "install in real mode runs the installer and records the fresh install" {
   STUB_RETURN=1 mktest::stub_function input::command_exists opencode
   STUB_RETURN=1 mktest::stub_function input::is_dry_run
   mktest::stub_function opencode::_run_installer
+  mktest::stub_function context::set
   opencode::install
   mktest::assert_stub_called opencode::_run_installer
+  mktest::assert_stub_called context::set opencode.installed true
+}
+
+# --- opencode::postflight_instructions ---
+
+@test "postflight_instructions surfaces the setup step after a fresh install" {
+  STUB_OUTPUT="true" mktest::stub_function context::get "opencode.installed" --default false
+  run opencode::postflight_instructions
+  [[ "$output" == *"opencode"* ]]
+  [[ "$output" == *"provider config"* ]]
+}
+
+@test "postflight_instructions emits nothing when the CLI was already present" {
+  STUB_OUTPUT="false" mktest::stub_function context::get "opencode.installed" --default false
+  run opencode::postflight_instructions
+  [ -z "$output" ]
 }
 
 # --- opencode::_run_installer ---

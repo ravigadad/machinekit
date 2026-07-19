@@ -105,9 +105,9 @@ No out-of-band account or secret. machinekit installs the platform default — O
    printf '%s' '<llm-api-key>' | age -r <your-age-public-key> -o secrets/hindsight/llm_api_key.age
    ```
 
-2. **The fleet tenant key — shared by every hindsight box.** If `secrets/hindsight/tenant_api_key.age` is absent, machinekit generates one on first apply and **announces it** (the value, never re-printed): save it into the pool and reuse the *same* file on every other hindsight machine — server and integration hosts must all carry one key. If you already have it, seed it like the LLM key above.
+2. **The fleet tenant key — shared by every hindsight box.** If `secrets/hindsight/tenant_api_key.age` is absent, machinekit generates one on first apply into the server's `~/.config/hindsight/hindsight.env`, and the end-of-apply summary points you there (the value is never printed): copy it into the pool (or your secrets manager) and reuse the *same* key on every other hindsight machine — server and integration hosts must all carry one key. If you already have it, seed it like the LLM key above.
 
-3. **Optional:** `secrets/hindsight/db_password.age` (generated if absent) and `secrets/hindsight/cp_access_key.age` (the control-plane web-UI password; absent → you're prompted at an interactive apply, or one is generated and announced).
+3. **Optional:** `secrets/hindsight/db_password.age` (generated if absent; machine-local, so it stays in the env file and is not surfaced) and `secrets/hindsight/cp_access_key.age` (the control-plane web-UI password; absent → you're prompted at an interactive apply, or one is generated into the env file and the end-of-apply summary tells you to retrieve it there to sign in).
 
 machinekit assembles these into a create-once `~/.config/hindsight/hindsight.env` (mode 600). To rotate or repoint, delete that file and re-apply. The full config surface (provider, model, ports, image overrides) is the commented `[module.hindsight_server]` block in [`templates/blueprints/common/machinekit.toml`](../templates/blueprints/common/machinekit.toml); for Hindsight itself, see the [upstream docs](https://github.com/vectorize-io/hindsight).
 
@@ -118,7 +118,7 @@ machinekit assembles these into a create-once `~/.config/hindsight/hindsight.env
 `hindsight_integration` wires this machine's coding agents (chosen with `integrations = [...]`) to a Hindsight server. Setup is just connectivity:
 
 1. **Point at the server.** Set either `server_host` (a reachable host — typically its tailnet MagicDNS name) or `server_url` (a full URL, for https, a path, or a hosted Hindsight) in `[module.hindsight_integration]`.
-2. **Share the tenant key.** The same `hindsight/tenant_api_key` secret the server uses — every box must match (see hindsight_server above). If this machine is provisioned before the server, machinekit generates and announces the key here; carry it to the server too.
+2. **Share the tenant key.** The same `hindsight/tenant_api_key` secret the server uses — every box must match (see hindsight_server above). Provision the server first so the key exists, share it (pool or secrets manager), then the clients resolve it. If a client is applied before the key is shared, machinekit generates a stand-in into its agent config and the end-of-apply summary flags that the fleet key isn't in your secrets manager — add the shared key and re-apply.
 
 Everything else (which banks to auto-recall or expose as tools) is plain config in the commented block in [`templates/blueprints/common/machinekit.toml`](../templates/blueprints/common/machinekit.toml). No accounts to create; an agent's own sign-in (e.g. `claude` on first run) is separate and yours to do.
 

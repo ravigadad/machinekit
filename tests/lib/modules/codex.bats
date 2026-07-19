@@ -32,12 +32,29 @@ setup() {
   mktest::assert_stub_not_called codex::_run_installer
 }
 
-@test "install in real mode runs the installer" {
+@test "install in real mode runs the installer and records the fresh install" {
   STUB_RETURN=1 mktest::stub_function input::command_exists codex
   STUB_RETURN=1 mktest::stub_function input::is_dry_run
   mktest::stub_function codex::_run_installer
+  mktest::stub_function context::set
   codex::install
   mktest::assert_stub_called codex::_run_installer
+  mktest::assert_stub_called context::set codex.installed true
+}
+
+# --- codex::postflight_instructions ---
+
+@test "postflight_instructions surfaces the sign-in step after a fresh install" {
+  STUB_OUTPUT="true" mktest::stub_function context::get "codex.installed" --default false
+  run codex::postflight_instructions
+  [[ "$output" == *"codex"* ]]
+  [[ "$output" == *"sign in"* ]]
+}
+
+@test "postflight_instructions emits nothing when the CLI was already present" {
+  STUB_OUTPUT="false" mktest::stub_function context::get "codex.installed" --default false
+  run codex::postflight_instructions
+  [ -z "$output" ]
 }
 
 # --- codex::_run_installer ---

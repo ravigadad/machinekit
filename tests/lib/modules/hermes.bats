@@ -40,12 +40,29 @@ setup() {
   mktest::assert_stub_not_called hermes::_run_installer
 }
 
-@test "install in real mode runs the installer" {
+@test "install in real mode runs the installer and records the fresh install" {
   STUB_RETURN=1 mktest::stub_function input::command_exists hermes
   STUB_RETURN=1 mktest::stub_function input::is_dry_run
   mktest::stub_function hermes::_run_installer
+  mktest::stub_function context::set
   hermes::install
   mktest::assert_stub_called hermes::_run_installer
+  mktest::assert_stub_called context::set hermes.installed true
+}
+
+# --- hermes::postflight_instructions ---
+
+@test "postflight_instructions surfaces the setup step after a fresh install" {
+  STUB_OUTPUT="true" mktest::stub_function context::get "hermes.installed" --default false
+  run hermes::postflight_instructions
+  [[ "$output" == *"hermes"* ]]
+  [[ "$output" == *"finish setup"* ]]
+}
+
+@test "postflight_instructions emits nothing when the CLI was already present" {
+  STUB_OUTPUT="false" mktest::stub_function context::get "hermes.installed" --default false
+  run hermes::postflight_instructions
+  [ -z "$output" ]
 }
 
 # --- hermes::_run_installer ---

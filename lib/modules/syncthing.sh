@@ -57,15 +57,16 @@ syncthing::install() {
   fi
 
   syncthing::_ensure_identity
-  syncthing::_announce_identity
   syncthing::_start
   syncthing::_wait_ready
   syncthing::_apply_discovery
 
   local share_with=""
   if syncthing::_join_consented; then
+    context::set "syncthing.joined" true
     share_with=$(syncthing::_join)
   else
+    context::set "syncthing.joined" false
     logging::warn "syncthing: mesh join not consented; folders stay local. Set MACHINEKIT_SYNCTHING_JOIN=1 to join."
   fi
   syncthing::_ensure_folders "$share_with"
@@ -127,19 +128,30 @@ syncthing::_ensure_identity() {
   syncthing::_generate
 }
 
-# Surface our device ID. For the hub it's the one piece every client must know,
-# so spell that out; for a client the hub discovers it on connect, so no copying.
-syncthing::_announce_identity() {
-  local id
-  id=$(syncthing::_own_device_id)
+# postflight: the fact worth surfacing at the end rather than mid-install — the
+# hub's device ID (the one piece every client must pin), or a client's mesh
+# membership. A client's own ID is not surfaced: the hub discovers it on connect,
+# so there is nothing to copy.
+syncthing::postflight_info() {
   if syncthing::_is_hub; then
-    logging::banner info "This hub's Syncthing device ID:
-  $id
-Put it in [[module.syncthing.peers]] (introducer = true) on each client."
+    printf 'Syncthing hub device ID: %s\n' "$(syncthing::_own_device_id)"
+    return 0
+  fi
+  [ "$(syncthing::_joined)" = "true" ] || return 0
+  printf 'Joined the Syncthing mesh via the hub.\n'
+}
+
+# postflight: the mesh step still on the operator — wire the hub's ID into each
+# client, join an unjoined client, or approve a joined client on the hub.
+syncthing::postflight_instructions() {
+  if syncthing::_is_hub; then
+    printf "Add this device ID to each client's [[module.syncthing.peers]] (introducer = true).\n"
+    return 0
+  fi
+  if [ "$(syncthing::_joined)" = "true" ]; then
+    printf 'Approve this device on the hub (it appears there as a pending device), or re-apply the hub.\n'
   else
-    logging::banner info "This machine's Syncthing device ID:
-  $id
-The hub discovers it when you approve the join there — no need to copy it."
+    printf 'Re-apply with MACHINEKIT_SYNCTHING_JOIN=1 to join the mesh.\n'
   fi
 }
 
@@ -333,6 +345,13 @@ syncthing::_peers() {
 # A hub absorbs joiners (accepts pending devices) instead of pre-listing them.
 syncthing::_is_hub() {
   [ "$(config::get "module.syncthing.hub" --default false --coerce boolean)" = "true" ]
+}
+
+# Whether this machine joined the mesh on this apply. install records the consent
+# outcome so postflight can report it without re-evaluating (and possibly
+# re-prompting) consent.
+syncthing::_joined() {
+  context::get "syncthing.joined" --default false
 }
 
 # Discovery posture: `tailnet` (default) hardens off every public/broadcast path;

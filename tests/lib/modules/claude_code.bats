@@ -32,12 +32,29 @@ setup() {
   mktest::assert_stub_not_called claude_code::_run_installer
 }
 
-@test "install in real mode runs the installer" {
+@test "install in real mode runs the installer and records the fresh install" {
   STUB_RETURN=1 mktest::stub_function input::command_exists claude
   STUB_RETURN=1 mktest::stub_function input::is_dry_run
   mktest::stub_function claude_code::_run_installer
+  mktest::stub_function context::set
   claude_code::install
   mktest::assert_stub_called claude_code::_run_installer
+  mktest::assert_stub_called context::set claude_code.installed true
+}
+
+# --- claude_code::postflight_instructions ---
+
+@test "postflight_instructions surfaces the sign-in step after a fresh install" {
+  STUB_OUTPUT="true" mktest::stub_function context::get "claude_code.installed" --default false
+  run claude_code::postflight_instructions
+  [[ "$output" == *"claude"* ]]
+  [[ "$output" == *"sign in"* ]]
+}
+
+@test "postflight_instructions emits nothing when the CLI was already present" {
+  STUB_OUTPUT="false" mktest::stub_function context::get "claude_code.installed" --default false
+  run claude_code::postflight_instructions
+  [ -z "$output" ]
 }
 
 # --- claude_code::_run_installer ---

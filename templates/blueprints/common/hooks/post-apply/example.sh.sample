@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+# Example post-apply hook — a tour of the Tier-3 escape hatch.
+#
+# Hooks are for machine-specific or personal glue that has no place in a
+# machinekit module: if a hook ever does something broadly useful, that's the
+# signal it should become a module instead. So this sample does nothing
+# meaningful on purpose — it exists to show what a hook can reach and to give you
+# a quick start for writing your own.
+#
+# To activate, drop the .sample extension (rename it however you like — hooks run
+# in alphabetical order, so a numeric prefix controls sequence):
+#   mv example.sh.sample 50-my-hook.sh
+#
+# Hooks run near the end of `machinekit apply` — after home files are synced and
+# every module has installed and run its post-apply step. A non-zero exit fails
+# the whole apply, so guard anything that may legitimately fail.
+
+set -euo pipefail
+
+# MACHINEKIT_SUPPORT is exported by `machinekit apply`. Sourcing it hands your
+# hook machinekit's own helpers:
+#   logging::{info,warn,error,success,step,debug}   [machinekit]-prefixed output (stderr)
+#   input::is_dry_run / input::is_interactive        current run mode
+#   input::dry_run "…"                               describe an action skipped in dry-run
+#   context::{get,set,get_array}                     the resolved apply data store (read-write)
+#   config::{get,get_array}                          values from the merged machinekit.toml
+#   lifecycle::{register_cleanup,fail}               run-on-exit cleanup / abort the apply
+# shellcheck disable=SC1090
+source "$MACHINEKIT_SUPPORT"
+
+logging::step "Example hook"
+
+# 1. Respect dry-run. A hook must make NO real change under `--dry-run`; describe
+#    what it *would* do and exit, so previewing an apply stays completely safe.
+if input::is_dry_run; then
+  input::dry_run "example hook: would run its machine-specific steps"
+  exit 0
+fi
+
+# 2. Read resolved apply data. context:: is machinekit's runtime store; config::
+#    reads straight from your blueprint's machinekit.toml. Both return non-zero
+#    for a missing key, so give a fallback with `||`.
+machine_type=$(context::get "machine_type" || printf '(none)')
+git_email=$(config::get "module.git.user_email" || printf '(unset)')
+logging::info "example hook: machine_type=${machine_type}, git_email=${git_email}"
+
+# 3. Allocate with cleanup. register_cleanup runs on exit — success or failure —
+#    so temp files and locks never leak, even if a later step aborts.
+scratch=$(mktemp -d)
+lifecycle::register_cleanup "rm -rf '$scratch'"
+
+# 4. Do your machine-specific thing. These are the kinds of one-off, personal, or
+#    org-specific errands that don't warrant a module — delete them and write
+#    yours. All arbitrary; none of it is something machinekit should do for you:
+#
+#      # ping your own inventory / notify that this box is provisioned
+#      curl -fsS -X POST "https://hooks.example.internal/provisioned/${machine_type}" || true
+#
+#      # clone a personal scratch repo that isn't worth a module
+#      git clone git@github.com:you/scratch.git "$HOME/scratch" 2>/dev/null || true
+#
+#      # leave a local marker of when this machine was last provisioned
+#      date > "$HOME/.machinekit-last-apply"
+#
+#      # run a company enrollment that only makes sense on the work machine
+#      [ "$machine_type" = work ] && /opt/corp/bin/enroll --quiet
+#
+#    Guard errands that can legitimately fail with `|| true` so a flaky side
+#    task doesn't fail the apply — or call `lifecycle::fail "reason"` to abort on
+#    purpose when a step is a hard requirement.
+
+logging::success "example hook: done (replace this sample with your own steps)"

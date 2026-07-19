@@ -5,7 +5,7 @@
 # from the vendor installer rather than pinning a brew package the self-updater
 # would fight, and skips re-running once it's present. First-run auth opens a
 # browser and signs you in as yourself — an outside-world, interactive step
-# machinekit deliberately leaves to you (hence the post-install reminder, not an
+# machinekit deliberately leaves to you (hence the postflight instruction, not an
 # automated login).
 
 claude_code::install() {
@@ -19,8 +19,17 @@ claude_code::install() {
     return 0
   fi
   claude_code::_run_installer
+  context::set "claude_code.installed" true
   logging::success "claude_code: installed."
-  logging::info "claude_code: run 'claude' and sign in to finish setup — machinekit does not handle auth."
+}
+
+# postflight: first-run auth (browser sign-in) is a deliberate hand-off. Surfaced
+# only when the CLI was installed this run — there's no reliable signed-in probe,
+# so a fresh install stands in for "not set up yet"; an already-present CLI stays
+# quiet.
+claude_code::postflight_instructions() {
+  [ "$(context::get "claude_code.installed" --default false)" = "true" ] || return 0
+  printf "Run 'claude' and sign in to finish setup — machinekit does not handle auth.\n"
 }
 
 claude_code::_run_installer() {

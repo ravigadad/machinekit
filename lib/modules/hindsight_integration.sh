@@ -123,8 +123,6 @@ hindsight_integration::_ensure_configs() {
     "hindsight_integration::${integration}::write_config" \
       "$url" "$token" "$prefix" "$recall_banks" "$tools_banks"
   done
-  hindsight::secrets::provided tenant_api_key \
-    || hindsight::secrets::announce_generated_tenant
 }
 
 # Configure the tenant's banks (missions/dispositions) from this machine, once
@@ -141,6 +139,7 @@ hindsight_integration::post_apply() {
     return 0
   fi
   if ! hindsight_integration::_configure_banks_consented; then
+    context::set "hindsight_integration.bank_config" unconsented
     logging::warn "hindsight_integration: bank config not consented; the tenant is left as-is. Set MACHINEKIT_HINDSIGHT_INTEGRATION_CONFIGURE_BANKS=1 to apply."
     return 0
   fi
@@ -156,11 +155,13 @@ hindsight_integration::_configure_banks() {
   # `provided` check, not a token resolution — an undecryptable/rotated shared key
   # is a real failure the resolve below surfaces fatally, not a "not shared" skip.
   if ! hindsight::secrets::provided tenant_api_key; then
-    logging::warn "hindsight_integration: the fleet tenant key ($(hindsight::secrets::name tenant_api_key)) isn't shared yet (pool/manager); skipping bank config. Persist the announced key and re-apply."
+    context::set "hindsight_integration.bank_config" tenant_unshared
+    logging::warn "hindsight_integration: the fleet tenant key ($(hindsight::secrets::name tenant_api_key)) isn't shared yet (pool/manager); skipping bank config. Add it to your secrets manager and re-apply."
     return 0
   fi
   url="$(hindsight_integration::_api_url)"
   if ! hindsight::banks::server_reachable "$url"; then
+    context::set "hindsight_integration.bank_config" unreachable
     logging::warn "hindsight_integration: $url not reachable; skipping bank config — it will apply on the next run once the server is up."
     return 0
   fi
@@ -175,7 +176,54 @@ hindsight_integration::_configure_banks() {
     logging::info "hindsight_integration: configuring bank '$bank'..."
     hindsight::banks::configure "$url" "$token" "$tenant" "$bank" "$body"
   done < <(hindsight_integration::_configured_bank_names)
+  context::set "hindsight_integration.bank_config" applied
   logging::success "hindsight_integration: applied bank config to the Hindsight tenant."
+}
+
+# postflight: what this machine wired up — the coding agents now pointed at the
+# memory server.
+hindsight_integration::postflight_info() {
+  local integrations="" integration
+  while IFS= read -r integration; do
+    [ -n "$integration" ] || continue
+    integrations="${integrations:+$integrations, }$integration"
+  done < <(hindsight_integration::_integrations)
+  [ -n "$integrations" ] || return 0
+  printf 'Wired %s to the Hindsight server at %s.\n' \
+    "$integrations" "$(hindsight_integration::_api_url)"
+}
+
+# postflight: the steps still on the operator — share the fleet tenant key (only
+# when this box doesn't also serve, since hindsight_server owns that line there),
+# and re-run bank config if it was skipped for a reason the operator resolves.
+hindsight_integration::postflight_instructions() {
+  if ! hindsight::secrets::provided tenant_api_key \
+      && ! hindsight_integration::_hindsight_server_active; then
+    printf 'The fleet tenant key (%s) is not in your secrets manager — every hindsight box must resolve the same one. Add it and re-apply.\n' \
+      "$(hindsight::secrets::name tenant_api_key)"
+  fi
+  case "$(hindsight_integration::_bank_config_outcome)" in
+    unconsented)
+      printf 'Bank missions were not applied (consent withheld) — re-apply with MACHINEKIT_HINDSIGHT_INTEGRATION_CONFIGURE_BANKS=1.\n' ;;
+    unreachable)
+      printf 'Bank missions were not applied (the Hindsight server was unreachable) — bring it up and re-apply.\n' ;;
+    # tenant_unshared is covered by the tenant-key step above; applied/unset need nothing.
+  esac
+}
+
+# The recorded outcome of this run's bank-config attempt (applied / unconsented /
+# tenant_unshared / unreachable), or empty when no banks are configured or the
+# run was dry. Lets postflight surface the operator's next step without
+# re-attempting the mutation.
+hindsight_integration::_bank_config_outcome() {
+  context::get "hindsight_integration.bank_config" --default ""
+}
+
+# Whether this box also runs the memory server. On such a box hindsight_server
+# owns the shared-tenant-key instruction, so this module defers to it (avoiding a
+# duplicate line under two module headers).
+hindsight_integration::_hindsight_server_active() {
+  context::get_array "modules.active" | grep -qxF "hindsight_server"
 }
 
 # Default false: the upsert can overwrite a bank's config (including manual
