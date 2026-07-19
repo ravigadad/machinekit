@@ -1,0 +1,4 @@
+# starship — cross-shell prompt. https://starship.rs
+# Minimal starter; extend with your own modules and styling. The schema line
+# gives editors completion and validation against starship's config schema.
+"$schema" = 'https://starship.rs/config-schema.json'
