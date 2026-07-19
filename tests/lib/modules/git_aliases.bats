@@ -14,3 +14,18 @@ setup() {
   result=$(git_aliases::requires)
   printf '%s\n' "$result" | grep -q '^zsh$'
 }
+
+# --- git_aliases::postflight_info ---
+
+@test "postflight_info reports where the alias library was installed" {
+  run git_aliases::postflight_info
+  [[ "$output" == *".git_aliases.zsh"* ]]
+}
+
+# --- git_aliases::postflight_instructions ---
+
+@test "postflight_instructions points to how the aliases are discovered" {
+  run git_aliases::postflight_instructions
+  [[ "$output" == *"alias"* ]]
+  [[ "$output" == *"github.com/ohmyzsh"* ]]
+}
