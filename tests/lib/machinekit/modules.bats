@@ -73,13 +73,12 @@ setup() {
   mktest::assert_stub_called modules::_call_function_per_module "post_apply"
 }
 
-@test "_call_function_per_module calls given function for all modules that declare it" {
-  mktest::stub_function foo_module::test
-  mktest::stub_function bar_module::test
+@test "_call_function_per_module calls given function for all modules that declare it and returns results" {
+  STUB_OUTPUT="foo_output" mktest::stub_function foo_module::test
+  STUB_OUTPUT="bar_output" mktest::stub_function bar_module::test
   STUB_OUTPUT=$'foo_module\nbar_module\nbaz_module' mktest::stub_function context::get_array "modules.active"
-  modules::_call_function_per_module "test"
-  mktest::assert_stub_called foo_module::test
-  mktest::assert_stub_called bar_module::test
+  run modules::_call_function_per_module "test"
+  [ "$output" = $'foo_output\nbar_output' ]
 }
 
 # --- modules::collect ---
