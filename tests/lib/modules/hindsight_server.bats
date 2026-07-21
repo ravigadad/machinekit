@@ -90,15 +90,15 @@ setup() {
 
 # --- hindsight_server::install ---
 
-@test "install installs pgvector before provisioning, then ensures the env file and places the compose" {
-  mktest::stub_function brew::install_formula "pgvector"
+@test "install makes the vector extension available before provisioning, then ensures the env file and places the compose" {
+  mktest::stub_function postgres::ensure_extension_available "vector"
   mktest::stub_function hindsight_server::_provision_database
   mktest::stub_function hindsight_server::_ensure_env_file
   mktest::stub_function hindsight_server::_place_compose
   hindsight_server::install
-  # Order is the contract: the vector extension (in _provision_database) needs
-  # the pgvector formula already installed.
-  mktest::assert_stub_called_in_order brew::install_formula "pgvector"
+  # Order is the contract: the vector extension (created in _provision_database)
+  # needs its binary already available (brew formula, or Postgres.app's bundle).
+  mktest::assert_stub_called_in_order postgres::ensure_extension_available "vector"
   mktest::assert_stub_called_in_order hindsight_server::_provision_database
   mktest::assert_stub_called hindsight_server::_ensure_env_file
   mktest::assert_stub_called hindsight_server::_place_compose

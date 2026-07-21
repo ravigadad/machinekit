@@ -144,7 +144,7 @@ After the module system and bash modernization land, the framework's machinery i
 Shipped since the module system landed:
 
 - `tailscale` (mesh networking, with headless tagged-device support)
-- a `postgres` host-provisioning module
+- the `postgres` capability — a host database, satisfied by `postgres_brew` (installs and runs PostgreSQL via Homebrew) by default, or `postgres_app` (provisions into an operator-run Postgres.app) on macOS
 - coding-agent installers — `claude_code`, `codex`, and `opencode` (each installs its CLI via the vendor's official self-updating installer)
 - persistent-assistant installers — `openclaw` and `hermes` (each installs its CLI via the vendor's official self-updating installer)
 - the Hindsight memory stack — `hindsight_server` (self-hosted memory API as a container) and `hindsight_integration` (wires coding agents to it)

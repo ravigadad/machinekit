@@ -69,6 +69,9 @@
 # # installs whichever are missing and verifies the rest; it never changes the
 # # port of an already-installed cluster, so a request must include every
 # # installed version (matching its current port) and may add more.
+# # The install behavior above is the default `postgres_brew` satisfier. The
+# # `postgres_app` satisfier (macOS) reads this same table but only *checks* it —
+# # it installs nothing, and fails if a listed server isn't already running.
 # [[module.postgres.versions]]
 # version = "18"
 # port = "5432"

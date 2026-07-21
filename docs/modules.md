@@ -95,6 +95,19 @@ No out-of-band account or secret. machinekit installs the platform default — O
 
 ---
 
+## postgres (postgres_brew / postgres_app)
+
+Nothing to do for the default. The `postgres` capability's default satisfier, `postgres_brew`, installs and runs PostgreSQL via Homebrew with no out-of-band setup — that's the case for most machines, including the memory server unless you say otherwise.
+
+Only if you list `postgres_app` (macOS only) to use [Postgres.app](https://postgresapp.com) as your provider is there manual setup, because machinekit never drives Postgres.app's lifecycle — it only checks and provisions into a server you run:
+
+1. **Install Postgres.app and start a server** *before* `apply`. By default machinekit provisions into whatever Postgres.app server is running on port 5432; if it finds no Postgres.app server there — or a non-Postgres.app postgres holding the port — it fails rather than provision into the wrong place.
+2. **Pin versions/ports (optional).** With `[module.postgres] versions = [{ version = 17, port = 5432 }]` machinekit verifies that exact server is running (same table `postgres_brew` would *create*; `postgres_app` only *checks* it). Without it, any Postgres.app server on 5432 is accepted.
+
+Extensions (e.g. `pgvector`, which `hindsight_server` uses) ship bundled with Postgres.app, so nothing extra is installed for them.
+
+---
+
 ## hindsight_server — an LLM provider key, and the shared tenant key
 
 `hindsight_server` runs a self-hosted [Hindsight](https://github.com/vectorize-io/hindsight) memory API as a container against the host postgres (the container runtime and postgres are pulled in automatically). List it in `modules` only on the machine that should be the memory server. Its secrets are named `hindsight/*` (resolved from the blueprint pool or, if configured, a secrets manager — see `infisical`):

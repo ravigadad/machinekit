@@ -67,13 +67,15 @@ hindsight_server::declared_secrets() {
   printf '%s\ttrue\ttrue\n'  "$(hindsight::secrets::name cp_access_key)"
 }
 
-# Engine-level prep plus the env file. The postgres primitives, brew, and the
-# env assembly are each dry-run-aware, so install delegates rather than branching
-# on dry-run itself. Host-postgres network access is the postgres module's job
+# Engine-level prep plus the env file. The postgres primitives and the env
+# assembly are each dry-run-aware, so install delegates rather than branching on
+# dry-run itself. The vector extension is made available through the postgres
+# capability (brew installs the formula; Postgres.app bundles it), never by naming
+# a brew formula here. Host-postgres network access is the postgres module's job
 # (its post_apply), so nothing here opens it.
 hindsight_server::install() {
   logging::step "hindsight_server install"
-  brew::install_formula pgvector
+  postgres::ensure_extension_available vector
   hindsight_server::_provision_database
   hindsight_server::_ensure_env_file
   hindsight_server::_place_compose
@@ -281,7 +283,7 @@ hindsight_server::_database_url() {
 
 # Routed through container_manager::_docker so it gets the OS-correct invocation:
 # `sudo docker` on Linux (root daemon, user not in the docker group), bare docker
-# on macOS/OrbStack. Same reason the network creation in postgres::access works.
+# on macOS/OrbStack. Same reason the network creation in postgres_brew::access works.
 hindsight_server::_compose_up() {
   container_manager::_docker compose \
     -f "$(hindsight_server::_compose_path)" \

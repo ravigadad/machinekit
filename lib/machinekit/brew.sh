@@ -76,7 +76,7 @@ brew::_run_install() {
 # A real install changes what `brew list` reports, but the per-kind cache was
 # warmed before it ran. Drop the cache so the next query re-fetches — otherwise
 # same-run introspection (e.g. "is the formula we just installed present?", which
-# postgres::introspect::instance_version depends on) reads a stale, pre-install
+# postgres_brew::introspect::instance_version depends on) reads a stale, pre-install
 # list and silently finds nothing.
 brew::_invalidate_installed() {
   case "$1" in
