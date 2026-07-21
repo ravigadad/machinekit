@@ -9,7 +9,7 @@
 # machine-specific (install once, reuse across runs):
 #   tart      brew install tart
 #   images    tart pull ghcr.io/cirruslabs/ubuntu:latest          (~20 GB)
-#             tart pull ghcr.io/cirruslabs/macos-sequoia-vanilla:latest  (~50 GB)
+#             tart pull ghcr.io/cirruslabs/macos-tahoe-vanilla:latest  (~50 GB)
 #   sshpass   brew install hudochenkov/sshpass/sshpass  (macOS images only)
 #
 # Usage:
@@ -32,7 +32,7 @@ source "$VM_DIR/lib/vm.sh"
 
 DEFAULT_IMAGES=(
   "ghcr.io/cirruslabs/ubuntu:latest"
-  "ghcr.io/cirruslabs/macos-sequoia-vanilla:latest"
+  "ghcr.io/cirruslabs/macos-tahoe-vanilla:latest"
 )
 DEFAULT_CASES=(apply-smoke)
 

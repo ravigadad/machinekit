@@ -51,7 +51,7 @@ Architecture is described in [architecture.md](./architecture.md); this document
 - Editor configs (`.editorconfig`, IDE settings) — repo-level concerns, not machine-level
 
 - `install.sh` — thin curl-pipe-bash shim that clones machinekit to `~/.local/share/machinekit/framework`, ensures a modern bash, and links the `machinekit` command into `~/.local/bin` on the user's PATH (via `libexec/machinekit-ensure-on-path`; `--no-modify-path` opts out of the shell-rc edit), leaving the tool ready to run. It does not apply a blueprint (a separate step). **Implemented.**
-- VM-based E2E tests — `tests/vm/` with Tart VM support (Ubuntu and macOS Sequoia images); `scripts/test-vm` wrapper; `.github/workflows/` for BATS and shellcheck CI. **Implemented** (VMs not in CI due to image size; run locally).
+- VM-based E2E tests — `tests/vm/` with Tart VM support (Ubuntu and macOS images); `scripts/test-vm` wrapper; `.github/workflows/` for BATS and shellcheck CI. **Implemented** (VMs not in CI due to image size; run locally).
 
 ---
 
