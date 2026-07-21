@@ -51,6 +51,17 @@ hindsight_integration::requires() {
   return 0
 }
 
+# Soft ordering edge: on a box that also runs the memory server, order this
+# module after hindsight_server so the local server is up (post_apply order) when
+# the bank-config upsert PATCHes it. Deliberately not `require` — a client points
+# at a remote server it doesn't run, and an ::after to an inactive hindsight_server
+# is silently ignored, so this couples the two only where both are present. The
+# server's first cold boot can still outlast its health check, so the upsert's
+# skip-and-retry fallback remains the guarantee; this only removes the certain miss.
+hindsight_integration::after() {
+  printf 'hindsight_server\n'
+}
+
 # Fail before any work on what's missing: the server location (server_url or
 # server_host), a known integration set, and each selected agent's own
 # preconditions. The tenant key is generated when absent (this box may be the

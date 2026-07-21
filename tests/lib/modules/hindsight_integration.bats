@@ -43,6 +43,13 @@ setup() {
   [ "${#lines[@]}" -eq 1 ]
 }
 
+# --- after ---
+
+@test "after orders integration behind hindsight_server" {
+  run hindsight_integration::after
+  [ "$output" = "hindsight_server" ]
+}
+
 # --- preflight ---
 
 @test "preflight validates bank configs and runs each integration's own preflight" {
