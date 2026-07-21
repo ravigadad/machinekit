@@ -6,12 +6,14 @@
 # brew's default pg_hba already trusts, so it's a no-op there. On Linux the
 # container appears on a bridge subnet, so we open listen_addresses and add a
 # scram-authenticated pg_hba line scoped to that subnet (scram is the real gate;
-# the CIDR is defense-in-depth). Lives in post_apply, not install: it needs the
-# container runtime present, and postgres/container_manager are siblings so
-# install order isn't guaranteed.
+# the CIDR is defense-in-depth). Dispatched by the postgres capability's post_apply
+# (which owns the runtime-active guard and ensures the shared network first), not
+# install: it needs the runtime present, and postgres/container_manager are siblings
+# so install order isn't guaranteed.
 
+# No runtime guard here: the capability's post_apply owns that decision before it
+# dispatches this seam.
 postgres_brew::access::configure() {
-  modules::capability_active container_manager || return 0
   case "$(context::get os.family)" in
     darwin)
       logging::debug "postgres: containers reach the host over loopback; no access changes needed"

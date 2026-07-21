@@ -54,24 +54,31 @@ setup() {
   [ -z "$output" ]
 }
 
+# --- container_manager::ensure_network ---
+
+@test "ensure_network does not create the network when it already exists" {
+  mktest::stub_function container_manager::_docker "network" "inspect" "machinekit"
+  mktest::stub_function container_manager::_docker "network" "create" "machinekit"
+  container_manager::ensure_network
+  mktest::assert_stub_not_called container_manager::_docker "network" "create" "machinekit"
+}
+
+@test "ensure_network creates the machinekit network when absent" {
+  STUB_RETURN=1 mktest::stub_function container_manager::_docker "network" "inspect" "machinekit"
+  mktest::stub_function container_manager::_docker "network" "create" "machinekit"
+  container_manager::ensure_network
+  mktest::assert_stub_called container_manager::_docker "network" "create" "machinekit"
+}
+
 # --- container_manager::container_subnet ---
 
-@test "container_subnet returns the subnet of the existing machinekit network" {
-  mktest::stub_function container_manager::_docker "network" "inspect" "machinekit"
+@test "container_subnet ensures the network, then returns its subnet" {
+  mktest::stub_function container_manager::ensure_network
   STUB_OUTPUT="172.30.0.0/16" mktest::stub_function container_manager::_docker \
     "network" "inspect" "machinekit" "--format" "{{ (index .IPAM.Config 0).Subnet }}"
   run container_manager::container_subnet
   [ "$output" = "172.30.0.0/16" ]
-}
-
-@test "container_subnet creates the machinekit network when absent, then returns its subnet" {
-  STUB_RETURN=1 mktest::stub_function container_manager::_docker "network" "inspect" "machinekit"
-  mktest::stub_function container_manager::_docker "network" "create" "machinekit"
-  STUB_OUTPUT="172.31.0.0/16" mktest::stub_function container_manager::_docker \
-    "network" "inspect" "machinekit" "--format" "{{ (index .IPAM.Config 0).Subnet }}"
-  run container_manager::container_subnet
-  [ "$output" = "172.31.0.0/16" ]
-  mktest::assert_stub_called container_manager::_docker "network" "create" "machinekit"
+  mktest::assert_stub_called container_manager::ensure_network
 }
 
 # --- container_manager::host_alias ---

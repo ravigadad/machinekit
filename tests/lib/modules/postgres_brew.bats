@@ -47,11 +47,11 @@ setup() {
   mktest::assert_stub_called postgres::ensure_superuser
 }
 
-# --- postgres_brew::post_apply ---
+# --- postgres_brew::configure_container_access ---
 
-@test "post_apply delegates to access configuration" {
+@test "configure_container_access delegates to access configuration" {
   mktest::stub_function postgres_brew::access::configure
-  postgres_brew::post_apply
+  postgres_brew::configure_container_access
   mktest::assert_stub_called postgres_brew::access::configure
 }
 

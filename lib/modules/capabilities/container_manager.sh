@@ -9,12 +9,22 @@ _CONTAINER_MANAGER_NETWORK="machinekit"
 
 container_manager::is_capability() { return 0; }
 
-# Ensure the canonical network exists and print its subnet. We don't pin a CIDR
-# (it could collide inside docker's 172.16/12 pool or with the host LAN/VPN); we
-# let docker auto-assign and read it back, so callers learn exactly what to open.
-container_manager::container_subnet() {
+# Ensure the canonical network exists (create-if-absent, idempotent). Its own
+# function — separate from container_subnet — because a consumer only *attaching*
+# a compose to the network (a service like hindsight_server) needs it to exist but
+# not its subnet, whereas a resource authorizing a pg_hba CIDR needs the subnet.
+# Both go through here, so the network has a single creator on every OS.
+container_manager::ensure_network() {
   container_manager::_docker network inspect "$_CONTAINER_MANAGER_NETWORK" >/dev/null 2>&1 \
     || container_manager::_docker network create "$_CONTAINER_MANAGER_NETWORK" >/dev/null
+}
+
+# The canonical network's subnet. We don't pin a CIDR (it could collide inside
+# docker's 172.16/12 pool or with the host LAN/VPN); docker auto-assigns and we
+# read it back, so callers learn exactly what to open. Ensures the network first,
+# so the read always has something to inspect.
+container_manager::container_subnet() {
+  container_manager::ensure_network
   container_manager::_docker network inspect "$_CONTAINER_MANAGER_NETWORK" \
     --format '{{ (index .IPAM.Config 0).Subnet }}'
 }

@@ -79,6 +79,13 @@ setup() {
   [ "$status" -eq 0 ]
 }
 
+# --- postgres_app::configure_container_access (seam) ---
+
+@test "configure_container_access is a no-op — Postgres.app is reached over loopback" {
+  run postgres_app::configure_container_access
+  [ "$status" -eq 0 ]
+}
+
 # --- postgres_app::_check_requested ---
 
 @test "_check_requested validates the shape, then asserts each requested server" {

@@ -6,10 +6,11 @@
 # and runs postgres itself; postgres_app provisions into an operator-run
 # Postgres.app. Consumers name the capability, never a satisfier.
 #
-# Three things vary by satisfier and are dispatched to the active one:
-#   bin_dir                   — where psql/createuser for the resolved instance live
-#   instance                  — the major serving 5432 (the instance consumers use)
+# Four things vary by satisfier and are dispatched to the active one:
+#   bin_dir                    — where psql/createuser for the resolved instance live
+#   instance                   — the major serving 5432 (the instance consumers use)
 #   ensure_extension_available — make an extension's binary installable/present
+#   configure_container_access — engine-specific host reachability from containers
 # Default satisfier is postgres_brew on every OS; a blueprint opts into postgres_app
 # by listing it in modules = [...], resolved like container_manager/orbstack.
 
@@ -20,6 +21,22 @@ postgres::default_satisfier() { printf 'postgres_brew\n'; }
 postgres::requires() { postgres::default_satisfier; }
 
 postgres::install() { :; }
+
+# After the container runtime is up, open postgres to containers: ensure the
+# shared machinekit network exists — a consumer's compose attaches to it, and it
+# is required on every OS even where the engine itself is reached over loopback —
+# then let the active satisfier apply any engine-specific reachability (brew opens
+# listen_addresses + pg_hba on Linux; Postgres.app needs nothing). Guarded on a
+# container runtime being active: postgres integrates with one when present but
+# does not require it, so with no runtime there is nothing to open. post_apply,
+# not install: it needs the runtime up, and the network is what hindsight_server's
+# later post_apply compose-up attaches to (dependency order guarantees this runs
+# first).
+postgres::post_apply() {
+  modules::capability_active container_manager || return 0
+  container_manager::ensure_network
+  postgres::_dispatch configure_container_access
+}
 
 # The major version of the resolved instance (the server on 5432). Public reader
 # for consumers that branch on the engine version — e.g. checking the major
@@ -175,8 +192,9 @@ postgres::_satisfier() {
 
 # Dispatch a capability seam to the active satisfier, forwarding any args. The seams
 # that genuinely vary by satisfier — instance_major_version, bin_dir,
-# ensure_extension_available — resolve the satisfier and call it identically, so
-# they share this one indirection rather than repeating the resolve-and-call block.
+# ensure_extension_available, configure_container_access — resolve the satisfier and
+# call it identically, so they share this one indirection rather than repeating the
+# resolve-and-call block.
 postgres::_dispatch() {
   local seam="$1"; shift
   local satisfier

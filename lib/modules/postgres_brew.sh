@@ -28,9 +28,12 @@ postgres_brew::install() {
   postgres::ensure_superuser
 }
 
-# Opens the instance to containers when a container runtime is active; see
-# access.sh. post_apply, not install: it needs the runtime present.
-postgres_brew::post_apply() {
+# The container-access seam the postgres capability dispatches (after it has
+# ensured the shared network, and only when a runtime is active — so this need
+# not re-check). Delegates to access.sh: a no-op on macOS/OrbStack (loopback is
+# already trusted) and, on Linux, opens listen_addresses + a pg_hba line for the
+# container subnet.
+postgres_brew::configure_container_access() {
   postgres_brew::access::configure
 }
 

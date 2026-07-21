@@ -13,17 +13,7 @@ setup() {
 
 # --- postgres_brew::access::configure ---
 
-@test "configure does nothing when no container runtime is active" {
-  STUB_RETURN=1 mktest::stub_function modules::capability_active "container_manager"
-  mktest::stub_function context::get
-  mktest::stub_function postgres_brew::access::_open_for_containers
-  postgres_brew::access::configure
-  mktest::assert_stub_not_called context::get
-  mktest::assert_stub_not_called postgres_brew::access::_open_for_containers
-}
-
 @test "configure is a no-op on macOS, where containers reach the host over loopback" {
-  mktest::stub_function modules::capability_active "container_manager"
   STUB_OUTPUT="darwin" mktest::stub_function context::get "os.family"
   mktest::stub_function postgres_brew::access::_open_for_containers
   postgres_brew::access::configure
@@ -31,7 +21,6 @@ setup() {
 }
 
 @test "configure opens access on Linux" {
-  mktest::stub_function modules::capability_active "container_manager"
   STUB_OUTPUT="linux" mktest::stub_function context::get "os.family"
   mktest::stub_function postgres_brew::access::_open_for_containers
   postgres_brew::access::configure

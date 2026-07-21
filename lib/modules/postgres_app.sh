@@ -58,6 +58,16 @@ postgres_app::ensure_extension_available() {
   logging::debug "postgres_app: extension $1 ships with Postgres.app; nothing to install"
 }
 
+# The container-access seam the postgres capability dispatches (after it has
+# ensured the shared network). Postgres.app is macOS-only, and OrbStack containers
+# reach the host over loopback — which Postgres.app's default pg_hba already
+# trusts — so there is no listen/pg_hba change to make here, unlike the brew
+# satisfier's Linux path. The network a consumer's compose attaches to is ensured
+# by the capability, not here.
+postgres_app::configure_container_access() {
+  logging::debug "postgres_app: containers reach Postgres.app over loopback; no access changes needed"
+}
+
 # --- the check (postgres_app verifies the versions table rather than making it) ---
 
 postgres_app::_check_requested() {

@@ -43,6 +43,26 @@ setup() {
   [ -z "$output" ]
 }
 
+# --- postgres::post_apply ---
+
+@test "post_apply is a no-op when no container runtime is active" {
+  STUB_RETURN=1 mktest::stub_function modules::capability_active "container_manager"
+  mktest::stub_function container_manager::ensure_network
+  mktest::stub_function postgres::_dispatch "configure_container_access"
+  postgres::post_apply
+  mktest::assert_stub_not_called container_manager::ensure_network
+  mktest::assert_stub_not_called postgres::_dispatch "configure_container_access"
+}
+
+@test "post_apply ensures the shared network, then dispatches container access to the satisfier" {
+  mktest::stub_function modules::capability_active "container_manager"
+  mktest::stub_function container_manager::ensure_network
+  mktest::stub_function postgres::_dispatch "configure_container_access"
+  postgres::post_apply
+  mktest::assert_stub_called_in_order container_manager::ensure_network
+  mktest::assert_stub_called_in_order postgres::_dispatch "configure_container_access"
+}
+
 # --- postgres::version ---
 
 @test "version dispatches the instance_major_version seam" {
