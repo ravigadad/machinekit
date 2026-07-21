@@ -26,10 +26,16 @@ hindsight::banks::server_reachable() {
 
 # hindsight::banks::configure URL TOKEN TENANT BANK CONFIG_JSON — upsert one
 # bank's config. Reachability is the caller's precondition, so a failure here is
-# a real error (auth, a bad field) and is fatal.
+# a real error (auth, a bad field) and is fatal. The caller passes the bare config
+# table; the API's PATCH body wraps it in an `updates` envelope (below), so that
+# transport shape stays here rather than in every caller.
 hindsight::banks::configure() {
-  local url="$1" token="$2" tenant="$3" bank="$4" body="$5" endpoint
+  local url="$1" token="$2" tenant="$3" bank="$4" config="$5" endpoint body
   endpoint="${url%/}/v1/$tenant/banks/$bank/config"
+  # Hindsight's config PATCH takes {"updates": {<fields>}} (the BankConfigUpdate
+  # model — `updates` is required), not the bare config table. Verified against a
+  # live server; the field names inside are unchanged.
+  body="$(printf '%s' "$config" | jq -c '{updates: .}')"
   hindsight::banks::_http_patch "$endpoint" "$token" "$body" \
     || lifecycle::fail "hindsight: failed to configure bank '$bank' at $endpoint."
 }
@@ -41,8 +47,8 @@ hindsight::banks::configure() {
 # appears in the process table (ps / /proc/<pid>/cmdline) to other local users.
 #
 # The endpoint shape (/v1/<tenant>/banks/<bank>/config), the PATCH merge
-# semantics, and the "default" tenant segment are from the upstream API docs, not
-# a live run.
+# semantics, and the "default" tenant segment are confirmed against a live
+# server: a wrapped body returns 200 and the sent fields land in the bank config.
 hindsight::banks::_http_patch() {
   local endpoint="$1" token="$2" body="$3"
   printf 'Authorization: Bearer %s\n' "$token" \

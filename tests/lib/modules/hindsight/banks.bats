@@ -61,18 +61,18 @@ setup() {
 
 # --- configure ---
 
-@test "configure PATCHes the bank's /config endpoint" {
+@test "configure PATCHes the bank's /config endpoint with the fields wrapped in an updates envelope" {
   mktest::stub_function hindsight::banks::_http_patch
   hindsight::banks::configure "http://memory-server:8888" "tok-123" "default" "music" '{"retain_mission":"m"}'
   mktest::assert_stub_called hindsight::banks::_http_patch \
-    "http://memory-server:8888/v1/default/banks/music/config" "tok-123" '{"retain_mission":"m"}'
+    "http://memory-server:8888/v1/default/banks/music/config" "tok-123" '{"updates":{"retain_mission":"m"}}'
 }
 
 @test "configure strips a trailing slash from the base url" {
   mktest::stub_function hindsight::banks::_http_patch
   hindsight::banks::configure "http://memory-server:8888/" "tok-123" "default" "music" '{"retain_mission":"m"}'
   mktest::assert_stub_called hindsight::banks::_http_patch \
-    "http://memory-server:8888/v1/default/banks/music/config" "tok-123" '{"retain_mission":"m"}'
+    "http://memory-server:8888/v1/default/banks/music/config" "tok-123" '{"updates":{"retain_mission":"m"}}'
 }
 
 @test "configure fails loudly when the patch fails" {
