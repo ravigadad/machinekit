@@ -207,8 +207,13 @@ syncthing::_stignore_patterns() {
 # Junk that should never replicate. (?d) marks them deletable so they can't block a
 # directory's removal. Not .stversions/ — Syncthing already excludes its own
 # reserved dirs from sync.
+#
+# .git is default-ignored so version-control state never replicates — git, not
+# Syncthing, owns it (file-level sync of a live .git corrupts it). Deliberately NOT
+# (?d)-deletable: on the backup machine .git is the live git_backup repo, so
+# Syncthing must never delete it, even to remove a parent dir.
 syncthing::_default_ignores() {
-  printf '%s\n' '(?d).DS_Store' '(?d)._*'
+  printf '%s\n' '(?d).DS_Store' '(?d)._*' '.git'
 }
 
 # Wire this machine into the mesh and echo the device IDs to share folders with

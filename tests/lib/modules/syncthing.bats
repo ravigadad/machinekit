@@ -333,7 +333,8 @@ setup() {
   run syncthing::_stignore_patterns '{"ignore_patterns":["(?d).DS_Store"]}'
   [ "${lines[0]}" = "(?d).DS_Store" ]
   [ "${lines[1]}" = "(?d)._*" ]
-  [ "${#lines[@]}" -eq 2 ]
+  [ "${lines[2]}" = ".git" ]
+  [ "${#lines[@]}" -eq 3 ]
 }
 
 @test "_stignore_patterns emits only defaults when the folder has no patterns" {
@@ -342,10 +343,13 @@ setup() {
   [ "${lines[1]}" = "(?d)._*" ]
 }
 
-@test "_default_ignores lists the deletable junk patterns" {
+@test "_default_ignores lists the default ignore patterns, including a non-deletable .git" {
   run syncthing::_default_ignores
   [[ "$output" == *"(?d).DS_Store"* ]]
   [[ "$output" == *"(?d)._*"* ]]
+  # .git is ignored but NOT (?d)-deletable — the backup machine's live repo.
+  [[ "$output" == *$'\n.git'* ]] || [[ "$output" == ".git"* ]]
+  [[ "$output" != *"(?d).git"* ]]
 }
 
 # --- _join / _accept_pending / _ensure_peers ---
