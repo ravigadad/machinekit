@@ -152,7 +152,7 @@ source = "git@github.com:you/agents.git"
 # source_protocol = "git"           # override only if auto-detection guesses wrong
 ```
 
-A private git source needs the same SSH access blueprints do — register your key with your host (see the git section above). Seeding only fills an **absent or empty** dir; if the directory already exists and has contents, machinekit leaves it untouched (so syncing it on by other means, or running again, is safe). If the dir is absent and no `source` is set, preflight stops with a message.
+A private git source needs the same SSH access blueprints do — register your key with your host (see the git section above). Seeding only fills an **absent or empty** dir; if the directory already exists and has contents, machinekit leaves it untouched (so syncing it on by other means, or running again, is safe). After a git seed the clone's `.git` is stripped, so the directory holds plain content rather than a live repo — keeping version-control history off the Syncthing mesh and leaving any repo on a backup machine to `git_backup`. If the dir is absent and no `source` is set, preflight stops with a message.
 
 ## agents_config_harnesses — a populated agents-config directory
 

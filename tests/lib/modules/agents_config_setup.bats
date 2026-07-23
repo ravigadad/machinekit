@@ -81,16 +81,20 @@ setup() {
   mktest::assert_stub_called logging::dry_run
 }
 
-@test "install seeds the dir from the source when absent" {
+@test "install seeds the dir from the source when absent, then strips its .git" {
   STUB_OUTPUT="/agents" mktest::stub_function agents_config_setup::dir
   STUB_RETURN=1 mktest::stub_function agents_config_setup::_present "/agents"
   STUB_OUTPUT="https://github.com/user/agents" mktest::stub_function agents_config_setup::_source
   STUB_RETURN=1 mktest::stub_function input::is_dry_run
   STUB_OUTPUT="" mktest::stub_function agents_config_setup::_source_protocol
   STUB_OUTPUT="git" mktest::stub_function fetch::resolve_protocol "https://github.com/user/agents" ""
-  mktest::stub_function fetch::into "https://github.com/user/agents" "/agents" "git"
+  mktest::stub_function fetch::into "https://github.com/user/agents" "/agents" "git" "shallow"
+  mktest::stub_function agents_config_setup::_strip_git "/agents"
   agents_config_setup::install
-  mktest::assert_stub_called fetch::into "https://github.com/user/agents" "/agents" "git"
+  # Seeded from the source (shallow — the .git is about to be stripped), then the
+  # .git stripped — in that order.
+  mktest::assert_stub_called_in_order fetch::into "https://github.com/user/agents" "/agents" "git" "shallow"
+  mktest::assert_stub_called_in_order agents_config_setup::_strip_git "/agents"
 }
 
 @test "install passes a configured protocol override through to resolve_protocol" {
@@ -100,9 +104,10 @@ setup() {
   STUB_RETURN=1 mktest::stub_function input::is_dry_run
   STUB_OUTPUT="cp" mktest::stub_function agents_config_setup::_source_protocol
   STUB_OUTPUT="cp" mktest::stub_function fetch::resolve_protocol "/local/agents" "cp"
-  mktest::stub_function fetch::into "/local/agents" "/agents" "cp"
+  mktest::stub_function fetch::into "/local/agents" "/agents" "cp" "shallow"
+  mktest::stub_function agents_config_setup::_strip_git "/agents"
   agents_config_setup::install
-  mktest::assert_stub_called fetch::into "/local/agents" "/agents" "cp"
+  mktest::assert_stub_called fetch::into "/local/agents" "/agents" "cp" "shallow"
 }
 
 @test "install in dry-run reports intent and does not fetch" {
@@ -116,6 +121,26 @@ setup() {
   mktest::assert_stub_not_called fetch::into
   mktest::assert_stub_not_called fetch::resolve_protocol
   mktest::assert_stub_called logging::dry_run
+}
+
+# --- _strip_git ---
+
+@test "_strip_git removes the dir's .git, leaving content intact" {
+  local dir="$BATS_TEST_TMPDIR/agents"
+  mkdir -p "$dir/.git"
+  printf 'x\n' > "$dir/.git/config"
+  printf 'keep\n' > "$dir/AGENTS.md"
+  agents_config_setup::_strip_git "$dir"
+  [ ! -e "$dir/.git" ]
+  [ -f "$dir/AGENTS.md" ]
+}
+
+@test "_strip_git is a no-op when the dir has no .git" {
+  local dir="$BATS_TEST_TMPDIR/plain"
+  mkdir -p "$dir"
+  printf 'keep\n' > "$dir/AGENTS.md"
+  agents_config_setup::_strip_git "$dir"
+  [ -f "$dir/AGENTS.md" ]
 }
 
 # --- config accessors (dir, _source, _source_protocol) ---

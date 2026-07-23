@@ -12,7 +12,10 @@
 #
 # Seeding only ever fills an absent/empty dir; an already-populated dir is left
 # untouched (idempotent, never clobbered), so cloning is a local set-up step with
-# no consent gate — like blueprints' own fetch.
+# no consent gate — like blueprints' own fetch. After a git seed the .git is
+# stripped, so the machine carries plain content, not a repo: git_backup rebuilds
+# its own repo from the remote on the backup machine, and Syncthing must not
+# replicate a live .git across the fleet.
 
 # Fail early when there's nothing on disk and no way to seed it, rather than at
 # install time. A dir that's already present needs no source.
@@ -44,14 +47,28 @@ agents_config_setup::install() {
       logging::debug "agents_config_setup: $dir already present; nothing to seed"
     fi
   elif input::is_dry_run; then
-    logging::dry_run "would seed the agents config dir ($dir) from $(agents_config_setup::_source)"
+    logging::dry_run "would seed the agents config dir ($dir) from $(agents_config_setup::_source), then strip its .git (plain content; git_backup owns any repo)"
   else
     source=$(agents_config_setup::_source)
     override=$(agents_config_setup::_source_protocol)
     protocol=$(fetch::resolve_protocol "$source" "$override")
     logging::info "Seeding agents config dir ($dir) from $source"
-    fetch::into "$source" "$dir" "$protocol"
+    # shallow: the .git is stripped right after, so history is pure waste to fetch.
+    fetch::into "$source" "$dir" "$protocol" shallow
+    agents_config_setup::_strip_git "$dir"
   fi
+}
+
+# Drop the seeded dir's .git so the machine holds plain content, not a repo. Done
+# uniformly on every machine, with no "am I the committer" check: the backup
+# machine's git_backup reconstructs its own repo from the remote, so this module
+# needs no knowledge of who backs up. A cp/plain-dir seed has no .git, so the rm is
+# then a no-op. Also keeps a live .git off the mesh — git, not Syncthing, owns
+# version-control state.
+agents_config_setup::_strip_git() {
+  local dir="$1"
+  rm -rf "$dir/.git"
+  logging::debug "agents_config_setup: stripped $dir/.git (plain content dir)"
 }
 
 # The canonical agents config dir — the shared key this module owns. Public so
