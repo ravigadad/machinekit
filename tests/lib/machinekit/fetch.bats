@@ -57,11 +57,17 @@ setup() {
 # --- fetch::into ---
 
 @test "into dispatches to git clone when protocol is git" {
-  mktest::stub_function fetch::_git "https://github.com/user/repo" "/dest"
+  mktest::stub_function fetch::_git "https://github.com/user/repo" "/dest" ""
   mktest::stub_function fetch::_cp
   fetch::into "https://github.com/user/repo" "/dest" "git"
-  mktest::assert_stub_called fetch::_git "https://github.com/user/repo" "/dest"
+  mktest::assert_stub_called fetch::_git "https://github.com/user/repo" "/dest" ""
   mktest::assert_stub_not_called fetch::_cp
+}
+
+@test "into forwards a shallow request to the git path" {
+  mktest::stub_function fetch::_git "https://github.com/user/repo" "/dest" "shallow"
+  fetch::into "https://github.com/user/repo" "/dest" "git" "shallow"
+  mktest::assert_stub_called fetch::_git "https://github.com/user/repo" "/dest" "shallow"
 }
 
 @test "into dispatches to cp when protocol is cp" {
@@ -84,9 +90,9 @@ setup() {
   mktest::stub_function fetch::_is_url "https://github.com/user/bp"
   mktest::stub_function fetch::_resolve_source_path
   STUB_RETURN=1 mktest::stub_function fetch::_provision_ssh_for_clone
-  mktest::stub_function fetch::_clone_with_recovery "https://github.com/user/bp" "$BATS_TEST_TMPDIR/dest" "0"
+  mktest::stub_function fetch::_clone_with_recovery "https://github.com/user/bp" "$BATS_TEST_TMPDIR/dest" "0" ""
   fetch::_git "https://github.com/user/bp" "$BATS_TEST_TMPDIR/dest"
-  mktest::assert_stub_called fetch::_clone_with_recovery "https://github.com/user/bp" "$BATS_TEST_TMPDIR/dest" "0"
+  mktest::assert_stub_called fetch::_clone_with_recovery "https://github.com/user/bp" "$BATS_TEST_TMPDIR/dest" "0" ""
   mktest::assert_stub_not_called fetch::_resolve_source_path
 }
 
@@ -94,18 +100,27 @@ setup() {
   STUB_RETURN=1 mktest::stub_function fetch::_is_url "./myrepo"
   STUB_OUTPUT="/abs/myrepo" mktest::stub_function fetch::_resolve_source_path "./myrepo"
   STUB_RETURN=1 mktest::stub_function fetch::_provision_ssh_for_clone
-  mktest::stub_function fetch::_clone_with_recovery "/abs/myrepo" "$BATS_TEST_TMPDIR/dest" "0"
+  mktest::stub_function fetch::_clone_with_recovery "/abs/myrepo" "$BATS_TEST_TMPDIR/dest" "0" ""
   fetch::_git "./myrepo" "$BATS_TEST_TMPDIR/dest"
-  mktest::assert_stub_called fetch::_clone_with_recovery "/abs/myrepo" "$BATS_TEST_TMPDIR/dest" "0"
+  mktest::assert_stub_called fetch::_clone_with_recovery "/abs/myrepo" "$BATS_TEST_TMPDIR/dest" "0" ""
 }
 
 @test "_git tells recovery a key was provisioned when _provision_ssh_for_clone succeeds" {
   mktest::stub_function fetch::_is_url "https://github.com/user/bp"
   mktest::stub_function fetch::_resolve_source_path
   mktest::stub_function fetch::_provision_ssh_for_clone
-  mktest::stub_function fetch::_clone_with_recovery "https://github.com/user/bp" "$BATS_TEST_TMPDIR/dest" "1"
+  mktest::stub_function fetch::_clone_with_recovery "https://github.com/user/bp" "$BATS_TEST_TMPDIR/dest" "1" ""
   fetch::_git "https://github.com/user/bp" "$BATS_TEST_TMPDIR/dest"
-  mktest::assert_stub_called fetch::_clone_with_recovery "https://github.com/user/bp" "$BATS_TEST_TMPDIR/dest" "1"
+  mktest::assert_stub_called fetch::_clone_with_recovery "https://github.com/user/bp" "$BATS_TEST_TMPDIR/dest" "1" ""
+}
+
+@test "_git forwards a shallow request to the clone" {
+  mktest::stub_function fetch::_is_url "https://github.com/user/bp"
+  mktest::stub_function fetch::_resolve_source_path
+  STUB_RETURN=1 mktest::stub_function fetch::_provision_ssh_for_clone
+  mktest::stub_function fetch::_clone_with_recovery "https://github.com/user/bp" "$BATS_TEST_TMPDIR/dest" "0" "shallow"
+  fetch::_git "https://github.com/user/bp" "$BATS_TEST_TMPDIR/dest" "shallow"
+  mktest::assert_stub_called fetch::_clone_with_recovery "https://github.com/user/bp" "$BATS_TEST_TMPDIR/dest" "0" "shallow"
 }
 
 # --- fetch::_provision_ssh_for_clone ---
@@ -145,11 +160,29 @@ setup() {
   mktest::assert_stub_not_called fetch::_handle_clone_failure
 }
 
+@test "_clone_with_recovery adds --depth 1 for a shallow clone" {
+  mktest::stub_function git "clone" "--depth" "1" "--" "git@github.com:user/bp" "$BATS_TEST_TMPDIR/dest"
+  mktest::stub_function fetch::_handle_clone_failure
+  fetch::_clone_with_recovery "git@github.com:user/bp" "$BATS_TEST_TMPDIR/dest" "0" "shallow"
+  TIMES=1 mktest::assert_stub_called git "clone" "--depth" "1" "--" "git@github.com:user/bp" "$BATS_TEST_TMPDIR/dest"
+  mktest::assert_stub_not_called fetch::_handle_clone_failure
+}
+
 @test "_clone_with_recovery calls _handle_clone_failure and retries on git failure" {
   STUB_RETURN=1 mktest::stub_function git "clone" "--" "git@github.com:user/bp" "$BATS_TEST_TMPDIR/dest"
   mktest::stub_function fetch::_handle_clone_failure
   run ! fetch::_clone_with_recovery "git@github.com:user/bp" "$BATS_TEST_TMPDIR/dest" "0"
   TIMES=2 mktest::assert_stub_called git "clone" "--" "git@github.com:user/bp" "$BATS_TEST_TMPDIR/dest"
+  mktest::assert_stub_called fetch::_handle_clone_failure
+}
+
+@test "_clone_with_recovery keeps --depth 1 on the retry clone for a shallow fetch" {
+  STUB_RETURN=1 mktest::stub_function git "clone" "--depth" "1" "--" "git@github.com:user/bp" "$BATS_TEST_TMPDIR/dest"
+  mktest::stub_function fetch::_handle_clone_failure
+  run ! fetch::_clone_with_recovery "git@github.com:user/bp" "$BATS_TEST_TMPDIR/dest" "0" "shallow"
+  # Both the first attempt and the post-recovery retry must carry --depth 1; dropping
+  # it from the retry would silently full-clone a shallow-requesting caller.
+  TIMES=2 mktest::assert_stub_called git "clone" "--depth" "1" "--" "git@github.com:user/bp" "$BATS_TEST_TMPDIR/dest"
   mktest::assert_stub_called fetch::_handle_clone_failure
 }
 

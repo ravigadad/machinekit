@@ -23,12 +23,12 @@ setup() {
   STUB_OUTPUT="git" mktest::stub_function fetch::resolve_protocol "https://github.com/user/bp" ""
   mktest::stub_function context::set "blueprints.source_protocol" "git"
   mktest::stub_function blueprints::_prepare_dest
-  mktest::stub_function fetch::into "https://github.com/user/bp" "$BATS_TEST_TMPDIR/tmp-dest" "git"
+  mktest::stub_function fetch::into "https://github.com/user/bp" "$BATS_TEST_TMPDIR/tmp-dest" "git" "shallow"
   mktest::stub_function input::is_dry_run
   blueprints::fetch
   mktest::assert_stub_called context::set "blueprints.source_protocol" "git"
   mktest::assert_stub_called_in_order blueprints::_prepare_dest
-  mktest::assert_stub_called_in_order fetch::into "https://github.com/user/bp" "$BATS_TEST_TMPDIR/tmp-dest" "git"
+  mktest::assert_stub_called_in_order fetch::into "https://github.com/user/bp" "$BATS_TEST_TMPDIR/tmp-dest" "git" "shallow"
 }
 
 @test "fetch honors an explicit protocol override and does not cache it" {
@@ -38,10 +38,10 @@ setup() {
   STUB_OUTPUT="cp" mktest::stub_function fetch::resolve_protocol "/local/bp" "cp"
   mktest::stub_function context::set
   mktest::stub_function blueprints::_prepare_dest
-  mktest::stub_function fetch::into "/local/bp" "$BATS_TEST_TMPDIR/tmp-dest" "cp"
+  mktest::stub_function fetch::into "/local/bp" "$BATS_TEST_TMPDIR/tmp-dest" "cp" "shallow"
   mktest::stub_function input::is_dry_run
   blueprints::fetch
-  mktest::assert_stub_called fetch::into "/local/bp" "$BATS_TEST_TMPDIR/tmp-dest" "cp"
+  mktest::assert_stub_called fetch::into "/local/bp" "$BATS_TEST_TMPDIR/tmp-dest" "cp" "shallow"
   mktest::assert_stub_not_called context::set
 }
 

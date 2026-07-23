@@ -28,7 +28,9 @@ blueprints::fetch() {
 
   blueprints::_prepare_dest
   logging::step "Fetching blueprints ($protocol): $source"
-  fetch::into "$source" "$_MK_BLUEPRINTS_DIR" "$protocol"
+  # shallow: the cached source is ephemeral (re-fetched every apply, read as a tree),
+  # so its history is never used.
+  fetch::into "$source" "$_MK_BLUEPRINTS_DIR" "$protocol" shallow
 
   if ! input::is_dry_run; then
     mkdir -p "$(dirname "$MACHINEKIT_BLUEPRINTS_DIR")"

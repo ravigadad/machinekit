@@ -43,27 +43,30 @@ fetch::resolve_protocol() {
   printf '%s\n' "$protocol"
 }
 
-# fetch::into SOURCE DEST PROTOCOL
+# fetch::into SOURCE DEST PROTOCOL [SHALLOW]
 # Lays SOURCE down at DEST using an already-resolved PROTOCOL. DEST must not be a
-# non-empty directory (git clone refuses one); cp creates it.
+# non-empty directory (git clone refuses one); cp creates it. A non-empty SHALLOW
+# requests a history-less git clone (--depth 1) — for consumers that read only the
+# current tree and never its history; ignored on the cp path, which carries no
+# history to shorten.
 fetch::into() {
-  local source="$1" dest="$2" protocol="$3"
+  local source="$1" dest="$2" protocol="$3" shallow="${4:-}"
   case "$protocol" in
-    git) fetch::_git "$source" "$dest" ;;
+    git) fetch::_git "$source" "$dest" "$shallow" ;;
     cp)  fetch::_cp  "$source" "$dest" ;;
     *)   lifecycle::fail "Unknown fetch protocol: $protocol (valid: git, cp)" ;;
   esac
 }
 
 fetch::_git() {
-  local source="$1" dest="$2" abs_source="$1"
+  local source="$1" dest="$2" shallow="${3:-}" abs_source="$1"
   fetch::_is_url "$source" || abs_source=$(fetch::_resolve_source_path "$source")
 
   local ssh_was_setup=0
   fetch::_provision_ssh_for_clone && ssh_was_setup=1
 
   logging::info "Cloning $abs_source → $dest"
-  fetch::_clone_with_recovery "$abs_source" "$dest" "$ssh_was_setup"
+  fetch::_clone_with_recovery "$abs_source" "$dest" "$ssh_was_setup" "$shallow"
 }
 
 # Provision an SSH key up front when the user passed key flags, so SSH URLs work
@@ -89,13 +92,20 @@ fetch::_provision_ssh_for_clone() {
 # (set up SSH and retry once) or fail. ssh_was_setup says whether a key was
 # already provisioned, so a repeat auth failure is terminal rather than retried.
 fetch::_clone_with_recovery() {
-  local abs_source="$1" dest="$2" ssh_was_setup="$3"
+  local abs_source="$1" dest="$2" ssh_was_setup="$3" shallow="${4:-}"
+
+  # --depth 1 when the caller wants only the current tree, not history. Empty array
+  # expands to nothing on a full clone, so the git line stays the same either way.
+  local depth_args=()
+  if [ -n "$shallow" ]; then
+    depth_args=(--depth 1)
+  fi
 
   # Capture stderr so we can classify auth vs network vs not-found on failure.
   # Progress output is sacrificed; on success the output is discarded silently.
   local stderr_file clone_rc=0
   stderr_file=$(mktemp)
-  git clone -- "$abs_source" "$dest" 2>"$stderr_file" || clone_rc=$?
+  git clone "${depth_args[@]}" -- "$abs_source" "$dest" 2>"$stderr_file" || clone_rc=$?
   if [ "$clone_rc" -eq 0 ]; then
     rm -f "$stderr_file"
     return 0
@@ -107,7 +117,7 @@ fetch::_clone_with_recovery() {
   printf '%s\n' "$stderr_out" >&2
   fetch::_handle_clone_failure "$stderr_out" "$abs_source" "$ssh_was_setup"
   logging::step "Retrying clone after SSH key setup..."
-  git clone -- "$abs_source" "$dest"
+  git clone "${depth_args[@]}" -- "$abs_source" "$dest"
 }
 
 # fetch::_classify_clone_error STDERR_OUT
