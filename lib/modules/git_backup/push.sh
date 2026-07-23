@@ -48,15 +48,67 @@ push::fail() {
 }
 
 # Make the dir a repo pointed at the remote. Cloned dirs already are; a dir that
-# arrived another way (e.g. synced in) may not be, so initialize idempotently.
+# arrived another way — synced in, or seeded then stripped of its .git — is not, so
+# initialize idempotently. A freshly-initialized repo must then anchor onto origin's
+# history before anything commits (see push::anchor_to_origin).
 push::ensure_repo() {
-  local remote="$1"
-  [ -d .git ] || push::git init -q
+  local remote="$1" fresh=0
+  if [ ! -d .git ]; then
+    push::git init -q
+    fresh=1
+  fi
   if push::git remote get-url origin >/dev/null 2>&1; then
     push::git remote set-url origin "$remote"
   else
     push::git remote add origin "$remote"
   fi
+  if [ "$fresh" -eq 1 ]; then
+    push::anchor_to_origin
+  fi
+}
+
+# Anchor a freshly-initialized repo onto origin's history so its first commit is a
+# descendant, not a root sharing no ancestry (which every push would add/add-conflict
+# on — seen with a stripped dir carrying a pending edit, or a backup machine rebuilt
+# from a mesh that ran ahead of origin). Move HEAD onto origin's branch *by name* —
+# the local init.defaultBranch need not match the branch origin's history lives on —
+# then reset --mixed onto it: index reset to origin, working tree untouched, so
+# commit_local records real diffs on top. No reachable origin branch yet (first-ever
+# backup) → leave the fresh init alone; push takes the initial-push path.
+push::anchor_to_origin() {
+  local branch
+  branch=$(push::origin_head_branch) || return 0
+  push::git fetch -q origin "$branch" 2>/dev/null || return 0
+  push::git rev-parse --verify -q "origin/$branch" >/dev/null || return 0
+  push::git symbolic-ref HEAD "refs/heads/$branch"
+  push::git reset --mixed -q "origin/$branch"
+  push::restore_origin_only_files
+}
+
+# After the index is anchored to origin, the working tree still lacks any file that
+# exists on origin but not in the seeded/synced content — an external writer's commit
+# this machine hasn't received yet. Left alone, commit_local's `git add -A` reads
+# those as deletions and the backup silently drops them from origin. Restore just
+# those files (index → working tree), so the reconstituted commit is origin's content
+# overlaid with local changes, never a deletion of origin-only files. Files the
+# working tree actually modified are not "deleted", so they're left as-is — the local
+# edit still wins; working-tree-only files stay as additions.
+push::restore_origin_only_files() {
+  push::git ls-files -z --deleted | while IFS= read -r -d '' path; do
+    push::git checkout -q -- "$path"
+  done
+}
+
+# Origin's default branch, read from its HEAD symref. The authority for which branch
+# origin's history lives on is origin itself — not the local init.defaultBranch, which
+# a headless machine (no global git config) leaves at git's compiled-in default.
+# Nonzero when origin is unreachable or has no branches yet.
+push::origin_head_branch() {
+  local branch
+  branch=$(push::git ls-remote --symref origin HEAD 2>/dev/null \
+    | awk '$1 == "ref:" { sub("refs/heads/", "", $2); print $2; exit }')
+  [ -n "$branch" ] || return 1
+  printf '%s\n' "$branch"
 }
 
 push::current_branch() {

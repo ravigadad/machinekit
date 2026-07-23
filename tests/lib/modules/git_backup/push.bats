@@ -175,6 +175,81 @@ origin_has_file() {
   grep -q "origin version" "$verify/base.txt"
 }
 
+# --- reconstitution (.git stripped, e.g. by agents_config_setup) ---
+
+@test "reconstitutes a .git-deleted dir onto origin, committing a pending edit as a descendant" {
+  seed_work
+  rm -rf "$WORK/.git"                     # agents_config_setup stripped it
+  printf 'edited\n' > "$WORK/base.txt"    # a pending edit: working tree ahead of origin
+  run_backup
+  # Anchored to origin's history, so the edit commits on top of it rather than as an
+  # unrelated root that add/add-conflicts (which is what the old bare `git init` did).
+  [ "$status" -eq 0 ]
+  [ ! -f "$NOTIFY_LOG" ]
+  origin_has_file base.txt
+  local verify="$BATS_TEST_TMPDIR/verify-rec"
+  tgit clone -q "$ORIGIN" "$verify"
+  grep -q "edited" "$verify/base.txt"
+  # Linear history: origin's base commit, then the backup commit — not an orphan root.
+  [ "$(tgit -C "$verify" rev-list --count HEAD)" -eq 2 ]
+}
+
+@test "reconstitution preserves origin files the working tree lacks (no clobber)" {
+  # The working tree is BEHIND origin: an external writer pushed external.txt to
+  # origin, but this machine's (stripped) content predates it. The backup must
+  # commit the local edit as a descendant WITHOUT deleting origin's external.txt —
+  # reset --mixed leaves the working tree missing that file, so a naive `add -A`
+  # would stage its deletion and fast-forward it away.
+  seed_work
+  advance_origin external.txt "from-elsewhere"   # another writer adds a file to origin
+  rm -rf "$WORK/.git"                             # stripped; WORK still lacks external.txt
+  printf 'edited\n' > "$WORK/base.txt"            # a local edit
+  run_backup
+  [ "$status" -eq 0 ]
+  [ ! -f "$NOTIFY_LOG" ]
+  local verify="$BATS_TEST_TMPDIR/verify-noclobber"
+  tgit clone -q "$ORIGIN" "$verify"
+  grep -q "edited" "$verify/base.txt"             # the local edit landed
+  grep -q "from-elsewhere" "$verify/external.txt" # origin's external file was NOT clobbered
+}
+
+@test "anchors onto origin's branch even when the local init default differs" {
+  # Origin's history lives on main; the reconstituting machine's fresh `git init`
+  # defaults to master (forced here, independent of the host's ambient default). The
+  # anchor must resolve origin's actual branch, not the local init default — otherwise
+  # it commits an orphan master root and pushes it as a divergent branch, never
+  # advancing origin's main.
+  local origin_main="$BATS_TEST_TMPDIR/origin-main.git"
+  git init --bare -b main -q "$origin_main"
+  local seed="$BATS_TEST_TMPDIR/seed-main"
+  tgit clone -q "$origin_main" "$seed" 2>/dev/null
+  printf 'base\n' > "$seed/base.txt"
+  tgit -C "$seed" add -A
+  tgit -C "$seed" commit -q -m base
+  tgit -C "$seed" push -q -u origin main
+
+  mkdir -p "$WORK"                        # a stripped content dir: no .git
+  printf 'edited\n' > "$WORK/base.txt"    # a pending edit ahead of origin
+
+  # Force the script's fresh `git init` to master regardless of the host default, and
+  # neutralize system config so the mismatch with origin's main is guaranteed.
+  local master_config="$BATS_TEST_TMPDIR/gitconfig-master"
+  printf '[init]\n\tdefaultBranch = master\n' > "$master_config"
+  printf '%s\t%s\t%s\n' "$WORK" "$origin_main" "" > "$MANIFEST"
+  run env MK_GIT_BACKUP_MANIFEST="$MANIFEST" MK_GIT_BACKUP_NOTIFY="$NOTIFY" \
+    GIT_CONFIG_GLOBAL="$master_config" GIT_CONFIG_SYSTEM=/dev/null bash "$SCRIPT"
+
+  [ "$status" -eq 0 ]
+  [ ! -f "$NOTIFY_LOG" ]
+  # Origin's main advanced with the edit as a descendant — 2 commits, no orphan.
+  local verify="$BATS_TEST_TMPDIR/verify-branch"
+  tgit clone -q "$origin_main" "$verify"
+  grep -q "edited" "$verify/base.txt"
+  [ "$(tgit -C "$verify" rev-list --count main)" -eq 2 ]
+  # No stray master branch was pushed to origin.
+  [ -z "$(git -C "$origin_main" for-each-ref --format='%(refname:short)' refs/heads/master)" ]
+}
+
 # --- missing dir ---
 
 @test "fails and notifies when a folder dir does not exist" {
