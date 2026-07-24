@@ -242,10 +242,11 @@ git_backup::_gitignore_patterns() {
   } | awk 'NF && !seen[$0]++'
 }
 
-# Junk a backup repo should never carry, including Syncthing's version buffer
-# (.stversions/) — git would otherwise commit it.
+# Junk a backup repo should never carry. Syncthing keeps its own machine-local
+# artifacts (.stfolder/, .stignore, .stversions/) out of the mesh; git would
+# otherwise commit them into the shared backup, so exclude them here too.
 git_backup::_default_ignores() {
-  printf '%s\n' '.DS_Store' '._*' '.stversions/'
+  printf '%s\n' '.DS_Store' '._*' '.stversions/' '.stignore' '.stfolder/'
 }
 
 git_backup::_install_push_script() {

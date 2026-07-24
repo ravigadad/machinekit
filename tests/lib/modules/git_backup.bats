@@ -366,13 +366,15 @@ setup() {
 @test "_gitignore_patterns de-duplicates, keeping the user's occurrence" {
   run git_backup::_gitignore_patterns '{"ignore_patterns":[".stversions/"]}'
   [ "${lines[0]}" = ".stversions/" ]
-  [ "${#lines[@]}" -eq 3 ]
+  [ "${#lines[@]}" -eq 5 ]
 }
 
-@test "_default_ignores includes the Syncthing version buffer" {
+@test "_default_ignores includes Syncthing's machine-local artifacts" {
   run git_backup::_default_ignores
   [[ "$output" == *".DS_Store"* ]]
   [[ "$output" == *".stversions/"* ]]
+  [[ "$output" == *".stignore"* ]]
+  [[ "$output" == *".stfolder/"* ]]
 }
 
 # --- _install_push_script ---

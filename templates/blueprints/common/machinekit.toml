@@ -295,9 +295,10 @@
 # # notify = "/path/to/notify-hook" # run with a message on trouble; default: logger/journald
 # #
 # # Each folder needs a `path` and a `remote`. It also gets a machinekit-managed
-# # .gitignore by default, holding .DS_Store and — importantly — .stversions/
-# # (Syncthing's version buffer), which git would otherwise commit. So pairing the
-# # syncthing folder above with this one just works; you don't list .stversions/.
+# # .gitignore by default, holding OS cruft plus Syncthing's own machine-local
+# # artifacts (version buffer, folder marker, ignore file) — the mesh keeps these
+# # to itself but git would otherwise commit them. So pairing the syncthing folder
+# # above with this one just works; you don't list Syncthing's artifacts yourself.
 # [[module.git_backup.folders]]
 # path = "~/.agents"
 # remote = "git@github.com:you/agents.git"
