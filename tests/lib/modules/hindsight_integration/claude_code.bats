@@ -70,7 +70,8 @@ setup() {
   local dest; dest="$(mktemp -d)/sub/claude-code.json"
   STUB_OUTPUT="$dest" mktest::stub_function hindsight_integration::claude_code::_config_path
   mktest::stub_function hindsight_integration::claude_code::_register_mcp_servers
-  hindsight_integration::claude_code::write_config "http://memory-server:8888" "tok123" "work" $'coding\npersonal' $'coding\nmusic'
+  STUB_OUTPUT='{}' mktest::stub_function hindsight_integration::claude_code::_retain_config_json '{}'
+  hindsight_integration::claude_code::write_config "http://memory-server:8888" "tok123" "work" $'coding\npersonal' $'coding\nmusic' '{}'
   [ "$(mktest::file_mode "$dest")" = "600" ]
   [ "$(jq -r '.hindsightApiUrl' "$dest")" = "http://memory-server:8888" ]
   [ "$(jq -r '.hindsightApiToken' "$dest")" = "tok123" ]
@@ -85,8 +86,43 @@ setup() {
   local dest; dest="$(mktemp -d)/sub/claude-code.json"
   STUB_OUTPUT="$dest" mktest::stub_function hindsight_integration::claude_code::_config_path
   mktest::stub_function hindsight_integration::claude_code::_register_mcp_servers
-  hindsight_integration::claude_code::write_config "http://memory-server:8888" "tok123" "coding" "" ""
+  STUB_OUTPUT='{}' mktest::stub_function hindsight_integration::claude_code::_retain_config_json '{}'
+  hindsight_integration::claude_code::write_config "http://memory-server:8888" "tok123" "coding" "" "" '{}'
   [ "$(jq -c '.recallAdditionalBanks' "$dest")" = '[]' ]
+}
+
+@test "write_config folds the translated retain tuning into the written config" {
+  local dest; dest="$(mktemp -d)/sub/claude-code.json"
+  STUB_OUTPUT="$dest" mktest::stub_function hindsight_integration::claude_code::_config_path
+  mktest::stub_function hindsight_integration::claude_code::_register_mcp_servers
+  STUB_OUTPUT='{"fakeRetainKey":"fake-value"}' mktest::stub_function \
+    hindsight_integration::claude_code::_retain_config_json '{"retain_mode":"chunked"}'
+  hindsight_integration::claude_code::write_config "http://memory-server:8888" "tok123" "coding" "" "" '{"retain_mode":"chunked"}'
+  [ "$(jq -r '.fakeRetainKey' "$dest")" = "fake-value" ]
+  # The connection settings survive the merge.
+  [ "$(jq -r '.hindsightApiUrl' "$dest")" = "http://memory-server:8888" ]
+}
+
+# --- _retain_config_json ---
+
+@test "_retain_config_json translates machinekit's keys to the plugin's schema" {
+  run hindsight_integration::claude_code::_retain_config_json \
+    '{"retain_mode":"chunked","retain_every_n_turns":10,"retain_overlap_turns":2}'
+  [ "$(jq -r '.retainMode' <<< "$output")" = "chunked" ]
+  [ "$(jq -r '.retainEveryNTurns' <<< "$output")" = "10" ]
+  [ "$(jq -r '.retainOverlapTurns' <<< "$output")" = "2" ]
+  # Translation must not stringify the counts the plugin does arithmetic on.
+  [ "$(jq -r '.retainEveryNTurns | type' <<< "$output")" = "number" ]
+}
+
+@test "_retain_config_json omits the keys absent from the retain settings" {
+  run hindsight_integration::claude_code::_retain_config_json '{"retain_mode":"chunked"}'
+  [ "$(jq -c 'keys' <<< "$output")" = '["retainMode"]' ]
+}
+
+@test "_retain_config_json is an empty object when no retain tuning is set" {
+  run hindsight_integration::claude_code::_retain_config_json '{}'
+  [ "$(jq -c '.' <<< "$output")" = '{}' ]
 }
 
 # --- _register_mcp_servers ---

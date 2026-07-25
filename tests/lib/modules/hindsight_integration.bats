@@ -56,6 +56,7 @@ setup() {
   STUB_OUTPUT="" mktest::stub_function hindsight_integration::_server_url
   STUB_OUTPUT="memory-server" mktest::stub_function hindsight_integration::_server_host
   mktest::stub_function hindsight_integration::_validate_bank_configs
+  mktest::stub_function hindsight_integration::_validate_retain_settings
   STUB_OUTPUT=$'foo\nbar' mktest::stub_function hindsight_integration::_integrations
   mktest::stub_function hindsight_integration::_is_available "foo"
   mktest::stub_function hindsight_integration::_is_available "bar"
@@ -64,8 +65,10 @@ setup() {
   STUB_EXIT=1 mktest::stub_function lifecycle::fail
   hindsight_integration::preflight
   mktest::assert_stub_not_called lifecycle::fail
-  # Bank-config validation is an unconditional step of the flow (no branch to skip).
+  # Bank-config and retain validation are unconditional steps of the flow (no
+  # branch to skip).
   mktest::assert_stub_called hindsight_integration::_validate_bank_configs
+  mktest::assert_stub_called hindsight_integration::_validate_retain_settings
   mktest::assert_stub_called hindsight_integration::foo::preflight
   mktest::assert_stub_called hindsight_integration::bar::preflight
 }
@@ -74,6 +77,7 @@ setup() {
   STUB_OUTPUT="" mktest::stub_function hindsight_integration::_server_url
   STUB_OUTPUT="memory-server" mktest::stub_function hindsight_integration::_server_host
   mktest::stub_function hindsight_integration::_validate_bank_configs
+  mktest::stub_function hindsight_integration::_validate_retain_settings
   STUB_OUTPUT="foo" mktest::stub_function hindsight_integration::_integrations
   mktest::stub_function hindsight_integration::_is_available "foo"
   STUB_EXIT=1 mktest::stub_function lifecycle::fail
@@ -88,6 +92,7 @@ setup() {
   STUB_OUTPUT="https://hindsight.example/api" mktest::stub_function hindsight_integration::_server_url
   STUB_OUTPUT="" mktest::stub_function hindsight_integration::_server_host
   mktest::stub_function hindsight_integration::_validate_bank_configs
+  mktest::stub_function hindsight_integration::_validate_retain_settings
   STUB_OUTPUT="foo" mktest::stub_function hindsight_integration::_integrations
   mktest::stub_function hindsight_integration::_is_available "foo"
   mktest::stub_function hindsight_integration::foo::preflight
@@ -108,6 +113,7 @@ setup() {
 @test "preflight fails on an unknown integration" {
   STUB_OUTPUT="memory-server" mktest::stub_function hindsight_integration::_server_host
   mktest::stub_function hindsight_integration::_validate_bank_configs
+  mktest::stub_function hindsight_integration::_validate_retain_settings
   STUB_OUTPUT="bogus" mktest::stub_function hindsight_integration::_integrations
   STUB_RETURN=1 mktest::stub_function hindsight_integration::_is_available "bogus"
   STUB_OUTPUT="bar" mktest::stub_function hindsight_integration::_available
@@ -171,9 +177,10 @@ setup() {
   STUB_OUTPUT="coding" mktest::stub_function hindsight_integration::_bank_id_prefix
   STUB_OUTPUT=$'coding\npersonal' mktest::stub_function hindsight_integration::_auto_recall_banks
   STUB_OUTPUT=$'coding\nmusic' mktest::stub_function hindsight_integration::_tool_use_banks
-  mktest::stub_function hindsight_integration::foo::write_config "http://memory-server:8888" "TOK" "coding" $'coding\npersonal' $'coding\nmusic'
+  STUB_OUTPUT='{"retain_mode":"chunked"}' mktest::stub_function hindsight_integration::_retain_settings_json
+  mktest::stub_function hindsight_integration::foo::write_config "http://memory-server:8888" "TOK" "coding" $'coding\npersonal' $'coding\nmusic' '{"retain_mode":"chunked"}'
   hindsight_integration::_ensure_configs
-  mktest::assert_stub_called hindsight_integration::foo::write_config "http://memory-server:8888" "TOK" "coding" $'coding\npersonal' $'coding\nmusic'
+  mktest::assert_stub_called hindsight_integration::foo::write_config "http://memory-server:8888" "TOK" "coding" $'coding\npersonal' $'coding\nmusic' '{"retain_mode":"chunked"}'
 }
 
 @test "_ensure_configs resolves the token once and shares it across integrations" {
@@ -186,14 +193,15 @@ setup() {
   STUB_OUTPUT="coding" mktest::stub_function hindsight_integration::_bank_id_prefix
   STUB_OUTPUT=$'coding\npersonal' mktest::stub_function hindsight_integration::_auto_recall_banks
   STUB_OUTPUT=$'coding\nmusic' mktest::stub_function hindsight_integration::_tool_use_banks
-  mktest::stub_function hindsight_integration::foo::write_config "http://memory-server:8888" "TOK" "coding" $'coding\npersonal' $'coding\nmusic'
-  mktest::stub_function hindsight_integration::bar::write_config "http://memory-server:8888" "TOK" "coding" $'coding\npersonal' $'coding\nmusic'
+  STUB_OUTPUT='{"retain_mode":"chunked"}' mktest::stub_function hindsight_integration::_retain_settings_json
+  mktest::stub_function hindsight_integration::foo::write_config "http://memory-server:8888" "TOK" "coding" $'coding\npersonal' $'coding\nmusic' '{"retain_mode":"chunked"}'
+  mktest::stub_function hindsight_integration::bar::write_config "http://memory-server:8888" "TOK" "coding" $'coding\npersonal' $'coding\nmusic' '{"retain_mode":"chunked"}'
   mktest::stub_function hindsight::secrets::provided "tenant_api_key"
   hindsight_integration::_ensure_configs
   # Resolved exactly once, and both integrations got the same token.
   TIMES=1 mktest::assert_stub_called hindsight::secrets::resolve "tenant_api_key"
-  mktest::assert_stub_called hindsight_integration::foo::write_config "http://memory-server:8888" "TOK" "coding" $'coding\npersonal' $'coding\nmusic'
-  mktest::assert_stub_called hindsight_integration::bar::write_config "http://memory-server:8888" "TOK" "coding" $'coding\npersonal' $'coding\nmusic'
+  mktest::assert_stub_called hindsight_integration::foo::write_config "http://memory-server:8888" "TOK" "coding" $'coding\npersonal' $'coding\nmusic' '{"retain_mode":"chunked"}'
+  mktest::assert_stub_called hindsight_integration::bar::write_config "http://memory-server:8888" "TOK" "coding" $'coding\npersonal' $'coding\nmusic' '{"retain_mode":"chunked"}'
 }
 
 # --- _is_available / _available ---
@@ -303,6 +311,124 @@ setup() {
   run hindsight_integration::_tool_use_banks
   [ "$status" -eq 0 ]
   [ -z "$output" ]
+}
+
+@test "_retain_mode reads module.hindsight_integration.retain_mode, defaulting to chunked" {
+  STUB_OUTPUT="full-session" mktest::stub_function config::get \
+    "module.hindsight_integration.retain_mode" --default "chunked"
+  run hindsight_integration::_retain_mode
+  [ "$output" = "full-session" ]
+}
+
+@test "_retain_every_n_turns reads retain_every_n_turns with its json type intact" {
+  STUB_OUTPUT="10" mktest::stub_function config::get_json \
+    "module.hindsight_integration.retain_every_n_turns" "null"
+  run hindsight_integration::_retain_every_n_turns
+  [ "$output" = "10" ]
+}
+
+@test "_retain_overlap_turns reads retain_overlap_turns with its json type intact" {
+  STUB_OUTPUT="2" mktest::stub_function config::get_json \
+    "module.hindsight_integration.retain_overlap_turns" "null"
+  run hindsight_integration::_retain_overlap_turns
+  [ "$output" = "2" ]
+}
+
+@test "_retain_settings_json carries the configured tuning, turn counts as json numbers" {
+  STUB_OUTPUT="chunked" mktest::stub_function hindsight_integration::_retain_mode
+  STUB_OUTPUT="10" mktest::stub_function hindsight_integration::_retain_every_n_turns
+  STUB_OUTPUT="2" mktest::stub_function hindsight_integration::_retain_overlap_turns
+  run hindsight_integration::_retain_settings_json
+  [ "$(jq -r '.retain_mode' <<< "$output")" = "chunked" ]
+  [ "$(jq -r '.retain_every_n_turns' <<< "$output")" = "10" ]
+  [ "$(jq -r '.retain_overlap_turns' <<< "$output")" = "2" ]
+  # Numbers, not quoted strings: the consuming client does arithmetic on the
+  # turn counts, which a string value breaks.
+  [ "$(jq -r '.retain_every_n_turns | type' <<< "$output")" = "number" ]
+  [ "$(jq -r '.retain_overlap_turns | type' <<< "$output")" = "number" ]
+}
+
+@test "_retain_settings_json omits the turn counts the blueprint left unset" {
+  STUB_OUTPUT="chunked" mktest::stub_function hindsight_integration::_retain_mode
+  STUB_OUTPUT="null" mktest::stub_function hindsight_integration::_retain_every_n_turns
+  STUB_OUTPUT="null" mktest::stub_function hindsight_integration::_retain_overlap_turns
+  run hindsight_integration::_retain_settings_json
+  [ "$(jq -c 'keys' <<< "$output")" = '["retain_mode"]' ]
+}
+
+@test "_retain_settings_json is an empty object when nothing is set" {
+  STUB_OUTPUT="" mktest::stub_function hindsight_integration::_retain_mode
+  STUB_OUTPUT="null" mktest::stub_function hindsight_integration::_retain_every_n_turns
+  STUB_OUTPUT="null" mktest::stub_function hindsight_integration::_retain_overlap_turns
+  run hindsight_integration::_retain_settings_json
+  [ "$(jq -c '.' <<< "$output")" = '{}' ]
+}
+
+# --- _validate_retain_settings / _validate_retain_mode / _validate_turn_count ---
+
+@test "_validate_retain_settings checks the mode and both turn counts" {
+  STUB_OUTPUT="10" mktest::stub_function hindsight_integration::_retain_every_n_turns
+  STUB_OUTPUT="2" mktest::stub_function hindsight_integration::_retain_overlap_turns
+  mktest::stub_function hindsight_integration::_validate_retain_mode
+  mktest::stub_function hindsight_integration::_validate_turn_count "retain_every_n_turns" "10" "1"
+  mktest::stub_function hindsight_integration::_validate_turn_count "retain_overlap_turns" "2" "0"
+  hindsight_integration::_validate_retain_settings
+  mktest::assert_stub_called hindsight_integration::_validate_retain_mode
+  mktest::assert_stub_called hindsight_integration::_validate_turn_count "retain_every_n_turns" "10" "1"
+  mktest::assert_stub_called hindsight_integration::_validate_turn_count "retain_overlap_turns" "2" "0"
+}
+
+@test "_validate_retain_mode accepts each documented mode" {
+  STUB_EXIT=1 mktest::stub_function lifecycle::fail
+  STUB_OUTPUT="chunked" mktest::stub_function hindsight_integration::_retain_mode
+  hindsight_integration::_validate_retain_mode
+  mktest::assert_stub_not_called lifecycle::fail
+}
+
+@test "_validate_retain_mode accepts full-session" {
+  STUB_EXIT=1 mktest::stub_function lifecycle::fail
+  STUB_OUTPUT="full-session" mktest::stub_function hindsight_integration::_retain_mode
+  hindsight_integration::_validate_retain_mode
+  mktest::assert_stub_not_called lifecycle::fail
+}
+
+@test "_validate_retain_mode fails on a mode that is not one of the documented two" {
+  STUB_EXIT=1 mktest::stub_function lifecycle::fail
+  # snake_case against a hyphenated foreign schema — the plausible typo, and one
+  # that would otherwise mean whole-transcript retention without a word.
+  STUB_OUTPUT="full_session" mktest::stub_function hindsight_integration::_retain_mode
+  run ! hindsight_integration::_validate_retain_mode
+  MATCH="retain_mode.*full_session" mktest::assert_stub_called lifecycle::fail
+}
+
+@test "_validate_turn_count accepts a whole number at the minimum" {
+  STUB_EXIT=1 mktest::stub_function lifecycle::fail
+  hindsight_integration::_validate_turn_count "retain_every_n_turns" "1" "1"
+  mktest::assert_stub_not_called lifecycle::fail
+}
+
+@test "_validate_turn_count accepts an unset count" {
+  STUB_EXIT=1 mktest::stub_function lifecycle::fail
+  hindsight_integration::_validate_turn_count "retain_every_n_turns" "null" "1"
+  mktest::assert_stub_not_called lifecycle::fail
+}
+
+@test "_validate_turn_count fails on a count that is not a number" {
+  STUB_EXIT=1 mktest::stub_function lifecycle::fail
+  run ! hindsight_integration::_validate_turn_count "retain_every_n_turns" '"ten"' "1"
+  MATCH="retain_every_n_turns" mktest::assert_stub_called lifecycle::fail
+}
+
+@test "_validate_turn_count fails below the minimum" {
+  STUB_EXIT=1 mktest::stub_function lifecycle::fail
+  run ! hindsight_integration::_validate_turn_count "retain_every_n_turns" "0" "1"
+  MATCH="retain_every_n_turns" mktest::assert_stub_called lifecycle::fail
+}
+
+@test "_validate_turn_count fails on a fractional count" {
+  STUB_EXIT=1 mktest::stub_function lifecycle::fail
+  run ! hindsight_integration::_validate_turn_count "retain_overlap_turns" "2.5" "0"
+  MATCH="retain_overlap_turns" mktest::assert_stub_called lifecycle::fail
 }
 
 # --- post_apply (bank config) ---

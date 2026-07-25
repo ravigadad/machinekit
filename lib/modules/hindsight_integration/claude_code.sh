@@ -7,7 +7,8 @@
 #   install         — set up the agent's plugin/integration (idempotent)
 #   write_config    — point the agent at the server: write its config file and
 #                     register tools-bank MCP servers
-#                     (URL, TOKEN, BANK_ID_PREFIX, RECALL_BANKS, TOOLS_BANKS)
+#                     (URL, TOKEN, BANK_ID_PREFIX, RECALL_BANKS, TOOLS_BANKS,
+#                     RETAIN_SETTINGS)
 #   config_present  — whether that config already exists (for create-once)
 #
 # The plugin reads ~/.hindsight/claude-code.json and activates on startup; tool_use
@@ -57,24 +58,39 @@ hindsight_integration::claude_code::config_present() {
 # tools bank. recall_banks/tools_banks arrive newline-delimited. jq builds the
 # JSON so values are escaped correctly.
 hindsight_integration::claude_code::write_config() {
-  local url="$1" token="$2" prefix="$3" recall_banks="$4" tools_banks="$5"
-  local config_path dir recall_json
+  local url="$1" token="$2" prefix="$3" recall_banks="$4" tools_banks="$5" retain_settings="$6"
+  local config_path dir recall_json retain_json
   config_path="$(hindsight_integration::claude_code::_config_path)"
   dir="$(dirname "$config_path")"
   mkdir -p "$dir"
   chmod 700 "$dir"
   recall_json="$(printf '%s' "$recall_banks" | jq -Rsc 'split("\n") | map(select(length > 0))')"
+  retain_json="$(hindsight_integration::claude_code::_retain_config_json "$retain_settings")"
   jq -n --arg url "$url" --arg token "$token" --arg prefix "$prefix" \
-    --argjson recall "$recall_json" '{
+    --argjson recall "$recall_json" --argjson retain "$retain_json" '{
     hindsightApiUrl: $url,
     hindsightApiToken: $token,
     dynamicBankId: true,
     dynamicBankGranularity: ["project"],
     bankIdPrefix: $prefix,
     recallAdditionalBanks: $recall
-  }' > "$config_path"
+  } + $retain' > "$config_path"
   chmod 600 "$config_path"
   hindsight_integration::claude_code::_register_mcp_servers "$url" "$token" "$tools_banks"
+}
+
+# The plugin's config schema is camelCase, machinekit's blueprint keys are
+# snake_case. Translating here rather than in the shared layer keeps knowledge of
+# the foreign schema inside the submodule that owns the file it lands in. A key
+# the operator never set arrives absent and stays absent, so the plugin applies
+# its own default rather than one machinekit invented.
+hindsight_integration::claude_code::_retain_config_json() {
+  local retain_settings="$1"
+  jq -c '{
+    retainMode: .retain_mode,
+    retainEveryNTurns: .retain_every_n_turns,
+    retainOverlapTurns: .retain_overlap_turns
+  } | with_entries(select(.value != null))' <<< "$retain_settings"
 }
 
 # Register a single-bank MCP server per tools bank (idempotent). Each gives the

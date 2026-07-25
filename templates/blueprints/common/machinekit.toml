@@ -137,6 +137,30 @@
 # # (auto recall/retain). bank_id_prefix defaults to "coding".
 # # bank_id_prefix = "coding"
 # #
+# # How much conversation an agent sends to the server, and how often. An agent
+# # whose client has no equivalent setting ignores these.
+# #
+# # These land in an agent's config the first time machinekit writes it, and that
+# # write happens once — a machine whose agent config already exists keeps what it
+# # has, including the defaults below, no matter what you change here. Changing
+# # retention on an already-provisioned machine means editing its agent config
+# # directly, or deleting it and re-applying (see the note on regenerating below).
+# #
+# # retain_mode defaults to "chunked": each retain sends a sliding window of the
+# # most recent turns, so its cost stays flat however long the session runs. The
+# # alternative, "full-session", re-sends the whole conversation every time — the
+# # same early turns are paid for again and again, and a long session gets
+# # expensive fast. Set it only if you want that whole-transcript retention.
+# # retain_mode = "full-session"
+# #
+# # The turn counts are unset by default, leaving the agent's client to its own
+# # cadence. retain_every_n_turns is how often a retain fires; retain_overlap_turns
+# # adds that many earlier turns to each window so context isn't cut off at the
+# # seam between them. A cadence of one turn per retain leaves no window to slide,
+# # and clients fall back to sending the whole transcript.
+# # retain_every_n_turns = 10
+# # retain_overlap_turns = 2
+# #
 # # Extra banks beyond the per-project one, by name. A bank in auto_recall_banks
 # # is folded into every session's recall (read-only); a bank in tool_use_banks is
 # # exposed as its own MCP server with read/write tools (a per-session context

@@ -31,6 +31,12 @@ unset _hi_submodule
 # exact --prompt argument (machinekit-testing-principles exact-arg stubbing).
 _HINDSIGHT_INTEGRATION_CONSENT_PROMPT="Apply bank missions/dispositions to the Hindsight tenant now? (y/n)"
 
+# The retention modes machinekit knows how to mean. Clients match the mode by
+# exact string and treat anything unrecognized as whole-transcript retention, so
+# an unvalidated typo would quietly land on the costly behaviour the chunked
+# default exists to avoid.
+_HINDSIGHT_INTEGRATION_RETAIN_MODES="chunked full-session"
+
 # Depends on whichever backend resolves the shared tenant key: age for a pool
 # file, secrets_manager for an explicit manager reference — derived from the
 # declared secret (declared_secrets), so a convention-backed key resolved from an
@@ -72,6 +78,7 @@ hindsight_integration::preflight() {
     || lifecycle::fail \
     "hindsight_integration: set [module.hindsight_integration] server_url, or server_host (the memory server's reachable host, typically its tailnet name)."
   hindsight_integration::_validate_bank_configs
+  hindsight_integration::_validate_retain_settings
   local integration
   while IFS= read -r integration; do
     [ -n "$integration" ] || continue
@@ -124,15 +131,16 @@ hindsight_integration::_ensure_configs() {
 
   # Standalone assignments, not `local x=$(…)`: resolve can lifecycle::fail (no
   # age key), and in local/argument position set -e can't see the failure.
-  local url token prefix recall_banks tools_banks
+  local url token prefix recall_banks tools_banks retain_settings
   url="$(hindsight_integration::_api_url)"
   token="$(hindsight::secrets::resolve tenant_api_key)"
   prefix="$(hindsight_integration::_bank_id_prefix)"
   recall_banks="$(hindsight_integration::_auto_recall_banks)"
   tools_banks="$(hindsight_integration::_tool_use_banks)"
+  retain_settings="$(hindsight_integration::_retain_settings_json)"
   for integration in "${pending[@]}"; do
     "hindsight_integration::${integration}::write_config" \
-      "$url" "$token" "$prefix" "$recall_banks" "$tools_banks"
+      "$url" "$token" "$prefix" "$recall_banks" "$tools_banks" "$retain_settings"
   done
 }
 
@@ -308,6 +316,56 @@ hindsight_integration::_tool_use_banks() {
   config::get_array "module.hindsight_integration.tool_use_banks" || true
 }
 
+# Retention tuning — how much transcript an agent ships to the server and how
+# often. The turn counts are unset by default: machinekit writes nothing for them
+# and the agent's client keeps its own cadence.
+#
+# retain_mode is the deliberate exception. A client left to its own default
+# re-sends the entire conversation on every retain, so a long session pays for
+# the same early turns over and over and the bill climbs with the square of its
+# length. A sliding window keeps each retain's cost flat however long the session
+# runs, which is the safe thing to hand an unattended machine; an operator who
+# wants whole-transcript retention asks for it by name. The window only applies
+# while the client's retain cadence is above one turn — at one turn per retain
+# there is no window to slide, and clients fall back to the whole transcript.
+hindsight_integration::_retain_mode() {
+  config::get "module.hindsight_integration.retain_mode" --default "chunked"
+}
+
+# The turn counts read through config::get_json, not config::get: the store holds
+# what toml2json parsed, so a number arrives as a number and a mistyped string
+# arrives quoted. config::get would -r-stringify both into the same bare word,
+# leaving nothing to tell a real count from `"ten"` — and the client does
+# arithmetic on this value. `null` when the blueprint omits the key.
+hindsight_integration::_retain_every_n_turns() {
+  config::get_json "module.hindsight_integration.retain_every_n_turns" "null"
+}
+
+hindsight_integration::_retain_overlap_turns() {
+  config::get_json "module.hindsight_integration.retain_overlap_turns" "null"
+}
+
+# The retention tuning as one object in machinekit's snake_case, for the
+# integrations to translate into whatever their client's config schema calls
+# these. Grouped rather than passed as three more positional arguments so a
+# future knob is additive to the object, not to every submodule's signature.
+# The turn counts are emitted as JSON numbers because clients do arithmetic on
+# them, which a quoted string breaks.
+hindsight_integration::_retain_settings_json() {
+  local retain_mode retain_every_n_turns retain_overlap_turns
+  retain_mode="$(hindsight_integration::_retain_mode)"
+  retain_every_n_turns="$(hindsight_integration::_retain_every_n_turns)"
+  retain_overlap_turns="$(hindsight_integration::_retain_overlap_turns)"
+  jq -nc \
+    --arg retain_mode "$retain_mode" \
+    --argjson retain_every_n_turns "$retain_every_n_turns" \
+    --argjson retain_overlap_turns "$retain_overlap_turns" \
+    '{ retain_mode: $retain_mode,
+       retain_every_n_turns: $retain_every_n_turns,
+       retain_overlap_turns: $retain_overlap_turns }
+     | with_entries(select(.value != null and .value != ""))'
+}
+
 # The per-bank config tables ({} when absent). Independent of the recall/tool_use
 # wiring lists above: a bank configured here need not be wired into this box, and
 # vice versa — the two axes don't have to line up.
@@ -332,6 +390,42 @@ hindsight_integration::_has_bank_configs() {
 # valid, so there's no guard to branch on — preflight keeps a single flow.
 hindsight_integration::_validate_bank_configs() {
   hindsight::banks::validate_shape "$(hindsight_integration::_bank_configs_json)"
+}
+
+# Also unconditional: every retention value is optional, and each validator
+# treats "not set" as valid, so there is no guard to branch on here either.
+hindsight_integration::_validate_retain_settings() {
+  hindsight_integration::_validate_retain_mode
+  hindsight_integration::_validate_turn_count \
+    retain_every_n_turns "$(hindsight_integration::_retain_every_n_turns)" 1
+  hindsight_integration::_validate_turn_count \
+    retain_overlap_turns "$(hindsight_integration::_retain_overlap_turns)" 0
+}
+
+# Fail on an unrecognized mode rather than pass it through. The client would
+# accept it silently and fall back to whole-transcript retention, so without this
+# a one-character typo costs money on every retain and nothing ever says so.
+hindsight_integration::_validate_retain_mode() {
+  local retain_mode
+  retain_mode="$(hindsight_integration::_retain_mode)"
+  case " $_HINDSIGHT_INTEGRATION_RETAIN_MODES " in
+    *" $retain_mode "*) return 0 ;;
+  esac
+  lifecycle::fail "hindsight_integration: unknown retain_mode '$retain_mode'. Available: $_HINDSIGHT_INTEGRATION_RETAIN_MODES."
+}
+
+# A turn count is optional, but a set one must be a whole number no smaller than
+# `minimum` — clients do arithmetic on it, and a quoted or nonsensical count
+# fails deep inside the agent long after apply reported success. Takes the value
+# as an argument rather than reading it, so one validator covers both counts.
+hindsight_integration::_validate_turn_count() {
+  local key="$1" value="$2" minimum="$3"
+  if [ "$value" = "null" ]; then
+    return 0
+  fi
+  jq -e --argjson minimum "$minimum" \
+    'type == "number" and . == floor and . >= $minimum' >/dev/null 2>&1 <<< "$value" \
+    || lifecycle::fail "hindsight_integration: module.hindsight_integration.$key must be a whole number >= $minimum (got $value)."
 }
 
 # The tenant path segment. "default" is Hindsight's conventional single-tenant
