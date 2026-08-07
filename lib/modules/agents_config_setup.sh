@@ -76,7 +76,11 @@ agents_config_setup::_strip_git() {
 # duplicating the key and default. A pure config read with a default, so a caller
 # resolves it whether or not this module is activated.
 agents_config_setup::dir() {
-  config::get "module.agents_config_setup.dir" --default "$HOME/.agents"
+  local dir
+  dir=$(config::get "module.agents_config_setup.dir" --default "$HOME/.agents")
+  # A blueprint may write the dir as ~/…; without this it would seed a literal
+  # '~' directory. Same expansion the syncthing and git_backup folder paths do.
+  printf '%s\n' "${dir/#\~/$HOME}"
 }
 
 # Where to seed the dir from when it's absent (URL or local path). Empty unless

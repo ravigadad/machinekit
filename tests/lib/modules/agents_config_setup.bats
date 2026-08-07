@@ -151,6 +151,12 @@ setup() {
   [ "$output" = "/custom/agents" ]
 }
 
+@test "dir expands a leading tilde in the configured value" {
+  STUB_OUTPUT="~/custom/agents" mktest::stub_function config::get "module.agents_config_setup.dir" "--default" "$HOME/.agents"
+  run agents_config_setup::dir
+  [ "$output" = "$HOME/custom/agents" ]
+}
+
 @test "_source reads the source key, defaulting to empty" {
   STUB_OUTPUT="https://github.com/user/agents" mktest::stub_function config::get "module.agents_config_setup.source" "--default" ""
   run agents_config_setup::_source
