@@ -487,6 +487,17 @@ setup() {
   run ! context::_from_env "test.key"
 }
 
+@test "_from_env reports a miss, quietly, when the key cannot name an environment variable" {
+  # A key may carry an operator-supplied segment, and one containing a hyphen
+  # yields a name no environment variable can have. Bash's indirect expansion
+  # treats that as a fatal error rather than an absent value, which would abort
+  # the run under set -e — so the miss has to be caught before the lookup.
+  STUB_OUTPUT="MACHINEKIT_SOME-REPO_READY" mktest::stub_function context::env_var_name "some-repo.ready"
+  run context::_from_env "some-repo.ready"
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+}
+
 # --- context::_from_user_config ---
 
 @test "_from_user_config resolves a key from the loaded defaults and writes it back to the store" {

@@ -286,6 +286,12 @@ context::_from_env() {
   local env_var is_secret=0
   [ "${2:-}" = "--secret" ] && is_secret=1
   env_var="$(context::env_var_name "$1")"
+  # A key may carry an operator-supplied segment, and one holding anything but
+  # letters, digits, and underscores derives a name no environment variable can
+  # have. Bash treats indirect expansion of such a name as a fatal error rather
+  # than an absent value, which would abort the run under set -e — so answer the
+  # only truthful thing (there is no such variable) before attempting it.
+  [[ "$env_var" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || return 1
   local env_val="${!env_var:-}"
   [ -z "$env_val" ] && return 1
   [ "$is_secret" = 1 ] || context::set "$1" "$env_val"
