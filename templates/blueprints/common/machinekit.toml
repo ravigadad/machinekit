@@ -363,3 +363,75 @@
 # # directory = "~/elsewhere"
 # # retain_count = 14
 #
+# [module.offsite_backup]
+# # Periodically copies configured local paths to remote restic repositories,
+# # encrypted client-side before anything leaves the machine. Generic — it backs up
+# # whatever paths you list and knows nothing about what produced the files.
+# #
+# # Needs one-time setup machinekit cannot do for you, per repository: a bucket at
+# # the provider of your choice, and two secrets named for that repository —
+# # offsite_backup/<name>/repository_password and, for a backend that needs them,
+# # offsite_backup/<name>/credentials as opaque KEY=value lines. See
+# # docs/modules.md (offsite_backup).
+# #
+# # Creating a repository writes to the remote, so it is consent-gated: say yes on
+# # an interactive apply, or set MACHINEKIT_OFFSITE_BACKUP_INIT_REPOSITORY=1. One
+# # yes covers every declared repository that is missing, and you are only asked
+# # when at least one is, so re-applying stays silent.
+# #
+# # The keys here are DEFAULTS; any repository below may override any of them.
+# # schedule = "30 3 * * *"          # cron; when the backup-and-prune run fires
+# # check_schedule = "0 4 * * 0"     # cron; when the repository is verified
+# # notify = "/path/to/notify-hook"  # run with a message on trouble; default: logger/journald
+# #
+# # RETENTION DELETES REMOTE HISTORY, and ships on by default. Each run adds a full
+# # new copy, so with no retention a repository grows with the square of time;
+# # these windows are what stop that. restic applies them to each path separately,
+# # so keep_daily = 7 means seven dailies of EACH path, not seven between them.
+# # Whatever is in force is printed at the end of every apply.
+# # keep_daily = 7
+# # keep_weekly = 4
+# # keep_monthly = 12
+# #
+# # check_read_data re-downloads and re-reads every pack. Thorough, slow, and the
+# # one operation with real egress cost — occasional, not scheduled.
+# # check_read_data = false
+# #
+# # SEVERAL PATHS IN ONE REPOSITORY IS THE USUAL SHAPE — restic gives each path its
+# # own retention and shares deduplication across the whole repository. Declare a
+# # SECOND repository only for what a second path cannot express: a different
+# # destination, a different encryption key, or a different keep policy.
+# #
+# # NAME A REPOSITORY FOR WHAT IT HOLDS, not for the provider or the tool: the name
+# # is what distinguishes one repository from another, so anything true of all of
+# # them carries no information, and a vendor name goes stale if you move the data.
+# # `name` is lowercase letters, digits, and underscores; it names this
+# # repository's secrets, its files, and its two service units, so pick it once and
+# # leave it alone. Mirroring it in the repository string's last path segment keeps
+# # the bucket readable against this file. (Bucket names cannot contain underscores
+# # on most providers — they become DNS labels — while the prefix after the bucket
+# # can, so a hyphenated bucket holding snake_case prefixes is expected.)
+# [[module.offsite_backup.repositories]]
+# name = "database_dumps"
+# repository = "s3:s3.example-region.example.com/my-restic-bucket/database_dumps"
+# #
+# # Each path needs a `path`. `max_age_hours` is per path, not per repository — it
+# # is the silent-failure alarm: if nothing under the path has changed in that
+# # long, the run notifies. Whatever writes there can stop while the upload keeps
+# # succeeding every night, and nothing else would tell you.
+# [[module.offsite_backup.repositories.paths]]
+# path = "~/postgres-dumps"
+# # max_age_hours = 36
+# #
+# # A second repository is for what a second path in the first one cannot express —
+# # here, a different keep policy. Any module-level key above may be repeated on a
+# # repository to override it for that one alone.
+# [[module.offsite_backup.repositories]]
+# name = "logs"
+# repository = "s3:s3.example-region.example.com/my-restic-bucket/logs"
+# keep_daily = 7
+# keep_weekly = 2
+# keep_monthly = 0
+#
+# [[module.offsite_backup.repositories.paths]]
+# path = "/var/log/example"

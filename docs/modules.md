@@ -263,3 +263,139 @@ git_backup/ssh_keys/<name>       # an SSH private key authorized to push to that
 Any key with write access works — a GitHub deploy key, your own key, whatever. Generate one (`ssh-keygen -t ed25519 -f <name> -N ""`), authorize its public half on the remote, then age-encrypt the private half into the pool path above (or file it in your secrets manager under that name). **Omit `ssh_key` entirely** to push over ambient SSH (an agent or an on-disk default key) — then no secret is needed. When any `ssh_key` is named, preflight requires it and pulls in whichever backend actually resolves it (`age` and/or `secrets_manager`) automatically.
 
 **Ignore patterns.** Each folder gets a machinekit-managed `.gitignore` by default, so the backup repo never carries junk — OS cruft like `.DS_Store`, plus Syncthing's own machine-local artifacts (its version buffer, folder marker, and ignore file), which the mesh keeps to itself but git would otherwise commit. So pairing a `syncthing` folder with a `git_backup` folder for the same path just works; you don't list Syncthing's artifacts yourself. The same three knobs apply per folder: `ignore_patterns = [...]` (your patterns, above the defaults), `add_default_ignores = false`, and `manage_gitignore = false` (leave the file to you). machinekit rewrites only its own delimited block; as with any `.gitignore` it affects only untracked files, so anything already committed needs a manual `git rm --cached`. The `.gitignore` is written only if the folder already exists — git_backup never creates a folder another module is meant to seed.
+
+## offsite_backup — a remote repository, its credentials, and its password
+
+`offsite_backup` periodically copies configured local paths to remote [restic](https://restic.net) repositories. It's generic — it backs up whatever paths you list and knows nothing about what produced the files. restic encrypts everything client-side before it leaves the machine, so the storage provider only ever holds ciphertext.
+
+Each repository you declare gets its own paths, its own schedule, its own retention, and its own two secrets. **One repository with several paths is the usual shape** — restic groups snapshots by host and paths when it forgets, so each path gets the keep policy applied to it independently, and deduplication is shared across the whole repository. Declare a *second* repository only for what a second path in the first one can't express: a different destination, a different encryption key, or a different keep policy.
+
+Three things need to exist per repository before you activate it, and none of them is something machinekit can create for you.
+
+1. **A bucket (or other restic-supported destination), at whatever provider you like.** restic speaks S3-compatible object storage, plus SFTP, REST, and local paths; at the volumes this module is built for, providers differ by well under a dollar a month, so choose on how many vendors you want to hold and whether you care about object lock — not on price. The destination becomes the `repository` value in your blueprint, which is ordinary config, not a secret.
+
+2. **Two secrets in the pool (or your secrets manager), namespaced by the repository's `name`:**
+
+   ```
+   offsite_backup/<name>/repository_password   # LOSE THIS AND THAT BACKUP IS UNREADABLE
+   offsite_backup/<name>/credentials           # the backend's credentials, as KEY=value lines
+   ```
+
+   The credentials secret is carried **opaquely**: every restic backend reads different environment variables, so machinekit exports whatever `KEY=value` lines the file holds and never interprets them. For an S3-compatible backend that's two lines — and note these are what *every* S3 client calls them, not an indication that the destination is AWS:
+
+   ```
+   AWS_ACCESS_KEY_ID=<the key id>
+   AWS_SECRET_ACCESS_KEY=<the application key>
+   ```
+
+   File both with `machinekit secrets put` (see the age-key section above), e.g. for a repository named `database_dumps`:
+
+   ```bash
+   printf '%s' '<a long random password>' \
+     | machinekit secrets put offsite_backup/database_dumps/repository_password \
+       --blueprints-dir <your-blueprints-checkout>
+   printf 'AWS_ACCESS_KEY_ID=%s\nAWS_SECRET_ACCESS_KEY=%s\n' '<key id>' '<application key>' \
+     | machinekit secrets put offsite_backup/database_dumps/credentials \
+       --blueprints-dir <your-blueprints-checkout>
+   ```
+
+   Omit the credentials secret entirely for a destination that needs none (a local path, or SFTP over a key you already have). The repository password is always required.
+
+3. **The repository itself, created once.** Creating it writes to the remote, so it's consent-gated like every other outward action: apply interactively and say yes, or set `MACHINEKIT_OFFSITE_BACKUP_INIT_REPOSITORY=1` for an unattended run. One yes covers every repository you've declared that doesn't exist yet, and machinekit only asks when at least one is actually absent — so re-applying later is silent. Decline, and the install still finishes and schedules everything; the repositories that don't exist just fail their runs, which the end of the apply tells you.
+
+   To create one yourself instead:
+
+   ```bash
+   export RESTIC_REPOSITORY='<your repository string>'
+   export RESTIC_PASSWORD_FILE=~/.config/machinekit/offsite_backup/<name>/repository_password
+   set -a; . ~/.config/machinekit/offsite_backup/<name>/credentials; set +a
+   restic init
+   ```
+
+Then configure the module. Module-level keys are defaults; any repository may override them:
+
+```toml
+[module.offsite_backup]
+# schedule = "30 3 * * *"        # cron; when the backup-and-prune run fires
+# check_schedule = "0 4 * * 0"   # cron; when the repository is verified
+# keep_daily = 7                 # retention — see the warning below
+# keep_weekly = 4
+# keep_monthly = 12
+# check_read_data = false        # true re-downloads every pack; slow, and the one
+                                 # operation with real egress cost
+# notify = "/path/to/notify-hook"  # run with a message on trouble; default: logger/journald
+
+# A repository holding things that share a retention shape. Its `name` is
+# lowercase letters, digits, and underscores; it names this repository's secrets,
+# its files, and its two service units, so pick it once and leave it alone.
+[[module.offsite_backup.repositories]]
+name = "database_dumps"
+repository = "s3:s3.example-region.example.com/my-restic-bucket/database_dumps"
+
+[[module.offsite_backup.repositories.paths]]
+path = "~/postgres-dumps"
+max_age_hours = 36               # alarm if nothing under the path changed in that long
+
+# A second repository exists for what a second path in the first one cannot
+# express — here, a different keep policy. Any module-level key may be repeated
+# on a repository to override it for that one alone.
+[[module.offsite_backup.repositories]]
+name = "logs"
+repository = "s3:s3.example-region.example.com/my-restic-bucket/logs"
+keep_daily = 7
+keep_weekly = 2
+keep_monthly = 0
+
+[[module.offsite_backup.repositories.paths]]
+path = "/var/log/example"
+```
+
+**Name a repository for what it holds, not for the provider or the tool.** The name distinguishes one repository from another, so anything that would be true of all of them (`offsite`, the vendor, `machinekit`) carries no information — and a vendor name goes stale the moment you move the data. Mirroring the name in the repository string's last path segment, as above, keeps the bucket readable against the blueprint. Note that bucket *names* can't contain underscores on most providers (they become DNS labels), while the prefix after the bucket has no such restriction — so a hyphenated bucket holding snake_case prefixes is expected, not a mistake.
+
+Each repository gets its own pair of services, labelled after its name (`offsite-backup-database-dumps`, `offsite-backup-database-dumps-check`).
+
+**Retention deletes remote history, and it ships on by default.** Each run adds a full new copy of whatever is in the path, so with no retention at all a repository grows with the *square* of time. The defaults above (7 daily / 4 weekly / 12 monthly) are what stop that; whatever is in force for each repository is printed at the end of every apply. Raise them if you want more history — the cost of keeping every daily copy forever is roughly ten to thirty times the cost of the default policy. Because restic groups snapshots by path when forgetting, one policy covers every path in a repository *separately*: `keep_daily = 7` keeps seven dailies of each path, not seven between them.
+
+**`max_age_hours` is per path, not per repository** — it's about the source directory's freshness, not the destination. If nothing under the path has changed inside that window, the run notifies. Whatever writes into the path can quietly stop while the upload keeps succeeding every night; nothing else would ever tell you.
+
+**`check_schedule` is what verifies the remote.** A backup you have never read back is a guess. The weekly default check validates the repository's structure without re-downloading its data; `check_read_data = true` re-reads every pack, which is thorough and expensive — reach for it occasionally, not on a schedule.
+
+**Provider wrinkles worth checking before you rely on a destination.**
+
+- **Backblaze B2 needs a lifecycle rule, or retention silently does nothing.** restic's S3 backend *hides* obsolete files rather than deleting them, and B2 keeps — and bills for — every hidden version by default. Set the bucket's Lifecycle Settings to **"Keep only the last version of the file"**; without it `forget --prune` reclaims no space at all. ([restic docs](https://restic.readthedocs.io/en/stable/030_preparing_a_new_repo.html)) Use B2's S3-compatible endpoint rather than restic's native `b2:` backend — both projects recommend it, because the native backend's error handling can hang instead of reporting. A bucket-restricted application key also needs **Allow List All Bucket Names** enabled, or B2 answers ordinary object requests with `403 AccessDenied` where restic expects a `404`.
+- **Cloudflare R2** has historically needed extra configuration because it doesn't implement `GetBucketLocation`. If you pick R2, verify `restic init` and one full backup/restore cycle before relying on it.
+- **Object Lock and pruning are in tension anywhere.** A locked file can't be deleted, so `forget --prune` fails inside the retention window — and on B2, enabling Object Lock on a bucket is irreversible. Leave it off unless you've deliberately made the retention period shorter than the prune interval.
+
+**Composing a full backup story.** `offsite_backup` is one leg of three, each independently useful and independently removable:
+
+- `postgres_dump` writes timestamped database dumps into a directory (it needs no setup and so has no section here).
+- A `syncthing` folder replicates that directory to your other machines — the server dies, two live copies remain. Give the folder `type = "receiveonly"` on the machines that don't own it, so a deletion on a replica can't propagate back to the original.
+- `offsite_backup` copies the same directory off-fleet — every machine gone, still recoverable.
+
+None of the three knows about the others; they meet because your blueprint points them at the same path.
+
+### Restoring
+
+Restoring overwrites a live database, so machinekit has no `restore` command — it's a deliberate act you perform yourself. Two tiers, depending on how much is gone.
+
+**From a dump file you still have** (on the server, or on any machine the sync mesh reached). Restore into a *new* database first, check it, and only then swap — never straight over the live one:
+
+```bash
+createdb -U postgres hindsight_restored
+pg_restore -U postgres -d hindsight_restored --no-owner <the .dump file>
+psql -U postgres -d hindsight_restored -c 'SELECT count(*) FROM memory_units'
+```
+
+`pg_restore` ships with PostgreSQL, so the custom-format dump needs no extra tooling; any extension the database uses (e.g. `vector`) must be installed on the target, which is what `machinekit apply` already does for a `hindsight_server` machine.
+
+**From the offsite repository**, when no dump file survives. Pull the file out first, then restore it exactly as above:
+
+```bash
+export RESTIC_REPOSITORY='<your repository string>'
+export RESTIC_PASSWORD_FILE=<the repository password, from your secrets manager>
+# plus the backend's own credential variables
+restic snapshots                       # pick the one you want
+restic restore <snapshot-id> --target /tmp/restored
+```
+
+On a bare machine you need three things to get here: the restic binary (a single static download), the repository password, and the backend credentials. The password is the one that can't be reconstructed — it lives in your secrets manager like every other secret, and losing it makes the offsite copy permanently unreadable.
