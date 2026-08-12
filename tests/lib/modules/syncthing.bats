@@ -25,11 +25,13 @@ setup() {
   STUB_OUTPUT='[{"device_id":"DEV"}]' mktest::stub_function syncthing::_peers
   mktest::stub_function syncthing::_validate_folders
   mktest::stub_function syncthing::_validate_ignores
+  mktest::stub_function syncthing::_validate_folder_types
   mktest::stub_function syncthing::_validate_peers
   mktest::stub_function syncthing::_discovery_options
   syncthing::preflight
   mktest::assert_stub_called syncthing::_validate_folders '[{"id":"f","path":"/p"}]'
   mktest::assert_stub_called syncthing::_validate_ignores '[{"id":"f","path":"/p"}]'
+  mktest::assert_stub_called syncthing::_validate_folder_types '[{"id":"f","path":"/p"}]'
   mktest::assert_stub_called syncthing::_validate_peers '[{"device_id":"DEV"}]'
 }
 
@@ -38,12 +40,14 @@ setup() {
   mktest::stub_function syncthing::_peers
   mktest::stub_function syncthing::_validate_folders
   mktest::stub_function syncthing::_validate_ignores
+  mktest::stub_function syncthing::_validate_folder_types
   mktest::stub_function syncthing::_validate_peers
   mktest::stub_function syncthing::_discovery_options
   run syncthing::preflight
   [ "$status" -eq 0 ]
   mktest::assert_stub_not_called syncthing::_validate_folders
   mktest::assert_stub_not_called syncthing::_validate_ignores
+  mktest::assert_stub_not_called syncthing::_validate_folder_types
   mktest::assert_stub_not_called syncthing::_validate_peers
 }
 
@@ -146,6 +150,21 @@ setup() {
   STUB_EXIT=1 mktest::stub_function lifecycle::fail
   run ! syncthing::_validate_folders '[{"id":"agents","path":""}]'
   mktest::assert_stub_called lifecycle::fail
+}
+
+# --- _validate_folder_types ---
+
+@test "_validate_folder_types passes folders with no type and with a known one" {
+  STUB_EXIT=1 mktest::stub_function lifecycle::fail
+  syncthing::_validate_folder_types \
+    '[{"id":"a","path":"/pa"},{"id":"b","path":"/pb","type":"receiveonly"}]'
+  mktest::assert_stub_not_called lifecycle::fail
+}
+
+@test "_validate_folder_types fails an unknown type rather than letting syncthing reject it later" {
+  STUB_EXIT=1 mktest::stub_function lifecycle::fail
+  run ! syncthing::_validate_folder_types '[{"id":"a","path":"/pa","type":"readonly"}]'
+  MATCH="receiveonly" mktest::assert_stub_called lifecycle::fail
 }
 
 @test "_validate_peers passes a well-formed list" {
@@ -276,20 +295,27 @@ setup() {
 
 # --- _ensure_folder (member: per-folder logic; real mkdir, stubbed collaborators) ---
 
-@test "_ensure_folder creates the dir, reconciles its stignore, and upserts it shared with the devices" {
+@test "_ensure_folder creates the dir, reconciles its stignore, upserts it shared with the devices, and applies its type" {
   local path="$BATS_TEST_TMPDIR/agents"
   mktest::stub_function syncthing::_apply_stignore "{\"id\":\"agents\",\"path\":\"$path\"}" "$path"
   mktest::stub_function syncthing::_cli_ensure_folder "agents" "$path" "DEV1 DEV2"
+  STUB_OUTPUT="fake-type" mktest::stub_function syncthing::_folder_type "{\"id\":\"agents\",\"path\":\"$path\"}"
+  mktest::stub_function syncthing::_cli_set_folder_type "agents" "fake-type"
   syncthing::_ensure_folder "{\"id\":\"agents\",\"path\":\"$path\"}" "DEV1 DEV2"
   [ -d "$path" ]
   mktest::assert_stub_called syncthing::_apply_stignore "{\"id\":\"agents\",\"path\":\"$path\"}" "$path"
   mktest::assert_stub_called syncthing::_cli_ensure_folder "agents" "$path" "DEV1 DEV2"
+  # Re-asserted every apply, not only on create: a folder flipped back to
+  # send-receive by hand must converge to what the blueprint declares.
+  mktest::assert_stub_called syncthing::_cli_set_folder_type "agents" "fake-type"
 }
 
 @test "_ensure_folder expands a leading ~ in the path" {
   HOME="$BATS_TEST_TMPDIR"
   mktest::stub_function syncthing::_apply_stignore
   mktest::stub_function syncthing::_cli_ensure_folder "agents" "$HOME/agents" ""
+  mktest::stub_function syncthing::_folder_type
+  mktest::stub_function syncthing::_cli_set_folder_type
   syncthing::_ensure_folder '{"id":"agents","path":"~/agents"}' ""
   [ -d "$HOME/agents" ]
   mktest::assert_stub_called syncthing::_cli_ensure_folder "agents" "$HOME/agents" ""
@@ -555,6 +581,16 @@ setup() {
   [ -z "$output" ]
 }
 
+@test "_folder_type defaults to send-receive when the folder declares none" {
+  run syncthing::_folder_type '{"id":"agents","path":"/p"}'
+  [ "$output" = "sendreceive" ]
+}
+
+@test "_folder_type reads the folder's declared type" {
+  run syncthing::_folder_type '{"id":"agents","path":"/p","type":"receiveonly"}'
+  [ "$output" = "receiveonly" ]
+}
+
 @test "_is_hub is true when the hub flag is set" {
   STUB_OUTPUT="true" mktest::stub_function config::get "module.syncthing.hub" "--default" "false" "--coerce" "boolean"
   syncthing::_is_hub
@@ -693,6 +729,12 @@ setup() {
   mktest::stub_function syncthing "cli" "config" "options" "someSyncthingOption" "set" "someValue"
   syncthing::_cli_set_option "someSyncthingOption" "someValue"
   mktest::assert_stub_called syncthing "cli" "config" "options" "someSyncthingOption" "set" "someValue"
+}
+
+@test "_cli_set_folder_type sets the folder's type" {
+  mktest::stub_function syncthing "cli" "config" "folders" "agents" "type" "set" "receiveonly"
+  syncthing::_cli_set_folder_type "agents" "receiveonly"
+  mktest::assert_stub_called syncthing "cli" "config" "folders" "agents" "type" "set" "receiveonly"
 }
 
 @test "_cli_ensure_folder upserts the folder and shares it with each device" {

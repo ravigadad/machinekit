@@ -283,6 +283,11 @@
 # [[module.syncthing.folders]]
 # id = "agents"
 # path = "~/.agents"
+# # A folder is two-way by default. `type = "receiveonly"` makes this machine a
+# # read-only replica of a folder another machine owns: a change or deletion made
+# # here is reverted rather than propagated, so the owner's copy can't be damaged
+# # from a replica. ("sendonly" and "receiveencrypted" are the other two.)
+# # type = "receiveonly"
 # # Each folder gets a machinekit-managed .stignore by default, holding
 # # (?d).DS_Store and other junk that should never replicate. Per folder you can:
 # # ignore_patterns = ["*.tmp"]     # your patterns (kept above the defaults)

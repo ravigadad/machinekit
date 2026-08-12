@@ -32,12 +32,19 @@
 
 _SYNCTHING_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Syncthing's folder types. A folder defaults to sendreceive (both directions);
+# receiveonly is what makes a machine a read-only replica of a folder another
+# machine owns, so a local change or deletion there never propagates back.
+_SYNCTHING_FOLDER_TYPES="sendreceive sendonly receiveonly receiveencrypted"
+_SYNCTHING_DEFAULT_FOLDER_TYPE="sendreceive"
+
 syncthing::preflight() {
   local folders peers
   folders=$(syncthing::_folders)
   peers=$(syncthing::_peers)
   [ -n "$folders" ] && syncthing::_validate_folders "$folders"
   [ -n "$folders" ] && syncthing::_validate_ignores "$folders"
+  [ -n "$folders" ] && syncthing::_validate_folder_types "$folders"
   [ -n "$peers" ] && syncthing::_validate_peers "$peers"
   # Validate the discovery posture now (called directly, so an unknown value's
   # lifecycle::fail isn't swallowed the way it would be in _apply_discovery's loop).
@@ -94,6 +101,19 @@ syncthing::_validate_peers() {
     any(.[]; (has("device_id")|not) or (.device_id == ""))')
   [ "$bad" = "true" ] && lifecycle::fail \
     "syncthing: every [[module.syncthing.peers]] entry needs a device_id."
+  return 0
+}
+
+# A folder's type must be one syncthing recognizes. Caught here rather than left
+# to the daemon, which would reject it partway through the folder pass with the
+# rest of the mesh already half-configured.
+syncthing::_validate_folder_types() {
+  local folders="$1" bad
+  bad=$(printf '%s' "$folders" | jq -r --arg valid "$_SYNCTHING_FOLDER_TYPES" '
+    ($valid | split(" ")) as $types
+    | any(.[]; .type as $declared | ($declared != null) and (($types | index($declared)) == null))')
+  [ "$bad" = "true" ] && lifecycle::fail \
+    "syncthing: a [[module.syncthing.folders]] type must be one of: $_SYNCTHING_FOLDER_TYPES."
   return 0
 }
 
@@ -168,9 +188,11 @@ syncthing::_ensure_folders() {
   done < <(printf '%s' "$folders" | jq -c '.[]')
 }
 
-# Create and register one folder: make its dir, reconcile its .stignore, and upsert
+# Create and register one folder: make its dir, reconcile its .stignore, upsert
 # it in the daemon shared with the given device IDs (space-separated; empty =
-# local-only).
+# local-only), and apply its type. The type is re-asserted on every apply rather
+# than only on create, so a folder flipped back to send-receive by hand converges
+# to what the blueprint declares.
 syncthing::_ensure_folder() {
   local folder="$1" share_with="$2" id path
   id=$(printf '%s' "$folder" | jq -r '.id')
@@ -179,7 +201,16 @@ syncthing::_ensure_folder() {
   mkdir -p "$path"
   syncthing::_apply_stignore "$folder" "$path"
   syncthing::_cli_ensure_folder "$id" "$path" "$share_with"
+  syncthing::_cli_set_folder_type "$id" "$(syncthing::_folder_type "$folder")"
   logging::success "syncthing: folder '$id' → $path"
+}
+
+# A folder's declared sync direction, defaulting to both ways. receiveonly is how
+# a machine holds a read-only replica of a folder another machine owns: a change
+# or deletion made there is reverted rather than propagated, so the owner's copy
+# cannot be damaged from a replica.
+syncthing::_folder_type() {
+  printf '%s' "$1" | jq -r --arg default "$_SYNCTHING_DEFAULT_FOLDER_TYPE" '.type // $default'
 }
 
 # Reconcile the folder's .stignore from its ignore config. manage_stignore = false
@@ -457,6 +488,11 @@ syncthing::_cli_ensure_folder() {
   for device in $share_with; do
     syncthing cli config folders "$id" devices add --device-id "$device"
   done
+}
+
+syncthing::_cli_set_folder_type() {
+  local id="$1" type="$2"
+  syncthing cli config folders "$id" type set "$type"
 }
 
 syncthing::_cli_add_device() {
