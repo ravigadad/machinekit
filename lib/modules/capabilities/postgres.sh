@@ -14,6 +14,13 @@
 # Default satisfier is postgres_brew on every OS; a blueprint opts into postgres_app
 # by listing it in modules = [...], resolved like container_manager/orbstack.
 
+# The predictable superuser every admin operation acts as (see ensure_superuser),
+# and the port the resolved instance always serves. Both are capability-wide
+# facts, so they get accessors rather than literals scattered through the SQL
+# helpers and the consumers that shell out to the client tools themselves.
+_POSTGRES_SUPERUSER="postgres"
+_POSTGRES_PORT="5432"
+
 postgres::is_capability() { return 0; }
 
 postgres::default_satisfier() { printf 'postgres_brew\n'; }
@@ -56,7 +63,19 @@ postgres::connection_string() {
     container)  host="$(container_manager::host_alias)" ;;
     *) lifecycle::fail "postgres::connection_string: unknown flavor '$flavor' (expected host-local or container)" ;;
   esac
-  printf 'postgresql://%s@%s:5432/%s\n' "$user" "$host" "$db"
+  printf 'postgresql://%s@%s:%s/%s\n' "$user" "$host" "$(postgres::port)" "$db"
+}
+
+# The role every admin operation connects as, and the port the resolved instance
+# serves. Public because a consumer that drives a postgres client tool itself
+# (postgres_dump running pg_dump out-of-band) needs the same two facts the SQL
+# helpers here use, and must not restate them.
+postgres::superuser() {
+  printf '%s\n' "$_POSTGRES_SUPERUSER"
+}
+
+postgres::port() {
+  printf '%s\n' "$_POSTGRES_PORT"
 }
 
 # Ensures the database exists, optionally owned by an existing role. Ownership is
@@ -128,10 +147,12 @@ postgres::ensure_superuser() {
     logging::dry_run "would ensure the postgres superuser exists"
     return 0
   fi
-  if "$(postgres::_createuser_path)" -s postgres 2>/dev/null; then
-    logging::success "postgres: created superuser postgres."
+  local superuser
+  superuser="$(postgres::superuser)"
+  if "$(postgres::_createuser_path)" -s "$superuser" 2>/dev/null; then
+    logging::success "postgres: created superuser $superuser."
   else
-    logging::debug "postgres: superuser postgres already present"
+    logging::debug "postgres: superuser $superuser already present"
   fi
 }
 
@@ -215,7 +236,7 @@ postgres::_role_exists() {
 postgres::_psql_exec() {
   local db="$1"
   shift
-  "$(postgres::_psql_path)" -X -q -U postgres -d "$db" "$@"
+  "$(postgres::_psql_path)" -X -q -U "$(postgres::superuser)" -d "$db" "$@"
 }
 
 # Like _psql_exec but reads the statement from stdin instead of an argv `-c`, so a
@@ -224,7 +245,7 @@ postgres::_psql_exec() {
 # role statements; the no-secret DDL and the SELECT checks stay on `-c`.
 postgres::_psql_exec_stdin() {
   local db="$1"
-  "$(postgres::_psql_path)" -X -q -U postgres -d "$db"
+  "$(postgres::_psql_path)" -X -q -U "$(postgres::superuser)" -d "$db"
 }
 
 postgres::_psql_path() {
@@ -233,6 +254,19 @@ postgres::_psql_path() {
 
 postgres::_createuser_path() {
   printf '%s/createuser\n' "$(postgres::_bin_dir)"
+}
+
+# The dump/restore client tools of the resolved instance. Public, unlike the psql
+# and createuser paths: those serve this file's own SQL helpers, whereas a
+# consumer module runs pg_dump/pg_restore itself — out-of-band, from a scheduled
+# service — and so needs the resolved absolute paths handed to it. Restore is here
+# alongside dump because verifying a dump reads it back with pg_restore --list.
+postgres::pg_dump_path() {
+  printf '%s/pg_dump\n' "$(postgres::_bin_dir)"
+}
+
+postgres::pg_restore_path() {
+  printf '%s/pg_restore\n' "$(postgres::_bin_dir)"
 }
 
 # The bin directory of the resolved instance, from the active satisfier — brew's

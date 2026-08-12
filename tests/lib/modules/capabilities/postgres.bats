@@ -73,15 +73,17 @@ setup() {
 
 # --- postgres::connection_string ---
 
-@test "connection_string builds a host-local URL on localhost:5432" {
+@test "connection_string builds a host-local URL on the capability's port" {
+  STUB_OUTPUT="7777" mktest::stub_function postgres::port
   run postgres::connection_string "mydb" "myuser" "host-local"
-  [ "$output" = "postgresql://myuser@localhost:5432/mydb" ]
+  [ "$output" = "postgresql://myuser@localhost:7777/mydb" ]
 }
 
 @test "connection_string builds a container URL via the container host alias" {
+  STUB_OUTPUT="7777" mktest::stub_function postgres::port
   STUB_OUTPUT="host.docker.internal" mktest::stub_function container_manager::host_alias
   run postgres::connection_string "mydb" "myuser" "container"
-  [ "$output" = "postgresql://myuser@host.docker.internal:5432/mydb" ]
+  [ "$output" = "postgresql://myuser@host.docker.internal:7777/mydb" ]
 }
 
 @test "connection_string fails on an unknown flavor" {
@@ -89,6 +91,20 @@ setup() {
   run postgres::connection_string "mydb" "myuser" "bogus"
   [ "$status" -ne 0 ]
   mktest::assert_stub_called lifecycle::fail
+}
+
+# --- postgres::superuser ---
+
+@test "superuser is the predictable postgres role" {
+  run postgres::superuser
+  [ "$output" = "postgres" ]
+}
+
+# --- postgres::port ---
+
+@test "port is the port the resolved instance always serves" {
+  run postgres::port
+  [ "$output" = "5432" ]
 }
 
 # --- postgres::ensure_database ---
@@ -217,10 +233,11 @@ setup() {
 
 @test "ensure_superuser creates the predictable postgres superuser" {
   STUB_RETURN=1 mktest::stub_function input::is_dry_run
+  STUB_OUTPUT="fake-superuser" mktest::stub_function postgres::superuser
   STUB_OUTPUT="fake_createuser" mktest::stub_function postgres::_createuser_path
-  mktest::stub_function fake_createuser "-s" "postgres"
+  mktest::stub_function fake_createuser "-s" "fake-superuser"
   postgres::ensure_superuser
-  mktest::assert_stub_called fake_createuser "-s" "postgres"
+  mktest::assert_stub_called fake_createuser "-s" "fake-superuser"
 }
 
 @test "ensure_superuser in dry-run reports without creating a role" {
@@ -234,8 +251,9 @@ setup() {
 
 @test "ensure_superuser stays quiet when the superuser already exists" {
   STUB_RETURN=1 mktest::stub_function input::is_dry_run
+  STUB_OUTPUT="fake-superuser" mktest::stub_function postgres::superuser
   STUB_OUTPUT="fake_createuser" mktest::stub_function postgres::_createuser_path
-  STUB_RETURN=1 mktest::stub_function fake_createuser "-s" "postgres"
+  STUB_RETURN=1 mktest::stub_function fake_createuser "-s" "fake-superuser"
   postgres::ensure_superuser
   mktest::assert_stub_not_called logging::success
 }
@@ -358,20 +376,22 @@ setup() {
 # --- postgres::_psql_exec ---
 
 @test "_psql_exec runs psql with no rc file, quietly, as the postgres superuser" {
+  STUB_OUTPUT="fake-superuser" mktest::stub_function postgres::superuser
   STUB_OUTPUT="fake_psql" mktest::stub_function postgres::_psql_path
   mktest::stub_function fake_psql
   postgres::_psql_exec "somedb" "-tAc" "some query"
-  mktest::assert_stub_called fake_psql "-X" "-q" "-U" "postgres" "-d" "somedb" "-tAc" "some query"
+  mktest::assert_stub_called fake_psql "-X" "-q" "-U" "fake-superuser" "-d" "somedb" "-tAc" "some query"
 }
 
 # --- postgres::_psql_exec_stdin ---
 
 @test "_psql_exec_stdin runs psql with the statement on stdin (no -c), as the postgres superuser" {
+  STUB_OUTPUT="fake-superuser" mktest::stub_function postgres::superuser
   STUB_OUTPUT="fake_psql" mktest::stub_function postgres::_psql_path
   fake_psql() { echo "$*" > "$BATS_TEST_TMPDIR/args"; cat > "$BATS_TEST_TMPDIR/in"; }
   printf 'SELECT 1' | postgres::_psql_exec_stdin somedb
   run cat "$BATS_TEST_TMPDIR/args"
-  [ "$output" = "-X -q -U postgres -d somedb" ]
+  [ "$output" = "-X -q -U fake-superuser -d somedb" ]
   run cat "$BATS_TEST_TMPDIR/in"
   [ "$output" = "SELECT 1" ]
 }
@@ -390,6 +410,22 @@ setup() {
   STUB_OUTPUT="/fake/bin" mktest::stub_function postgres::_bin_dir
   run postgres::_createuser_path
   [ "$output" = "/fake/bin/createuser" ]
+}
+
+# --- postgres::pg_dump_path ---
+
+@test "pg_dump_path resolves pg_dump inside the resolved instance's bin directory" {
+  STUB_OUTPUT="/fake/bin" mktest::stub_function postgres::_bin_dir
+  run postgres::pg_dump_path
+  [ "$output" = "/fake/bin/pg_dump" ]
+}
+
+# --- postgres::pg_restore_path ---
+
+@test "pg_restore_path resolves pg_restore inside the resolved instance's bin directory" {
+  STUB_OUTPUT="/fake/bin" mktest::stub_function postgres::_bin_dir
+  run postgres::pg_restore_path
+  [ "$output" = "/fake/bin/pg_restore" ]
 }
 
 # --- postgres::_bin_dir ---

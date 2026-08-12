@@ -22,17 +22,17 @@ setup() {
 # --- install_calendar ---
 
 @test "install_calendar validates the cron spec, then schedules the calendar kind" {
-  mktest::stub_function service::_validate_cron "0 3 * * 0"
+  mktest::stub_function service::validate_cron "0 3 * * 0"
   mktest::stub_function service::_install "svc" "/fake/exec" "calendar" "0 3 * * 0" "FOO=bar"
   service::install_calendar "svc" "/fake/exec" "0 3 * * 0" "FOO=bar"
-  mktest::assert_stub_called_in_order service::_validate_cron
+  mktest::assert_stub_called_in_order service::validate_cron
   mktest::assert_stub_called_in_order service::_install "svc" "/fake/exec" "calendar" "0 3 * * 0" "FOO=bar"
 }
 
 @test "install_calendar does not install when the cron spec is invalid" {
   # _validate_cron fails by exiting (lifecycle::fail), so install is skipped only
   # because the process is gone — not by a checked return. Model it as an exit.
-  STUB_EXIT=1 mktest::stub_function service::_validate_cron
+  STUB_EXIT=1 mktest::stub_function service::validate_cron
   mktest::stub_function service::_install
   run service::install_calendar "svc" "/fake/exec" "bogus" "FOO=bar"
   [ "$status" -ne 0 ]
@@ -348,7 +348,7 @@ setup() {
   mktest::stub_function service::_cron_field_values "*" 1 12
   mktest::stub_function service::_cron_field_values "0" 0 7
   STUB_EXIT=1 mktest::stub_function lifecycle::fail
-  service::_validate_cron "0 3 * * 0"
+  service::validate_cron "0 3 * * 0"
   mktest::assert_stub_called service::_cron_field_values "0" 0 59
   mktest::assert_stub_called service::_cron_field_values "3" 0 23
   mktest::assert_stub_called service::_cron_field_values "*" 1 31
@@ -359,13 +359,13 @@ setup() {
 
 @test "_validate_cron fails when the field count is wrong" {
   STUB_EXIT=1 mktest::stub_function lifecycle::fail
-  run service::_validate_cron "0 3 * *"
+  run service::validate_cron "0 3 * *"
   MATCH="5 cron fields" mktest::assert_stub_called lifecycle::fail
 }
 
 @test "_validate_cron fails on an out-of-range field" {
   STUB_EXIT=1 mktest::stub_function lifecycle::fail
-  run service::_validate_cron "0 25 * * *"
+  run service::validate_cron "0 25 * * *"
   MATCH="cron" mktest::assert_stub_called lifecycle::fail
 }
 

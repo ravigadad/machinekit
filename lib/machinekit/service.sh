@@ -37,7 +37,7 @@ service::install_interval() {
 service::install_calendar() {
   local label="$1" exec="$2" when="$3"
   shift 3
-  service::_validate_cron "$when"
+  service::validate_cron "$when"
   service::_install "$label" "$exec" calendar "$when" "$@"
 }
 
@@ -317,8 +317,10 @@ service::_dow_names() {
 }
 
 # Validate a full cron spec by expanding every field (which fails on malformed or
-# out-of-range input); the five fields are minute hour day month weekday.
-service::_validate_cron() {
+# out-of-range input); the five fields are minute hour day month weekday. Public
+# so a consumer can reject a bad schedule in its own preflight — install_calendar
+# validates too, but by then the rest of that module's install has already run.
+service::validate_cron() {
   local when="$1"
   local -a fields
   read -r -a fields <<<"$when"
