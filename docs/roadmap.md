@@ -151,6 +151,7 @@ Shipped since the module system landed:
 - the agents-config pair — `agents_config_setup` (ensures the shared agents-config directory is present, seeding it from a git or local source) and `agents_config_harnesses` (projects that directory — top-level instructions and on-demand skills into coding agents, plus identity files into the persistent assistants that read them)
 - `syncthing` (generic peer-to-peer, tailnet-only folder sync that keeps that directory live across the fleet)
 - `git_backup` (generic, single-writer push-only-with-abort backup of configured folders to git remotes, one manifest-driven service)
+- `postgres_dump` (dumps named databases to timestamped files at a path on a schedule, verifying each dump reads back before it prunes older ones — so a bad new dump never costs you a good old one)
 
 More as needed (prompt themes, password-manager CLIs as a secrets-fetch layer, and so on). The current set lives in [`lib/modules/`](../lib/modules/), with operator setup for the ones that need it in [docs/modules.md](./modules.md).
 

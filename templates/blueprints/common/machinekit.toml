@@ -335,3 +335,31 @@
 # # ignore_patterns = ["build/"]   # your patterns (kept above the defaults)
 # # add_default_ignores = false    # drop machinekit's built-in junk defaults
 # # manage_gitignore = false       # leave .gitignore entirely to you
+#
+# [module.postgres_dump]
+# # Periodically dumps named databases to timestamped files at a path. Named for
+# # what it does, not what it is for: it produces files. Whether that amounts to a
+# # BACKUP is a property of what else you point at the directory — a syncthing
+# # folder replicating it, offsite_backup uploading it — never of this module.
+# # Requires the postgres capability; it drives that instance's own pg_dump.
+# #
+# # Each dump is written to a hidden partial file and only published once it is
+# # complete AND verified (its table of contents reads back). A dump that will not
+# # read is discarded and notified, and retention does NOT run — dropping a good
+# # older generation on the strength of a bad new one is how a backup chain gets
+# # emptied.
+# #
+# # `directory` has no default: something else is meant to be pointed at it, so a
+# # guessed location would invite a silent mismatch. `schedule` is a cron spec,
+# # which already expresses both "daily at 3am" and "every 6 hours".
+# directory = "~/postgres-dumps"
+# # schedule = "0 3 * * *"           # cron; when the dump run fires
+# # retain_count = 7                 # generations kept per database (0 = keep all)
+# # notify = "/path/to/notify-hook"  # run with a message on trouble; default: logger/journald
+# #
+# # Each database needs a `name`; it may override the directory and retain_count.
+# [[module.postgres_dump.databases]]
+# name = "somedb"
+# # directory = "~/elsewhere"
+# # retain_count = 14
+#
