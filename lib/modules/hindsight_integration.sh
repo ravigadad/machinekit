@@ -366,11 +366,12 @@ hindsight_integration::_retain_settings_json() {
      | with_entries(select(.value != null and .value != ""))'
 }
 
-# The per-bank config tables ({} when absent). Independent of the recall/tool_use
+# The per-bank config tables, keyed by bank name, without any a machine type turned
+# off with `enabled = false` ({} when none). Independent of the recall/tool_use
 # wiring lists above: a bank configured here need not be wired into this box, and
 # vice versa — the two axes don't have to line up.
 hindsight_integration::_bank_configs_json() {
-  config::get_json "module.hindsight_integration.additional_banks" '{}'
+  config::enabled_table "module.hindsight_integration.additional_banks"
 }
 
 hindsight_integration::_configured_bank_names() {
@@ -389,7 +390,9 @@ hindsight_integration::_has_bank_configs() {
 # Called unconditionally by preflight: validate_shape treats no-banks ({}) as
 # valid, so there's no guard to branch on — preflight keeps a single flow.
 hindsight_integration::_validate_bank_configs() {
-  hindsight::banks::validate_shape "$(hindsight_integration::_bank_configs_json)"
+  local bank_configs
+  bank_configs=$(hindsight_integration::_bank_configs_json)
+  hindsight::banks::validate_shape "$bank_configs"
 }
 
 # Also unconditional: every retention value is optional, and each validator

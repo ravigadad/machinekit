@@ -169,6 +169,10 @@ Also shipped, the write side: `machinekit secrets put [<name>]` age-encrypts a v
 
 Shipped: `secrets::resolve` / `secrets::present` / `secrets::backend_for` (`lib/machinekit/secrets.sh`) resolve any named secret — an age-encrypted pool file, or (given an active `secrets_manager` satisfier) a secrets-manager reference — without the consuming module ever knowing which backend actually holds it. `[secrets.manager_refs]` maps a name to an explicit manager-native reference; absent that, an active manager is queried by convention name and used only if it actually holds the secret (presence is truthful, so an absent secret reads as missing rather than falsely manager-backed). The satisfier is readied — installed and authenticated — during preflight, for `secrets list`, and for an interactive `secrets put`, before any secret is resolved. The age key itself gained a parallel third sourcing path alongside `--existing-age-key-file` and interactive generation, so a fully manager-sourced blueprint needs no age key at all. First satisfier: `infisical` (Infisical Cloud only; self-hosting is a separate, undone topic), supporting both machine-identity (`universal`) and browser/SSO (`user`) auth — the latter interactive-only, since federated SSO has no password to hand over non-interactively.
 
+### Per-entry config layering
+
+Shipped: a machine type can change, add to, or turn off one entry of something `common` declares several of, instead of restating the whole set. Collections such as Syncthing folders, backup folders, databases, and repositories are tables keyed by an identifier rather than lists of tables, so the config merge reaches each entry by its key; `enabled = false` turns an inherited entry off; and `additional_<name>` adds to an inherited list, generalizing `additional_modules`, with the module that reads the list deciding where the additions go. See [architecture.md § How machinekit.toml layers](./architecture.md#how-machinekittoml-layers).
+
 The roadmap stops being prescriptive here. The architecture supports incremental addition; what gets added is a function of what the framework actually needs in use.
 
 ---

@@ -20,7 +20,8 @@ postgres_brew::provides() { printf 'postgres\n'; }
 postgres_brew::install() {
   logging::step "postgres install"
   local requested
-  if requested="$(postgres::_requested_versions)"; then
+  requested="$(postgres::_requested_versions)"
+  if [ -n "$requested" ]; then
     postgres_brew::_install_requested "$requested"
   else
     postgres_brew::_install_default

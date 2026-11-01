@@ -37,7 +37,7 @@ setup() {
 }
 
 @test "install routes to the default path when no versions are configured" {
-  STUB_RETURN=1 mktest::stub_function postgres::_requested_versions
+  STUB_OUTPUT="" mktest::stub_function postgres::_requested_versions
   mktest::stub_function postgres_brew::_install_requested
   mktest::stub_function postgres_brew::_install_default
   mktest::stub_function postgres::ensure_superuser
@@ -45,6 +45,21 @@ setup() {
   mktest::assert_stub_called postgres_brew::_install_default
   mktest::assert_stub_not_called postgres_brew::_install_requested
   mktest::assert_stub_called postgres::ensure_superuser
+}
+
+# A malformed versions table has to stop the run, not read as "none configured"
+# and quietly fall back to the default instance.
+@test "install stops when the versions table is malformed" {
+  STUB_EXIT=1 mktest::stub_function postgres::_requested_versions
+  mktest::stub_function postgres_brew::_install_requested
+  mktest::stub_function postgres_brew::_install_default
+  mktest::stub_function postgres::ensure_superuser
+  # bats' run turns errexit off; machinekit runs under set -e, which is what stops it.
+  with_errexit() { set -e; "$@"; }
+  run with_errexit postgres_brew::install
+  [ "$status" -ne 0 ]
+  mktest::assert_stub_not_called postgres_brew::_install_default
+  mktest::assert_stub_not_called postgres_brew::_install_requested
 }
 
 # --- postgres_brew::configure_container_access ---

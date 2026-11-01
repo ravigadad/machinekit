@@ -51,19 +51,15 @@ preflight::resolve_active_modules() {
   # Base modules are always active. The resolver dedups by name, so a blueprint
   # requesting one explicitly is harmless. The union is never empty, so there is
   # no empty-set short-circuit.
-  # A machine type's `modules` replaces common's (the config merge carries arrays
-  # whole), so `additional_modules` is the extend-don't-replace escape hatch. Each
-  # key feeds the requested set through its own read — common's modules, then the
-  # type's extras — kept independent so an absent `modules` still lets the extras in.
-  local requested=("${MK_BASE_MODULES[@]}") mod
+  # A machine type's `modules` replaces common's (the config merge carries lists
+  # whole), so a type adds to it with `additional_modules`. Order doesn't matter
+  # here: the resolver puts dependencies first regardless.
+  local requested=("${MK_BASE_MODULES[@]}") mod module_list
+  module_list=$(config::extended_list "$(config::get_json "" "{}")" modules after "machinekit.toml")
   while IFS= read -r mod; do
     [ -n "$mod" ] || continue
     requested+=("$mod")
-  done < <(config::get_array "modules")
-  while IFS= read -r mod; do
-    [ -n "$mod" ] || continue
-    requested+=("$mod")
-  done < <(config::get_array "additional_modules")
+  done < <(printf '%s' "$module_list" | jq -r '.[]')
 
   local ordered=()
   while IFS= read -r mod; do

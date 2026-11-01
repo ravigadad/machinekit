@@ -152,6 +152,13 @@ setup() {
   [ -z "$output" ]
 }
 
+# Keys are unique, but an explicit name can repeat another entry's, and two
+# entries for one database would dump to the same files.
+@test "_database_shape_error reports a database name that appears twice" {
+  run postgres_dump::_database_shape_error '[{"name":"somedb"},{"name":"somedb"}]' "/fake/dumps" "7"
+  [[ "$output" == *"more than once"* ]]
+}
+
 @test "_database_shape_error reports a non-numeric retain_count" {
   run postgres_dump::_database_shape_error '[{"name":"somedb","retain_count":"lots"}]' "/fake/dumps" "7"
   [[ "$output" == *"retain_count"* ]]
@@ -243,17 +250,10 @@ setup() {
 
 # --- config accessors + paths ---
 
-@test "_databases returns the configured databases" {
-  STUB_OUTPUT='[{"name":"somedb"}]' mktest::stub_function config::get "module.postgres_dump.databases"
+@test "_databases returns the configured databases, each key filling the database name" {
+  STUB_OUTPUT="the-databases" mktest::stub_function config::entries "module.postgres_dump.databases" "name"
   run postgres_dump::_databases
-  [ "$output" = '[{"name":"somedb"}]' ]
-}
-
-@test "_databases is empty and succeeds when the key is unset" {
-  STUB_RETURN=1 mktest::stub_function config::get
-  run postgres_dump::_databases
-  [ "$status" -eq 0 ]
-  [ -z "$output" ]
+  [ "$output" = "the-databases" ]
 }
 
 @test "_schedule defaults to a nightly run" {

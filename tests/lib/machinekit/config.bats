@@ -83,6 +83,189 @@ setup() {
   [ "$output" = "null" ]
 }
 
+# --- config::entries ---
+
+@test "entries reads the collection at the config key and returns its entries" {
+  STUB_OUTPUT='{"fake":{}}' mktest::stub_function config::get_json "module.fake.entries" "{}"
+  STUB_OUTPUT="the-entries" mktest::stub_function config::entries_from_json '{"fake":{}}' "module.fake.entries" "name"
+  run config::entries "module.fake.entries" "name"
+  [ "$output" = "the-entries" ]
+}
+
+@test "entries passes an empty key field when the caller names none" {
+  STUB_OUTPUT='{"fake":{}}' mktest::stub_function config::get_json "module.fake.entries" "{}"
+  STUB_OUTPUT="the-entries" mktest::stub_function config::entries_from_json '{"fake":{}}' "module.fake.entries" ""
+  run config::entries "module.fake.entries"
+  [ "$output" = "the-entries" ]
+}
+
+# --- config::entries_from_json ---
+
+@test "entries_from_json returns the enabled entries when the collection is well-formed" {
+  mktest::stub_function config::_collection_shape_error '{"fake":{}}'
+  STUB_OUTPUT="the-entries" mktest::stub_function config::_enabled_entries '{"fake":{}}' "name"
+  run config::entries_from_json '{"fake":{}}' "module.fake.entries" "name"
+  [ "$output" = "the-entries" ]
+}
+
+@test "entries_from_json fails naming the collection when its shape is wrong" {
+  STUB_OUTPUT="the-shape-error" mktest::stub_function config::_collection_shape_error '{"fake":1}'
+  mktest::stub_function config::_enabled_entries
+  STUB_EXIT=1 mktest::stub_function lifecycle::fail
+  run config::entries_from_json '{"fake":1}' "module.fake.entries" ""
+  [ "$status" -eq 1 ]
+  MATCH="module\.fake\.entries.*the-shape-error" mktest::assert_stub_called lifecycle::fail
+  mktest::assert_stub_not_called config::_enabled_entries
+}
+
+# --- config::enabled_table ---
+
+@test "enabled_table returns the collection's enabled entries as a table when it is well-formed" {
+  STUB_OUTPUT='{"fake":{}}' mktest::stub_function config::get_json "module.fake.entries" "{}"
+  mktest::stub_function config::_collection_shape_error '{"fake":{}}'
+  STUB_OUTPUT="the-table" mktest::stub_function config::_enabled_table '{"fake":{}}'
+  run config::enabled_table "module.fake.entries"
+  [ "$output" = "the-table" ]
+}
+
+@test "enabled_table fails naming the collection when its shape is wrong" {
+  STUB_OUTPUT='{"fake":1}' mktest::stub_function config::get_json "module.fake.entries" "{}"
+  STUB_OUTPUT="the-shape-error" mktest::stub_function config::_collection_shape_error '{"fake":1}'
+  mktest::stub_function config::_enabled_table
+  STUB_EXIT=1 mktest::stub_function lifecycle::fail
+  run config::enabled_table "module.fake.entries"
+  [ "$status" -eq 1 ]
+  MATCH="module\.fake\.entries.*the-shape-error" mktest::assert_stub_called lifecycle::fail
+  mktest::assert_stub_not_called config::_enabled_table
+}
+
+# --- config::extended_list ---
+
+@test "extended_list returns the combined list when both lists are well-formed" {
+  mktest::stub_function config::_list_shape_error '{"fake":1}' "fake_list"
+  STUB_OUTPUT="the-list" mktest::stub_function config::_combined_list '{"fake":1}' "fake_list" "before"
+  run config::extended_list '{"fake":1}' "fake_list" "before" "module.fake.entries.one"
+  [ "$output" = "the-list" ]
+}
+
+@test "extended_list fails naming the entry when a list is malformed" {
+  STUB_OUTPUT="the-shape-error" mktest::stub_function config::_list_shape_error '{"fake":1}' "fake_list"
+  mktest::stub_function config::_combined_list
+  STUB_EXIT=1 mktest::stub_function lifecycle::fail
+  run config::extended_list '{"fake":1}' "fake_list" "before" "module.fake.entries.one"
+  [ "$status" -eq 1 ]
+  MATCH="module\.fake\.entries\.one.*the-shape-error" mktest::assert_stub_called lifecycle::fail
+  mktest::assert_stub_not_called config::_combined_list
+}
+
+# --- config::_list_shape_error ---
+
+@test "_list_shape_error reports nothing when both lists are lists or absent" {
+  result=$(config::_list_shape_error '{"fake_list":["a"],"additional_fake_list":["b"]}' "fake_list")
+  [ -z "$result" ]
+  result=$(config::_list_shape_error '{}' "fake_list")
+  [ -z "$result" ]
+}
+
+@test "_list_shape_error reports the list when it is not a list" {
+  result=$(config::_list_shape_error '{"fake_list":"a"}' "fake_list")
+  [[ "$result" == "fake_list "* ]]
+}
+
+@test "_list_shape_error reports the additional list when it is not a list" {
+  result=$(config::_list_shape_error '{"additional_fake_list":"b"}' "fake_list")
+  [[ "$result" == "additional_fake_list "* ]]
+}
+
+# --- config::_combined_list ---
+
+@test "_combined_list puts the additional items before the inherited ones" {
+  result=$(config::_combined_list '{"fake_list":["a1","a2"],"additional_fake_list":["b1"]}' "fake_list" "before")
+  [ "$result" = '["b1","a1","a2"]' ]
+}
+
+@test "_combined_list puts the additional items after the inherited ones" {
+  result=$(config::_combined_list '{"fake_list":["a1","a2"],"additional_fake_list":["b1"]}' "fake_list" "after")
+  [ "$result" = '["a1","a2","b1"]' ]
+}
+
+@test "_combined_list fails on a position other than before or after" {
+  run config::_combined_list '{}' "fake_list" "fake-position"
+  [ "$status" -ne 0 ]
+}
+
+@test "_combined_list treats an absent list as empty" {
+  result=$(config::_combined_list '{"additional_fake_list":["b1"]}' "fake_list" "after")
+  [ "$result" = '["b1"]' ]
+  result=$(config::_combined_list '{}' "fake_list" "after")
+  [ "$result" = '[]' ]
+}
+
+# --- config::_collection_shape_error ---
+
+@test "_collection_shape_error reports nothing for a well-formed collection" {
+  result=$(config::_collection_shape_error '{"fake-one":{"enabled":false},"fake_two":{"a":1},"three":{}}')
+  [ -z "$result" ]
+}
+
+@test "_collection_shape_error reports a collection that is not a table" {
+  result=$(config::_collection_shape_error '["fake"]')
+  [[ "$result" == *"table"* ]]
+}
+
+@test "_collection_shape_error reports an entry that is not a table, naming it" {
+  result=$(config::_collection_shape_error '{"fake":false}')
+  [[ "$result" == *"fake"*"table"* ]]
+}
+
+@test "_collection_shape_error reports a key outside the bare-key characters, naming it" {
+  result=$(config::_collection_shape_error '{"fake.key":{}}')
+  [[ "$result" == *"fake.key"*"letters"* ]]
+}
+
+@test "_collection_shape_error reports a non-boolean enabled, naming the entry" {
+  result=$(config::_collection_shape_error '{"fake":{"enabled":"no"}}')
+  [[ "$result" == *"fake"*"enabled"* ]]
+}
+
+# --- config::_enabled_entries ---
+
+@test "_enabled_entries emits the enabled table's entries as a compact array" {
+  STUB_OUTPUT='{"one":{"a":1},"three":{"b":2}}' mktest::stub_function config::_enabled_table '{"fake":"collection"}'
+  run config::_enabled_entries '{"fake":"collection"}' ""
+  [ "$output" = '[{"a":1},{"b":2}]' ]
+}
+
+@test "_enabled_entries fills the named field from the key" {
+  STUB_OUTPUT='{"one":{"a":1}}' mktest::stub_function config::_enabled_table '{"fake":"collection"}'
+  run config::_enabled_entries '{"fake":"collection"}' "name"
+  [ "$output" = '[{"name":"one","a":1}]' ]
+}
+
+@test "_enabled_entries keeps an explicit value in the named field over the key" {
+  STUB_OUTPUT='{"one":{"name":"explicit"}}' mktest::stub_function config::_enabled_table '{"fake":"collection"}'
+  run config::_enabled_entries '{"fake":"collection"}' "name"
+  [ "$output" = '[{"name":"explicit"}]' ]
+}
+
+@test "_enabled_entries emits nothing when no entry is enabled" {
+  STUB_OUTPUT='{}' mktest::stub_function config::_enabled_table '{"fake":"collection"}'
+  run config::_enabled_entries '{"fake":"collection"}' "name"
+  [ -z "$output" ]
+}
+
+# --- config::_enabled_table ---
+
+@test "_enabled_table keeps the enabled entries under their keys, stripping enabled" {
+  run config::_enabled_table '{"one":{"a":1,"enabled":true},"two":{"enabled":false},"three":{"b":2}}'
+  [ "$output" = '{"one":{"a":1},"three":{"b":2}}' ]
+}
+
+@test "_enabled_table is an empty table when every entry is disabled" {
+  run config::_enabled_table '{"one":{"enabled":false}}'
+  [ "$output" = '{}' ]
+}
+
 # --- config::_common_json ---
 
 @test "_common_json returns parsed machinekit toml file in common dir" {
@@ -115,8 +298,35 @@ setup() {
 
 @test "_parse_toml parses a valid TOML file into JSON" {
   printf 'answer = 42\n' > "$FAKE_BP/test.toml"
+  mktest::stub_function config::_first_table_list_path '{"answer":42}'
   result=$(config::_parse_toml "$FAKE_BP/test.toml")
   [ "$(printf '%s' "$result" | jq -r '.answer')" = "42" ]
+}
+
+@test "_parse_toml fails naming the file and the key when the file holds a list of tables" {
+  printf 'answer = 42\n' > "$FAKE_BP/test.toml"
+  STUB_OUTPUT="module.fake.entries" mktest::stub_function config::_first_table_list_path '{"answer":42}'
+  STUB_EXIT=1 mktest::stub_function lifecycle::fail
+  run config::_parse_toml "$FAKE_BP/test.toml"
+  [ "$status" -eq 1 ]
+  MATCH="test\.toml.*module\.fake\.entries" mktest::assert_stub_called lifecycle::fail
+}
+
+# --- config::_first_table_list_path ---
+
+@test "_first_table_list_path returns the dotted key of a list of tables" {
+  result=$(config::_first_table_list_path '{"module":{"fake":{"entries":[{"a":1}]}}}')
+  [ "$result" = "module.fake.entries" ]
+}
+
+@test "_first_table_list_path returns nothing when no list holds a table" {
+  result=$(config::_first_table_list_path '{"modules":["a","b"],"module":{"fake":{"entries":{"one":{"list":[1,2]}}}}}')
+  [ -z "$result" ]
+}
+
+@test "_first_table_list_path finds a list of tables nested inside a keyed entry" {
+  result=$(config::_first_table_list_path '{"module":{"fake":{"entries":{"one":{"nested":[{"a":1}]}}}}}')
+  [ "$result" = "module.fake.entries.one.nested" ]
 }
 
 # --- config::_merge_json ---

@@ -95,7 +95,9 @@ postgres_dump::_database_shape_error() {
     --arg directory "$default_directory" \
     --arg retain_count "$default_retain_count" '
     if   any(.[]; (.name // "") == "") then
-      "every [[module.postgres_dump.databases]] entry needs a name"
+      "every [module.postgres_dump.databases.<key>] entry needs a name (the name defaults to the key)"
+    elif ([.[].name] | length) != ([.[].name] | unique | length) then
+      "a database name appears more than once"
     elif any(.[]; ((.directory // $directory) == "")) then
       "every database needs a directory: set [module.postgres_dump].directory, or one on the entry"
     elif any(.[]; ((.retain_count // $retain_count) | tostring | test("^[0-9]+$") | not)) then
@@ -161,10 +163,11 @@ postgres_dump::_install_service() {
 
 # --- config accessors + paths ---
 
-# Array-of-tables; `|| true` so an unset key is an empty result (no databases is a
-# valid no-op config), not a set -e failure.
+# Each entry's key is the database name unless it sets `name`, so
+# `[module.postgres_dump.databases.hindsight]` alone dumps the hindsight database.
+# Empty when none are configured (no databases is a valid no-op config).
 postgres_dump::_databases() {
-  config::get "module.postgres_dump.databases" || true
+  config::entries "module.postgres_dump.databases" name
 }
 
 postgres_dump::_schedule() {

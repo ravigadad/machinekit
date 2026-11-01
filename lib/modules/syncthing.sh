@@ -81,14 +81,15 @@ syncthing::install() {
 }
 
 # Each folder entry must carry an id (stable + identical across machines, so the
-# same logical folder lines up) and a path. Fail loudly on a malformed entry
+# same logical folder lines up) and a path. The id defaults to the entry's key, so
+# it is missing only when set to "" explicitly. Fail loudly on a malformed entry
 # rather than producing a half-configured mesh.
 syncthing::_validate_folders() {
   local folders="$1" bad
   bad=$(printf '%s' "$folders" | jq -r '
     any(.[]; (has("id")|not) or (has("path")|not) or (.id == "") or (.path == ""))')
   [ "$bad" = "true" ] && lifecycle::fail \
-    "syncthing: every [[module.syncthing.folders]] entry needs both an id and a path."
+    "syncthing: every [module.syncthing.folders.<key>] entry needs both an id and a path (the id defaults to the key)."
   return 0
 }
 
@@ -100,7 +101,7 @@ syncthing::_validate_peers() {
   bad=$(printf '%s' "$peers" | jq -r '
     any(.[]; (has("device_id")|not) or (.device_id == ""))')
   [ "$bad" = "true" ] && lifecycle::fail \
-    "syncthing: every [[module.syncthing.peers]] entry needs a device_id."
+    "syncthing: every [module.syncthing.peers.<key>] entry needs a device_id."
   return 0
 }
 
@@ -113,26 +114,29 @@ syncthing::_validate_folder_types() {
     ($valid | split(" ")) as $types
     | any(.[]; .type as $declared | ($declared != null) and (($types | index($declared)) == null))')
   [ "$bad" = "true" ] && lifecycle::fail \
-    "syncthing: a [[module.syncthing.folders]] type must be one of: $_SYNCTHING_FOLDER_TYPES."
+    "syncthing: a [module.syncthing.folders.<key>] type must be one of: $_SYNCTHING_FOLDER_TYPES."
   return 0
 }
 
 # Each folder's ignore config must be coherent: refusing to manage .stignore while
-# still listing ignore_patterns is a contradiction; managing it with neither
-# defaults nor patterns is a pointless empty block (warn, don't fail).
+# still listing patterns is a contradiction; managing it with neither defaults nor
+# patterns is a pointless empty block (warn, don't fail). Reading the patterns
+# here, as a plain assignment, is also what makes a malformed pattern list stop
+# the run in preflight rather than mid-install.
 syncthing::_validate_ignores() {
-  local folders="$1" folder id manage add_defaults pattern_count
+  local folders="$1" folder id manage add_defaults patterns pattern_count
   while IFS= read -r folder; do
     [ -n "$folder" ] || continue
     id=$(printf '%s' "$folder" | jq -r '.id // "?"')
     manage=$(printf '%s' "$folder" | jq -r 'if .manage_stignore == null then true else .manage_stignore end')
     add_defaults=$(printf '%s' "$folder" | jq -r 'if .add_default_ignores == null then true else .add_default_ignores end')
-    pattern_count=$(printf '%s' "$folder" | jq -r '(.ignore_patterns // []) | length')
+    patterns=$(config::extended_list "$folder" ignore_patterns before "syncthing folder '$id'")
+    pattern_count=$(printf '%s' "$patterns" | jq -r 'length')
     if [ "$manage" != "true" ] && [ "$pattern_count" -gt 0 ]; then
-      lifecycle::fail "syncthing: folder '$id' sets manage_stignore = false but lists ignore_patterns — drop one (machinekit can't both manage .stignore and leave it alone)."
+      lifecycle::fail "syncthing: folder '$id' sets manage_stignore = false but has ignore patterns — drop one (machinekit can't both manage .stignore and leave it alone)."
     fi
     if [ "$manage" = "true" ] && [ "$add_defaults" != "true" ] && [ "$pattern_count" -eq 0 ]; then
-      logging::warn "syncthing: folder '$id' manages .stignore with no defaults and no ignore_patterns — only an empty managed block will be written."
+      logging::warn "syncthing: folder '$id' manages .stignore with no defaults and no ignore patterns — only an empty managed block will be written."
     fi
   done < <(printf '%s' "$folders" | jq -c '.[]')
   return 0
@@ -165,7 +169,7 @@ syncthing::postflight_info() {
 # client, join an unjoined client, or approve a joined client on the hub.
 syncthing::postflight_instructions() {
   if syncthing::_is_hub; then
-    printf "Add this device ID to each client's [[module.syncthing.peers]] (introducer = true).\n"
+    printf "Add this device ID to a [module.syncthing.peers.<key>] entry in each client's config (introducer = true).\n"
     return 0
   fi
   if [ "$(syncthing::_joined)" = "true" ]; then
@@ -215,20 +219,22 @@ syncthing::_folder_type() {
 
 # Reconcile the folder's .stignore from its ignore config. manage_stignore = false
 # leaves the file entirely to the user; otherwise machinekit maintains its block
-# (user patterns first, then the built-in defaults).
+# (the blueprint's patterns first, then the built-in defaults).
 syncthing::_apply_stignore() {
   local folder="$1" path="$2"
   [ "$(printf '%s' "$folder" | jq -r 'if .manage_stignore == null then true else .manage_stignore end')" = "true" ] || return 0
   syncthing::_stignore_patterns "$folder" | managed_block::ensure "$path/.stignore" "//"
 }
 
-# Emit the folder's ordered, de-duplicated ignore lines: user ignore_patterns
-# first (so a user negation wins .stignore's first-match precedence), then the
-# defaults unless add_default_ignores is false.
+# Emit the folder's ordered, de-duplicated ignore lines. .stignore applies the
+# first matching pattern, so the most specific layer goes first, letting its `!`
+# negations win: a machine type's additional_ignore_patterns, then the inherited
+# ignore_patterns, then the defaults unless add_default_ignores is false.
 syncthing::_stignore_patterns() {
-  local folder="$1"
+  local folder="$1" id
+  id=$(printf '%s' "$folder" | jq -r '.id // "?"')
   {
-    printf '%s' "$folder" | jq -r '.ignore_patterns[]? // empty'
+    config::extended_list "$folder" ignore_patterns before "syncthing folder '$id'" | jq -r '.[]'
     if [ "$(printf '%s' "$folder" | jq -r 'if .add_default_ignores == null then true else .add_default_ignores end')" = "true" ]; then
       syncthing::_default_ignores
     fi
@@ -368,14 +374,14 @@ syncthing::_install_conflict_service() {
 
 # --- config accessors ---
 
-# Array-of-tables; `|| true` so an unset key is an empty result (no folders is a
-# valid single-machine config), not a set -e failure.
+# Each folder's key is its Syncthing folder id unless the entry sets one. Empty
+# when none are configured (no folders is a valid single-machine config).
 syncthing::_folders() {
-  config::get "module.syncthing.folders" || true
+  config::entries "module.syncthing.folders" id
 }
 
 syncthing::_peers() {
-  config::get "module.syncthing.peers" || true
+  config::entries "module.syncthing.peers"
 }
 
 # A hub absorbs joiners (accepts pending devices) instead of pre-listing them.

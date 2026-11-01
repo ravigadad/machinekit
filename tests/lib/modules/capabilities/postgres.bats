@@ -295,9 +295,9 @@ setup() {
 
 # --- postgres::_requested_versions ---
 
-@test "_requested_versions reads the versions array from config" {
+@test "_requested_versions reads the versions collection" {
   STUB_OUTPUT='the-versions-array' \
-    mktest::stub_function config::get "module.postgres.versions"
+    mktest::stub_function config::entries "module.postgres.versions"
   run postgres::_requested_versions
   [ "$output" = 'the-versions-array' ]
 }

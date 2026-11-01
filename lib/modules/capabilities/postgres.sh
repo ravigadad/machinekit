@@ -181,11 +181,15 @@ postgres::_request_shape_error() {
     else empty end'
 }
 
-# The operator's requested {version, port} set, or nonzero when none is
-# configured. Keyed on the capability's own config namespace, so both satisfiers
-# read the same table: brew makes it true, postgres_app checks it.
+# The operator's requested {version, port} set as a JSON array, or nothing when
+# none is configured. Each entry's key is only a handle (`primary`, say): the
+# version is an attribute that changes on upgrade, so it stays a field rather than
+# the key a machine type's override would have to follow. Keyed on the
+# capability's own config namespace, so both satisfiers read the same table: brew
+# makes it true, postgres_app checks it. Callers assign it on its own line, so a
+# malformed table stops the run instead of reading as "none configured".
 postgres::_requested_versions() {
-  config::get "module.postgres.versions"
+  config::entries "module.postgres.versions"
 }
 
 # Fail with a clear message if the requested set is malformed. The pure check and

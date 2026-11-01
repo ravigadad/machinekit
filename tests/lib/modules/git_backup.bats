@@ -187,6 +187,8 @@ setup() {
 # --- _validate_ignores ---
 
 @test "_validate_ignores passes the common defaults-on, no-patterns folder" {
+  STUB_OUTPUT='[]' mktest::stub_function config::extended_list \
+    '{"path":"/a","remote":"r1"}' "ignore_patterns" "after" "git_backup folder '/a'"
   STUB_EXIT=1 mktest::stub_function lifecycle::fail
   git_backup::_validate_ignores '[{"path":"/a","remote":"r1"}]'
   mktest::assert_stub_not_called lifecycle::fail
@@ -194,18 +196,24 @@ setup() {
 }
 
 @test "_validate_ignores passes an opt-out folder with no patterns" {
+  STUB_OUTPUT='[]' mktest::stub_function config::extended_list \
+    '{"path":"/a","remote":"r1","manage_gitignore":false}' "ignore_patterns" "after" "git_backup folder '/a'"
   STUB_EXIT=1 mktest::stub_function lifecycle::fail
   git_backup::_validate_ignores '[{"path":"/a","remote":"r1","manage_gitignore":false}]'
   mktest::assert_stub_not_called lifecycle::fail
 }
 
-@test "_validate_ignores fails an opt-out folder that still lists ignore_patterns" {
+@test "_validate_ignores fails an opt-out folder that still has patterns" {
+  STUB_OUTPUT='["x"]' mktest::stub_function config::extended_list \
+    '{"path":"/a","remote":"r1","manage_gitignore":false}' "ignore_patterns" "after" "git_backup folder '/a'"
   STUB_EXIT=1 mktest::stub_function lifecycle::fail
-  run ! git_backup::_validate_ignores '[{"path":"/a","remote":"r1","manage_gitignore":false,"ignore_patterns":["x"]}]'
+  run ! git_backup::_validate_ignores '[{"path":"/a","remote":"r1","manage_gitignore":false}]'
   MATCH="manage_gitignore = false" mktest::assert_stub_called lifecycle::fail
 }
 
 @test "_validate_ignores warns on the all-empty no-op folder" {
+  STUB_OUTPUT='[]' mktest::stub_function config::extended_list \
+    '{"path":"/a","remote":"r1","add_default_ignores":false}' "ignore_patterns" "after" "git_backup folder '/a'"
   STUB_EXIT=1 mktest::stub_function lifecycle::fail
   git_backup::_validate_ignores '[{"path":"/a","remote":"r1","add_default_ignores":false}]'
   mktest::assert_stub_not_called lifecycle::fail
@@ -349,24 +357,34 @@ setup() {
   mktest::assert_stub_not_called managed_block::ensure
 }
 
-@test "_gitignore_patterns emits user patterns before defaults" {
-  run git_backup::_gitignore_patterns '{"ignore_patterns":["build/","node_modules/"]}'
-  [ "${lines[0]}" = "build/" ]
-  [ "${lines[1]}" = "node_modules/" ]
-  [ "${lines[2]}" = ".DS_Store" ]
-  [ "${lines[3]}" = "._*" ]
-  [ "${lines[4]}" = ".stversions/" ]
+# .gitignore applies the last matching pattern, so the most specific layer goes
+# last, letting its `!` negations win: the defaults, then the folder's patterns
+# with a machine type's additions after the inherited ones.
+@test "_gitignore_patterns emits the defaults, then the folder's patterns with additions last" {
+  STUB_OUTPUT=$'default1\ndefault2' mktest::stub_function git_backup::_default_ignores
+  STUB_OUTPUT='["build/","!default1"]' mktest::stub_function config::extended_list \
+    '{"path":"/a"}' "ignore_patterns" "after" "git_backup folder '/a'"
+  run git_backup::_gitignore_patterns '{"path":"/a"}'
+  [ "$output" = "$(printf 'default1\ndefault2\nbuild/\n!default1')" ]
 }
 
 @test "_gitignore_patterns omits defaults when add_default_ignores is false" {
-  run git_backup::_gitignore_patterns '{"ignore_patterns":["build/"],"add_default_ignores":false}'
+  mktest::stub_function git_backup::_default_ignores
+  STUB_OUTPUT='["build/"]' mktest::stub_function config::extended_list \
+    '{"path":"/a","add_default_ignores":false}' "ignore_patterns" "after" "git_backup folder '/a'"
+  run git_backup::_gitignore_patterns '{"path":"/a","add_default_ignores":false}'
   [ "$output" = "build/" ]
+  mktest::assert_stub_not_called git_backup::_default_ignores
 }
 
-@test "_gitignore_patterns de-duplicates, keeping the user's occurrence" {
-  run git_backup::_gitignore_patterns '{"ignore_patterns":[".stversions/"]}'
-  [ "${lines[0]}" = ".stversions/" ]
-  [ "${#lines[@]}" -eq 5 ]
+# Keeping the last occurrence preserves what git sees: a repeated pattern still
+# lands after any `!` exception written between its two occurrences.
+@test "_gitignore_patterns de-duplicates, keeping the last occurrence" {
+  STUB_OUTPUT=$'default1\ndefault2' mktest::stub_function git_backup::_default_ignores
+  STUB_OUTPUT='["!default1","default1"]' mktest::stub_function config::extended_list \
+    '{"path":"/a"}' "ignore_patterns" "after" "git_backup folder '/a'"
+  run git_backup::_gitignore_patterns '{"path":"/a"}'
+  [ "$output" = "$(printf 'default2\n!default1\ndefault1')" ]
 }
 
 @test "_default_ignores includes Syncthing's machine-local artifacts" {
@@ -412,16 +430,9 @@ setup() {
 # --- config accessors + paths ---
 
 @test "_folders returns the configured folders" {
-  STUB_OUTPUT='[{"path":"/a","remote":"r1"}]' mktest::stub_function config::get "module.git_backup.folders"
+  STUB_OUTPUT="the-folders" mktest::stub_function config::entries "module.git_backup.folders"
   run git_backup::_folders
-  [ "$output" = '[{"path":"/a","remote":"r1"}]' ]
-}
-
-@test "_folders is empty and succeeds when the key is unset" {
-  STUB_RETURN=1 mktest::stub_function config::get
-  run git_backup::_folders
-  [ "$status" -eq 0 ]
-  [ -z "$output" ]
+  [ "$output" = "the-folders" ]
 }
 
 @test "_interval defaults to 300" {

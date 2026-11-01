@@ -19,7 +19,7 @@ setup() {
 
 # One well-formed repository entry, used wherever the entry's own content is
 # incidental to what the test is checking.
-ENTRY='{"name":"fake_repo","repository":"fake:repository","paths":[{"path":"/fake/dumps"}]}'
+ENTRY='{"name":"fake_repo","repository":"fake:repository","paths":{"dumps":{"path":"/fake/dumps"}}}'
 
 # --- requires ---
 
@@ -101,12 +101,12 @@ offsite_backup/second_repo/credentials\tfalse\tfalse' ]
   STUB_OUTPUT='[{"path":"/fake/dumps"}]' mktest::stub_function offsite_backup::_paths "$ENTRY"
   STUB_OUTPUT="30 3 * * *" mktest::stub_function offsite_backup::_schedule "$ENTRY"
   STUB_OUTPUT="0 4 * * 0" mktest::stub_function offsite_backup::_check_schedule "$ENTRY"
-  mktest::stub_function offsite_backup::_validate_paths '[{"path":"/fake/dumps"}]'
+  mktest::stub_function offsite_backup::_validate_paths '[{"path":"/fake/dumps"}]' "fake_repo"
   mktest::stub_function offsite_backup::_validate_secrets "fake_repo"
   mktest::stub_function service::validate_cron "30 3 * * *"
   mktest::stub_function service::validate_cron "0 4 * * 0"
   offsite_backup::_validate_repository "$ENTRY"
-  mktest::assert_stub_called offsite_backup::_validate_paths '[{"path":"/fake/dumps"}]'
+  mktest::assert_stub_called offsite_backup::_validate_paths '[{"path":"/fake/dumps"}]' "fake_repo"
   mktest::assert_stub_called offsite_backup::_validate_secrets "fake_repo"
   mktest::assert_stub_called service::validate_cron "30 3 * * *"
   mktest::assert_stub_called service::validate_cron "0 4 * * 0"
@@ -175,8 +175,10 @@ offsite_backup/second_repo/credentials\tfalse\tfalse' ]
 # --- postflight_info / postflight_instructions ---
 
 @test "postflight_info reports each repository's paths, schedule, and retention" {
-  STUB_OUTPUT='[{"name":"fake_repo","repository":"fake:repository","paths":[{"path":"~/dumps"}]}]' \
+  STUB_OUTPUT='[{"name":"fake_repo","repository":"fake:repository"}]' \
     mktest::stub_function offsite_backup::_repositories
+  STUB_OUTPUT='[{"path":"~/dumps"}]' \
+    mktest::stub_function offsite_backup::_paths '{"name":"fake_repo","repository":"fake:repository"}'
   STUB_OUTPUT="30 3 * * *" mktest::stub_function offsite_backup::_schedule
   STUB_OUTPUT="0 4 * * 0" mktest::stub_function offsite_backup::_check_schedule
   STUB_OUTPUT="7" mktest::stub_function offsite_backup::_keep_daily
@@ -195,8 +197,12 @@ offsite_backup/second_repo/credentials\tfalse\tfalse' ]
 }
 
 @test "postflight_info names the repository each line belongs to" {
-  STUB_OUTPUT='[{"name":"first_repo","repository":"fake:one","paths":[{"path":"/fake/a"}]},{"name":"second_repo","repository":"fake:two","paths":[{"path":"/fake/b"}]}]' \
+  STUB_OUTPUT='[{"name":"first_repo","repository":"fake:one"},{"name":"second_repo","repository":"fake:two"}]' \
     mktest::stub_function offsite_backup::_repositories
+  STUB_OUTPUT='[{"path":"/fake/a"}]' \
+    mktest::stub_function offsite_backup::_paths '{"name":"first_repo","repository":"fake:one"}'
+  STUB_OUTPUT='[{"path":"/fake/b"}]' \
+    mktest::stub_function offsite_backup::_paths '{"name":"second_repo","repository":"fake:two"}'
   STUB_OUTPUT="30 3 * * *" mktest::stub_function offsite_backup::_schedule
   STUB_OUTPUT="0 4 * * 0" mktest::stub_function offsite_backup::_check_schedule
   STUB_OUTPUT="7" mktest::stub_function offsite_backup::_keep_daily
@@ -286,28 +292,31 @@ offsite_backup/second_repo/credentials\tfalse\tfalse' ]
   [[ "$output" == *"repository"* ]]
 }
 
-@test "_repositories_shape_error reports a repository with no paths" {
-  run offsite_backup::_repositories_shape_error '[{"name":"fake_repo","repository":"fake:repository"}]'
-  [[ "$output" == *"paths"* ]]
-}
-
 # --- _validate_paths ---
 
 @test "_validate_paths passes a well-formed path set" {
   STUB_EXIT=1 mktest::stub_function lifecycle::fail
-  offsite_backup::_validate_paths '[{"path":"/fake/dumps"},{"path":"/fake/other","max_age_hours":36}]'
+  offsite_backup::_validate_paths '[{"path":"/fake/dumps"},{"path":"/fake/other","max_age_hours":36}]' "fake_repo"
   mktest::assert_stub_not_called lifecycle::fail
+}
+
+# Checked here rather than with the repository set, because a path a machine type
+# turned off leaves nothing to back up just as surely as one never written.
+@test "_validate_paths fails, naming the repository, when it has no enabled paths" {
+  STUB_EXIT=1 mktest::stub_function lifecycle::fail
+  run ! offsite_backup::_validate_paths "" "fake_repo"
+  MATCH="fake_repo.*at least one" mktest::assert_stub_called lifecycle::fail
 }
 
 @test "_validate_paths fails when an entry has no path" {
   STUB_EXIT=1 mktest::stub_function lifecycle::fail
-  run ! offsite_backup::_validate_paths '[{"max_age_hours":36}]'
+  run ! offsite_backup::_validate_paths '[{"max_age_hours":36}]' "fake_repo"
   MATCH="needs a path" mktest::assert_stub_called lifecycle::fail
 }
 
 @test "_validate_paths fails on a non-numeric max_age_hours" {
   STUB_EXIT=1 mktest::stub_function lifecycle::fail
-  run ! offsite_backup::_validate_paths '[{"path":"/fake/dumps","max_age_hours":"a while"}]'
+  run ! offsite_backup::_validate_paths '[{"path":"/fake/dumps","max_age_hours":"a while"}]' "fake_repo"
   MATCH="max_age_hours" mktest::assert_stub_called lifecycle::fail
 }
 
@@ -573,17 +582,10 @@ EOF
 
 # --- _repositories / per-entry accessors ---
 
-@test "_repositories returns the configured repositories" {
-  STUB_OUTPUT="[$ENTRY]" mktest::stub_function config::get "module.offsite_backup.repositories"
+@test "_repositories returns the configured repositories, each key filling the name" {
+  STUB_OUTPUT="the-repositories" mktest::stub_function config::entries "module.offsite_backup.repositories" "name"
   run offsite_backup::_repositories
-  [ "$output" = "[$ENTRY]" ]
-}
-
-@test "_repositories is empty and succeeds when the key is unset" {
-  STUB_RETURN=1 mktest::stub_function config::get
-  run offsite_backup::_repositories
-  [ "$status" -eq 0 ]
-  [ -z "$output" ]
+  [ "$output" = "the-repositories" ]
 }
 
 @test "_name reads the repository's name" {
@@ -596,14 +598,20 @@ EOF
   [ "$output" = "fake:repository" ]
 }
 
-@test "_paths reads the repository's own path list" {
+@test "_paths reads the enabled entries of the repository's own paths collection" {
+  STUB_OUTPUT="fake_repo" mktest::stub_function offsite_backup::_name "$ENTRY"
+  STUB_OUTPUT="the-paths" mktest::stub_function config::entries_from_json \
+    '{"dumps":{"path":"/fake/dumps"}}' "offsite_backup repository 'fake_repo' paths"
   run offsite_backup::_paths "$ENTRY"
-  [ "$output" = '[{"path":"/fake/dumps"}]' ]
+  [ "$output" = "the-paths" ]
 }
 
-@test "_paths is an empty list when the repository declares none" {
+@test "_paths reads an empty collection when the repository declares none" {
+  STUB_OUTPUT="fake_repo" mktest::stub_function offsite_backup::_name '{"name":"fake_repo"}'
+  STUB_OUTPUT="" mktest::stub_function config::entries_from_json '{}' "offsite_backup repository 'fake_repo' paths"
   run offsite_backup::_paths '{"name":"fake_repo"}'
-  [ "$output" = "[]" ]
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
 }
 
 # --- _repository_setting (the entry-beats-module cascade) ---

@@ -2,7 +2,7 @@
 # git_backup — periodically pushes one or more working dirs to git remotes, giving
 # a live, replicated dir (e.g. one Syncthing keeps in sync — which propagates
 # deletions and so is not itself a backup) durable history on a remote. Generic:
-# it backs up whatever folders the blueprint lists ([[module.git_backup.folders]])
+# it backs up whatever folders the blueprint lists ([module.git_backup.folders.*])
 # and knows nothing about what lives in them. Depends on no other module.
 #
 # One service runs for all folders; the push script (git_backup/push.sh) iterates
@@ -120,26 +120,29 @@ git_backup::_validate_folders() {
   bad=$(printf '%s' "$folders" | jq -r '
     any(.[]; (has("path")|not) or (has("remote")|not) or (.path == "") or (.remote == ""))')
   [ "$bad" = "true" ] && lifecycle::fail \
-    "git_backup: every [[module.git_backup.folders]] entry needs both a path and a remote."
+    "git_backup: every [module.git_backup.folders.<key>] entry needs both a path and a remote."
   return 0
 }
 
 # Each folder's ignore config must be coherent: refusing to manage .gitignore while
-# still listing ignore_patterns is a contradiction; managing it with neither
-# defaults nor patterns is a pointless empty block (warn, don't fail).
+# still listing patterns is a contradiction; managing it with neither defaults nor
+# patterns is a pointless empty block (warn, don't fail). Reading the patterns
+# here, as a plain assignment, is also what makes a malformed pattern list stop
+# the run in preflight rather than mid-install.
 git_backup::_validate_ignores() {
-  local folders="$1" folder path manage add_defaults pattern_count
+  local folders="$1" folder path manage add_defaults patterns pattern_count
   while IFS= read -r folder; do
     [ -n "$folder" ] || continue
     path=$(printf '%s' "$folder" | jq -r '.path // "?"')
     manage=$(printf '%s' "$folder" | jq -r 'if .manage_gitignore == null then true else .manage_gitignore end')
     add_defaults=$(printf '%s' "$folder" | jq -r 'if .add_default_ignores == null then true else .add_default_ignores end')
-    pattern_count=$(printf '%s' "$folder" | jq -r '(.ignore_patterns // []) | length')
+    patterns=$(config::extended_list "$folder" ignore_patterns after "git_backup folder '$path'")
+    pattern_count=$(printf '%s' "$patterns" | jq -r 'length')
     if [ "$manage" != "true" ] && [ "$pattern_count" -gt 0 ]; then
-      lifecycle::fail "git_backup: folder '$path' sets manage_gitignore = false but lists ignore_patterns — drop one (machinekit can't both manage .gitignore and leave it alone)."
+      lifecycle::fail "git_backup: folder '$path' sets manage_gitignore = false but has ignore patterns — drop one (machinekit can't both manage .gitignore and leave it alone)."
     fi
     if [ "$manage" = "true" ] && [ "$add_defaults" != "true" ] && [ "$pattern_count" -eq 0 ]; then
-      logging::warn "git_backup: folder '$path' manages .gitignore with no defaults and no ignore_patterns — only an empty managed block will be written."
+      logging::warn "git_backup: folder '$path' manages .gitignore with no defaults and no ignore patterns — only an empty managed block will be written."
     fi
   done < <(printf '%s' "$folders" | jq -c '.[]')
   return 0
@@ -230,16 +233,20 @@ git_backup::_apply_gitignore() {
   git_backup::_gitignore_patterns "$folder" | managed_block::ensure "$path/.gitignore" "#"
 }
 
-# Emit the folder's ordered, de-duplicated ignore lines: user ignore_patterns
-# first, then the defaults unless add_default_ignores is false.
+# Emit the folder's ordered, de-duplicated ignore lines. .gitignore applies the
+# last matching pattern, so the most specific layer goes last, letting its `!`
+# negations win: the defaults unless add_default_ignores is false, then the
+# inherited ignore_patterns, then a machine type's additional_ignore_patterns.
+# A duplicate keeps its last position for the same reason.
 git_backup::_gitignore_patterns() {
-  local folder="$1"
+  local folder="$1" path
+  path=$(printf '%s' "$folder" | jq -r '.path // "?"')
   {
-    printf '%s' "$folder" | jq -r '.ignore_patterns[]? // empty'
     if [ "$(printf '%s' "$folder" | jq -r 'if .add_default_ignores == null then true else .add_default_ignores end')" = "true" ]; then
       git_backup::_default_ignores
     fi
-  } | awk 'NF && !seen[$0]++'
+    config::extended_list "$folder" ignore_patterns after "git_backup folder '$path'" | jq -r '.[]'
+  } | awk 'NF { line[NR] = $0; last[$0] = NR } END { for (i = 1; i <= NR; i++) if ((i in line) && last[line[i]] == i) print line[i] }'
 }
 
 # Junk a backup repo should never carry. Syncthing keeps its own machine-local
@@ -274,10 +281,10 @@ git_backup::_install_service() {
 
 # --- config accessors + paths ---
 
-# Array-of-tables; `|| true` so an unset key is an empty result (no folders is a
-# valid no-op config), not a set -e failure.
+# Each folder's key is only a handle for overrides; `path` stays a field. Empty
+# when none are configured (no folders is a valid no-op config).
 git_backup::_folders() {
-  config::get "module.git_backup.folders" || true
+  config::entries "module.git_backup.folders"
 }
 
 git_backup::_interval() {

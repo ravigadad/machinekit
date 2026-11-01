@@ -80,7 +80,7 @@ At apply time, with `--machine-type <type>`:
 1. **home** — module template dirs layer first; then `common/home/`; then `machine_types/<type>/home/`. machinekit applies the merged result.
 2. **Brewfile** — `common/Brewfile` runs first; then `machine_types/<type>/Brewfile` (additive).
 3. **hooks/post-apply/** — `common/`'s hooks run first; then the type's hooks.
-4. **machinekit.toml** — `common/machinekit.toml` is loaded; values in `machine_types/<type>/machinekit.toml` override on key conflict — so a type's `modules` array replaces common's wholesale, with `additional_modules` as the extend-don't-replace alternative (its entries are appended to the inherited set).
+4. **machinekit.toml** — `common/machinekit.toml` is loaded, and `machine_types/<type>/machinekit.toml` is merged on top. See [how machinekit.toml layers](#how-machinekittoml-layers) for what a type can change, add to, or turn off.
 
 Without `--machine-type`, only the `common/` layer applies. There is no special "default" machine type; absence of the flag means "no type-specific layering."
 
@@ -316,7 +316,19 @@ This composition happens uniformly across the four moving pieces of a blueprint:
 - `home/` — machinekit applies `common/home/` first, then `machine_types/<type>/home/` on top. Same-target-path files in the type layer override the common layer.
 - `Brewfile` — `common/Brewfile` runs first; `machine_types/<type>/Brewfile` runs after. Additive — both sets of packages get installed.
 - `hooks/post-apply/` — common hooks run first, then type hooks. Both run.
-- `machinekit.toml` — `common/machinekit.toml` is loaded; values in `machine_types/<type>/machinekit.toml` override on key conflict.
+- `machinekit.toml` — `common/machinekit.toml` is loaded; values in `machine_types/<type>/machinekit.toml` override on key conflict (below).
+
+### How machinekit.toml layers
+
+The two files are merged table by table: a type's value for a key replaces common's, and tables present in both are merged key by key all the way down. A list is a single value, so a type that sets a list replaces common's list whole.
+
+**Collections are keyed tables, never lists of tables.** Anything there can be several of — Syncthing folders and peers, backup folders, databases, repositories — is written as a table keyed by an identifier the blueprint chooses: `[module.syncthing.folders.agents]`, not `[[module.syncthing.folders]]`. Because the merge reaches each entry by its key, a type can change one inherited entry without restating the others, and add entries of its own. A module may use the key as a value it needs, such as a folder id or a database name, unless the entry sets that field itself; `[module.postgres_dump.databases.hindsight]` with nothing under it is a complete entry. Keys use TOML's bare-key characters (letters, digits, `_`, `-`). The loader rejects a list of tables in either file, naming the file and key, because the merge would otherwise let one layer's list silently replace the other layer's table.
+
+**A type turns off an inherited entry with `enabled = false`**, for example `agents = { enabled = false }` under the collection's header. The entry stays in the merged config but no module acts on it.
+
+**A type adds to an inherited list with `additional_<name>`** next to it. `additional_modules` extends `modules`; `additional_ignore_patterns` on a Syncthing folder extends that folder's `ignore_patterns`. Where the additions go is up to the module that reads the list, because order means different things to different consumers. The per-module docs say which lists can be extended and where the additions land.
+
+All three rules are implemented in `lib/machinekit/config.sh` (`config::entries`, `config::extended_list`), which every module uses to read its collections and extensible lists.
 
 Without `--machine-type`, only the common layer applies. There is no implicit "default" type — the absence of a flag means "no type-specific layering." Users with a single-machine setup or a uniform fleet leave `machine_types/` empty (or omit the `--machine-type` flag) and have no need to think about layering at all.
 

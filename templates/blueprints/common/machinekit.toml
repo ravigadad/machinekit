@@ -64,18 +64,19 @@
 # [module.postgres]
 # # By default (no config) postgres manages the host's port-5432 instance,
 # # installing the latest major if none exists. To pin specific majors to
-# # specific ports, list them — every entry needs both a version and a port,
-# # and exactly one must be 5432 (the instance consumers use). machinekit
+# # specific ports, list them — each entry is keyed by a handle of your choosing
+# # and needs both a version and a port, and exactly one must be 5432 (the
+# # instance consumers use). machinekit
 # # installs whichever are missing and verifies the rest; it never changes the
 # # port of an already-installed cluster, so a request must include every
 # # installed version (matching its current port) and may add more.
 # # The install behavior above is the default `postgres_brew` satisfier. The
 # # `postgres_app` satisfier (macOS) reads this same table but only *checks* it —
 # # it installs nothing, and fails if a listed server isn't already running.
-# [[module.postgres.versions]]
+# [module.postgres.versions.primary]
 # version = "18"
 # port = "5432"
-# [[module.postgres.versions]]
+# [module.postgres.versions.legacy]
 # version = "17"
 # port = "5433"
 #
@@ -278,10 +279,12 @@
 # # with folders local-only. Apply the hub first to read its device ID, give that ID
 # # to the clients, apply them, then re-apply the hub to approve the joiners.
 # #
-# # Folders (both hub and clients): each needs an `id` (stable + identical across
-# # machines for the same folder) and a `path`.
-# [[module.syncthing.folders]]
-# id = "agents"
+# # --- ON THE HUB ---
+# hub = true
+# #
+# # Folders (both hub and clients): each is keyed by its folder id (stable +
+# # identical across machines for the same folder) and needs a `path`.
+# [module.syncthing.folders.agents]
 # path = "~/.agents"
 # # A folder is two-way by default. `type = "receiveonly"` makes this machine a
 # # read-only replica of a folder another machine owns: a change or deletion made
@@ -290,17 +293,18 @@
 # # type = "receiveonly"
 # # Each folder gets a machinekit-managed .stignore by default, holding
 # # (?d).DS_Store and other junk that should never replicate. Per folder you can:
-# # ignore_patterns = ["*.tmp"]     # your patterns (kept above the defaults)
+# # ignore_patterns = ["*.tmp"]     # your patterns (placed before the defaults:
+# #                                 # Syncthing applies the first match)
 # # add_default_ignores = false     # drop machinekit's built-in junk defaults
 # # manage_stignore = false         # leave .stignore entirely to you
-# #
-# # --- ON THE HUB ---
-# hub = true
+# # In a machine_types/<type>/machinekit.toml, add to the patterns inherited from
+# # here (rather than replacing them) under the same folder key:
+# # additional_ignore_patterns = ["cache/"]
 # #
 # # --- ON EACH CLIENT (instead of `hub = true`): list only the hub. ---
 # # introducer = true means "learn the other clients through the hub", so you never
 # # list client-to-client peers.
-# # [[module.syncthing.peers]]
+# # [module.syncthing.peers.hub]
 # # device_id = "PUT-THE-HUBS-DEVICE-ID-HERE"
 # # address = "tcp://server:22000"   # the hub's tailnet address, or "dynamic"
 # # introducer = true
@@ -328,11 +332,14 @@
 # # artifacts (version buffer, folder marker, ignore file) — the mesh keeps these
 # # to itself but git would otherwise commit them. So pairing the syncthing folder
 # # above with this one just works; you don't list Syncthing's artifacts yourself.
-# [[module.git_backup.folders]]
+# # The key is only a handle a machine type can use to override this folder.
+# [module.git_backup.folders.agents]
 # path = "~/.agents"
 # remote = "git@github.com:you/agents.git"
 # # ssh_key = "agents"             # override the module default for this folder
-# # ignore_patterns = ["build/"]   # your patterns (kept above the defaults)
+# # ignore_patterns = ["build/"]   # your patterns (placed after the defaults:
+# #                                # git applies the last match)
+# # additional_ignore_patterns = [] # a machine type's additions, placed last
 # # add_default_ignores = false    # drop machinekit's built-in junk defaults
 # # manage_gitignore = false       # leave .gitignore entirely to you
 #
@@ -357,9 +364,9 @@
 # # retain_count = 7                 # generations kept per database (0 = keep all)
 # # notify = "/path/to/notify-hook"  # run with a message on trouble; default: logger/journald
 # #
-# # Each database needs a `name`; it may override the directory and retain_count.
-# [[module.postgres_dump.databases]]
-# name = "somedb"
+# # Each database is keyed by its name (set `name` to use a different one); it may
+# # override the directory and retain_count.
+# [module.postgres_dump.databases.somedb]
 # # directory = "~/elsewhere"
 # # retain_count = 14
 #
@@ -405,33 +412,33 @@
 # # NAME A REPOSITORY FOR WHAT IT HOLDS, not for the provider or the tool: the name
 # # is what distinguishes one repository from another, so anything true of all of
 # # them carries no information, and a vendor name goes stale if you move the data.
-# # `name` is lowercase letters, digits, and underscores; it names this
+# # A repository is keyed by its name (set `name` to use a different one), which
+# # is lowercase letters, digits, and underscores; it names this
 # # repository's secrets, its files, and its two service units, so pick it once and
 # # leave it alone. Mirroring it in the repository string's last path segment keeps
 # # the bucket readable against this file. (Bucket names cannot contain underscores
 # # on most providers — they become DNS labels — while the prefix after the bucket
 # # can, so a hyphenated bucket holding snake_case prefixes is expected.)
-# [[module.offsite_backup.repositories]]
-# name = "database_dumps"
+# [module.offsite_backup.repositories.database_dumps]
 # repository = "s3:s3.example-region.example.com/my-restic-bucket/database_dumps"
 # #
-# # Each path needs a `path`. `max_age_hours` is per path, not per repository — it
+# # Each path is keyed by a handle of your choosing and needs a `path` (a
+# # filesystem path can't be a TOML key). `max_age_hours` is per path, not per repository — it
 # # is the silent-failure alarm: if nothing under the path has changed in that
 # # long, the run notifies. Whatever writes there can stop while the upload keeps
 # # succeeding every night, and nothing else would tell you.
-# [[module.offsite_backup.repositories.paths]]
+# [module.offsite_backup.repositories.database_dumps.paths.dumps]
 # path = "~/postgres-dumps"
 # # max_age_hours = 36
 # #
 # # A second repository is for what a second path in the first one cannot express —
 # # here, a different keep policy. Any module-level key above may be repeated on a
 # # repository to override it for that one alone.
-# [[module.offsite_backup.repositories]]
-# name = "logs"
+# [module.offsite_backup.repositories.logs]
 # repository = "s3:s3.example-region.example.com/my-restic-bucket/logs"
 # keep_daily = 7
 # keep_weekly = 2
 # keep_monthly = 0
 #
-# [[module.offsite_backup.repositories.paths]]
+# [module.offsite_backup.repositories.logs.paths.example]
 # path = "/var/log/example"

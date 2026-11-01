@@ -102,7 +102,7 @@ Nothing to do for the default. The `postgres` capability's default satisfier, `p
 Only if you list `postgres_app` (macOS only) to use [Postgres.app](https://postgresapp.com) as your provider is there manual setup, because machinekit never drives Postgres.app's lifecycle — it only checks and provisions into a server you run:
 
 1. **Install Postgres.app and start a server** *before* `apply`. By default machinekit provisions into whatever Postgres.app server is running on port 5432; if it finds no Postgres.app server there — or a non-Postgres.app postgres holding the port — it fails rather than provision into the wrong place.
-2. **Pin versions/ports (optional).** With `[module.postgres] versions = [{ version = 17, port = 5432 }]` machinekit verifies that exact server is running (same table `postgres_brew` would *create*; `postgres_app` only *checks* it). Without it, any Postgres.app server on 5432 is accepted.
+2. **Pin versions/ports (optional).** With `[module.postgres.versions.primary]` and `version = 17`, `port = 5432` under it machinekit verifies that exact server is running (same table `postgres_brew` would *create*; `postgres_app` only *checks* it). Without it, any Postgres.app server on 5432 is accepted.
 
 Extensions (e.g. `pgvector`, which `hindsight_server` uses) ship bundled with Postgres.app, so nothing extra is installed for them.
 
@@ -179,7 +179,7 @@ One caveat worth knowing: any of these projections refuses to clobber a pre-exis
 The topology is **hub-and-spoke**: one always-on machine is the hub (`hub = true`); every other machine is a client that points at the hub and learns the rest *through* it. Device IDs are generated on first run, so some ordering is unavoidable — but only the **hub's** ID ever needs copying:
 
 1. **Apply on the hub first.** It announces the hub's device ID. The hub pre-lists no clients.
-2. **Give that hub ID to each client** (`[[module.syncthing.peers]]`, `introducer = true`) and apply. The client connects to the hub and lands in the hub's *pending* list.
+2. **Give that hub ID to each client** (a `[module.syncthing.peers.<key>]` entry with `introducer = true`) and apply. The client connects to the hub and lands in the hub's *pending* list.
 3. **Re-apply on the hub** to approve the joiners. The hub discovers their IDs from the connection (you never transcribe a client ID), adds them, and shares the folders. Adding a machine later is just steps 2–3 for that one machine; the *other* clients update themselves.
 
 Joining is consent-gated at every step — confirm interactively, or set `MACHINEKIT_SYNCTHING_JOIN=1` for an unattended run. Until consent, the daemon installs and idles with its folders local-only. (Syncthing has no "accept any device" — a deliberate approval on the hub is the security floor.)
@@ -191,20 +191,18 @@ Joining is consent-gated at every step — confirm interactively, or set `MACHIN
 ```toml
 [module.syncthing]
 hub = true                    # accept joiners instead of pre-listing them
-[[module.syncthing.folders]]
-id = "agents"                 # stable + identical across machines for the same folder
+
+[module.syncthing.folders.agents]  # the key is the folder id: identical across machines
 path = "~/.agents"
 ```
 
 **Client** config — just the hub:
 
 ```toml
-[module.syncthing]
-[[module.syncthing.folders]]
-id = "agents"
+[module.syncthing.folders.agents]
 path = "~/.agents"
 
-[[module.syncthing.peers]]
+[module.syncthing.peers.hub]
 device_id = "HUB-DEVICE-ID"   # the hub's announced ID (the only ID you copy)
 address = "tcp://server:22000" # the hub's tailnet address (or "dynamic")
 introducer = true             # learn the other clients through the hub
@@ -213,13 +211,12 @@ introducer = true             # learn the other clients through the hub
 **Sync direction.** A folder is two-way by default. Set `type` on a folder to change that — most usefully `type = "receiveonly"` on machines that hold a *replica* of a folder one machine owns: a change or deletion made on a receive-only replica is reverted rather than propagated, so the owner's copy can't be damaged from elsewhere. (`sendonly` and `receiveencrypted` are the other two Syncthing accepts.) The type is re-asserted on every apply, so a folder flipped by hand converges back to what the blueprint says.
 
 ```toml
-[[module.syncthing.folders]]
-id = "postgres-dumps"
+[module.syncthing.folders.postgres-dumps]
 path = "~/postgres-dumps"
 type = "receiveonly"          # on every machine except the one writing the dumps
 ```
 
-**Ignore patterns.** Each folder gets a machinekit-managed `.stignore` by default — a delimited block excluding two kinds of thing from replication: OS junk (`(?d).DS_Store` and friends, marked `(?d)` deletable so they can't block a directory removal) and version-control metadata (`.git`), which is deliberately *not* marked deletable — on a machine that also backs the folder up over git, its `.git` is a live repo Syncthing must neither replicate nor delete. Per folder you can add your own with `ignore_patterns = [...]` (kept above the defaults, so a `!`-negation wins Syncthing's first-match precedence), drop the built-ins with `add_default_ignores = false`, or hand the file entirely back to yourself with `manage_stignore = false`. machinekit only ever rewrites its own block; everything else in the file is yours, and deleting the block just gets it restored next apply.
+**Ignore patterns.** Each folder gets a machinekit-managed `.stignore` by default — a delimited block excluding two kinds of thing from replication: OS junk (`(?d).DS_Store` and friends, marked `(?d)` deletable so they can't block a directory removal) and version-control metadata (`.git`), which is deliberately *not* marked deletable — on a machine that also backs the folder up over git, its `.git` is a live repo Syncthing must neither replicate nor delete. Per folder you can add your own with `ignore_patterns = [...]`, drop the built-ins with `add_default_ignores = false`, or hand the file entirely back to yourself with `manage_stignore = false`. A machine type adds to a folder's inherited patterns with `additional_ignore_patterns = [...]` on the same folder. Syncthing applies the first pattern that matches, so the block is written most specific first — the type's additions, then `ignore_patterns`, then the defaults — and a `!` negation from a more specific layer wins. machinekit only ever rewrites its own block; everything else in the file is yours, and deleting the block just gets it restored next apply.
 
 **Conflict notifications.** Syncthing silently renames the losing side of a concurrent same-file edit to `*.sync-conflict-*` and never surfaces it on its own. Whenever any folders are configured, machinekit installs a standing scheduled scan of them (no extra setup needed) that re-fires a notify hook on every run while any conflict files remain — a nag until you resolve them, not a one-time ping you might miss:
 
@@ -243,12 +240,12 @@ ssh_key = "agents"             # module-level default key name (optional; see be
 # interval = 300               # seconds between backup runs
 # notify = "/path/to/notify-hook"  # run with a message on trouble; default: logger/journald
 
-[[module.git_backup.folders]]
+[module.git_backup.folders.agents]  # the key is only a handle for overrides
 path = "~/.agents"
 remote = "git@github.com:you/agents.git"
 # ssh_key = "agents"           # per-folder override of the module default
 
-[[module.git_backup.folders]]
+[module.git_backup.folders.notes]
 path = "~/notes"
 remote = "git@github.com:you/notes.git"
 ```
@@ -262,7 +259,7 @@ git_backup/ssh_keys/<name>       # an SSH private key authorized to push to that
 
 Any key with write access works — a GitHub deploy key, your own key, whatever. Generate one (`ssh-keygen -t ed25519 -f <name> -N ""`), authorize its public half on the remote, then age-encrypt the private half into the pool path above (or file it in your secrets manager under that name). **Omit `ssh_key` entirely** to push over ambient SSH (an agent or an on-disk default key) — then no secret is needed. When any `ssh_key` is named, preflight requires it and pulls in whichever backend actually resolves it (`age` and/or `secrets_manager`) automatically.
 
-**Ignore patterns.** Each folder gets a machinekit-managed `.gitignore` by default, so the backup repo never carries junk — OS cruft like `.DS_Store`, plus Syncthing's own machine-local artifacts (its version buffer, folder marker, and ignore file), which the mesh keeps to itself but git would otherwise commit. So pairing a `syncthing` folder with a `git_backup` folder for the same path just works; you don't list Syncthing's artifacts yourself. The same three knobs apply per folder: `ignore_patterns = [...]` (your patterns, above the defaults), `add_default_ignores = false`, and `manage_gitignore = false` (leave the file to you). machinekit rewrites only its own delimited block; as with any `.gitignore` it affects only untracked files, so anything already committed needs a manual `git rm --cached`. The `.gitignore` is written only if the folder already exists — git_backup never creates a folder another module is meant to seed.
+**Ignore patterns.** Each folder gets a machinekit-managed `.gitignore` by default, so the backup repo never carries junk — OS cruft like `.DS_Store`, plus Syncthing's own machine-local artifacts (its version buffer, folder marker, and ignore file), which the mesh keeps to itself but git would otherwise commit. So pairing a `syncthing` folder with a `git_backup` folder for the same path just works; you don't list Syncthing's artifacts yourself. The same knobs apply per folder: `ignore_patterns = [...]`, `additional_ignore_patterns = [...]` (a machine type's additions), `add_default_ignores = false`, and `manage_gitignore = false` (leave the file to you). Git applies the last pattern that matches — the opposite of Syncthing — so this block is written most specific last: the defaults, then `ignore_patterns`, then the type's additions, and a `!` negation from a more specific layer wins. machinekit rewrites only its own delimited block; as with any `.gitignore` it affects only untracked files, so anything already committed needs a manual `git rm --cached`. The `.gitignore` is written only if the folder already exists — git_backup never creates a folder another module is meant to seed.
 
 ## offsite_backup — a remote repository, its credentials, and its password
 
@@ -325,28 +322,27 @@ Then configure the module. Module-level keys are defaults; any repository may ov
                                  # operation with real egress cost
 # notify = "/path/to/notify-hook"  # run with a message on trouble; default: logger/journald
 
-# A repository holding things that share a retention shape. Its `name` is
-# lowercase letters, digits, and underscores; it names this repository's secrets,
-# its files, and its two service units, so pick it once and leave it alone.
-[[module.offsite_backup.repositories]]
-name = "database_dumps"
+# A repository holding things that share a retention shape. Its key is its name
+# (set `name` to override): lowercase letters, digits, and underscores, because it
+# names this repository's secrets, its files, and its two service units — so pick
+# it once and leave it alone.
+[module.offsite_backup.repositories.database_dumps]
 repository = "s3:s3.example-region.example.com/my-restic-bucket/database_dumps"
 
-[[module.offsite_backup.repositories.paths]]
+[module.offsite_backup.repositories.database_dumps.paths.dumps]  # the key is only a handle
 path = "~/postgres-dumps"
 max_age_hours = 36               # alarm if nothing under the path changed in that long
 
 # A second repository exists for what a second path in the first one cannot
 # express — here, a different keep policy. Any module-level key may be repeated
 # on a repository to override it for that one alone.
-[[module.offsite_backup.repositories]]
-name = "logs"
+[module.offsite_backup.repositories.logs]
 repository = "s3:s3.example-region.example.com/my-restic-bucket/logs"
 keep_daily = 7
 keep_weekly = 2
 keep_monthly = 0
 
-[[module.offsite_backup.repositories.paths]]
+[module.offsite_backup.repositories.logs.paths.example]
 path = "/var/log/example"
 ```
 

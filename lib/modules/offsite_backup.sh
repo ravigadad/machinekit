@@ -13,10 +13,9 @@
 #
 # A blueprint declares one or more repositories, each with its own paths:
 #
-#   [[module.offsite_backup.repositories]]
-#   name = "b2"
+#   [module.offsite_backup.repositories.database_dumps]
 #   repository = "s3:…"
-#   [[module.offsite_backup.repositories.paths]]
+#   [module.offsite_backup.repositories.database_dumps.paths.dumps]
 #   path = "~/postgres-dumps"
 #
 # Several paths in ONE repository is the common shape and needs no nesting:
@@ -107,9 +106,12 @@ offsite_backup::preflight() {
 # Everything about one repository that can be wrong independently of the set:
 # its paths, the secret that opens it, and its two schedules.
 offsite_backup::_validate_repository() {
-  local entry="$1"
-  offsite_backup::_validate_paths "$(offsite_backup::_paths "$entry")"
-  offsite_backup::_validate_secrets "$(offsite_backup::_name "$entry")"
+  local entry="$1" name paths
+  name=$(offsite_backup::_name "$entry")
+  # A plain assignment, so a malformed paths collection stops the run here.
+  paths=$(offsite_backup::_paths "$entry")
+  offsite_backup::_validate_paths "$paths" "$name"
+  offsite_backup::_validate_secrets "$name"
   service::validate_cron "$(offsite_backup::_schedule "$entry")"
   service::validate_cron "$(offsite_backup::_check_schedule "$entry")"
 }
@@ -141,12 +143,13 @@ offsite_backup::install() {
 }
 
 offsite_backup::_install_repository() {
-  local entry="$1" name
+  local entry="$1" name paths
   name=$(offsite_backup::_name "$entry")
+  paths=$(offsite_backup::_paths "$entry")
   # Order is the contract: creating the repository drives the run script with
   # this repository's secret files, so those must be on disk first.
   offsite_backup::_install_secret_files "$name"
-  offsite_backup::_write_manifest "$name" "$(offsite_backup::_paths "$entry")"
+  offsite_backup::_write_manifest "$name" "$paths"
   offsite_backup::_ensure_repository "$entry"
   offsite_backup::_install_backup_service "$entry"
   offsite_backup::_install_check_service "$entry"
@@ -166,7 +169,7 @@ offsite_backup::postflight_info() {
       [ -n "$path" ] || continue
       printf 'Backing up %s to %s (%s) on schedule "%s".\n' \
         "$path" "$name" "$repository" "$(offsite_backup::_schedule "$entry")"
-    done < <(printf '%s' "$entry" | jq -r '.paths[]?.path // empty')
+    done < <(offsite_backup::_paths "$entry" | jq -r '.[].path')
     printf 'Repository %s: keeping %s daily, %s weekly, %s monthly snapshots; verified on schedule "%s".\n' \
       "$name" \
       "$(offsite_backup::_keep_daily "$entry")" \
@@ -205,25 +208,27 @@ offsite_backup::_validate_repositories() {
 offsite_backup::_repositories_shape_error() {
   printf '%s' "$1" | jq -r '
     if   any(.[]; (.name // "") == "") then
-      "every [[module.offsite_backup.repositories]] entry needs a name"
+      "every [module.offsite_backup.repositories.<key>] entry needs a name (the name defaults to the key)"
     elif any(.[]; ((.name | tostring) | test("^[a-z0-9_]+$") | not)) then
       "a repository name must be lowercase letters, digits, and underscores (it names secrets, files, and service units)"
     elif ([.[].name] | length) != ([.[].name] | unique | length) then
       "a repository name appears more than once"
     elif any(.[]; (.repository // "") == "") then
       "every repository entry needs a repository string (e.g. s3:…)"
-    elif any(.[]; ((.paths // []) | length) == 0) then
-      "every repository needs at least one [[module.offsite_backup.repositories.paths]] entry"
     else empty end'
 }
 
-# Every path entry needs a path, and a staleness deadline (when given) has to be a
-# number of hours; fail loudly rather than writing a half-usable manifest.
+# A repository needs at least one enabled path, every path entry needs a path, and
+# a staleness deadline (when given) has to be a number of hours; fail loudly
+# rather than writing a half-usable manifest. The paths arrive with disabled
+# entries already dropped, so "none" here covers a path a machine type turned off.
 offsite_backup::_validate_paths() {
-  local paths="$1" shape_error
+  local paths="$1" name="$2" shape_error
+  [ -n "$paths" ] || lifecycle::fail \
+    "offsite_backup: repository '$name' needs at least one [module.offsite_backup.repositories.<key>.paths.<key>] entry."
   shape_error=$(printf '%s' "$paths" | jq -r '
     if   any(.[]; (.path // "") == "") then
-      "every [[module.offsite_backup.repositories.paths]] entry needs a path"
+      "every [module.offsite_backup.repositories.<key>.paths.<key>] entry needs a path"
     elif any(.[]; (.max_age_hours != null) and ((.max_age_hours | tostring | test("^[0-9]+$")) | not)) then
       "max_age_hours must be a whole number of hours"
     else empty end')
@@ -399,10 +404,10 @@ offsite_backup::_install_check_service() {
 
 # --- config: the repository set and each entry's own fields ---
 
-# Array-of-tables; `|| true` so an unset key is an empty result (no repositories
-# is a valid no-op config), not a set -e failure.
+# Each repository's key is its name unless it sets `name`. Empty when none are
+# configured (no repositories is a valid no-op config).
 offsite_backup::_repositories() {
-  config::get "module.offsite_backup.repositories" || true
+  config::entries "module.offsite_backup.repositories" name
 }
 
 offsite_backup::_name() {
@@ -413,8 +418,13 @@ offsite_backup::_repository() {
   printf '%s' "$1" | jq -r '.repository'
 }
 
+# The repository's enabled paths, from the keyed collection nested inside it. Each
+# key is only a handle; `path` stays a field, since a filesystem path is not a
+# usable TOML key.
 offsite_backup::_paths() {
-  printf '%s' "$1" | jq -c '.paths // []'
+  local entry="$1"
+  config::entries_from_json "$(printf '%s' "$entry" | jq -c '.paths // {}')" \
+    "offsite_backup repository '$(offsite_backup::_name "$entry")' paths"
 }
 
 # --- config: settings, each cascading repository over module default ---
