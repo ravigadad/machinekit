@@ -181,8 +181,7 @@ setup() {
 # --- _validate_ignores (real jq) ---
 
 @test "_validate_ignores passes the common defaults-on, no-patterns folder" {
-  STUB_OUTPUT='[]' mktest::stub_function config::extended_list \
-    '{"id":"agents","path":"/p"}' "ignore_patterns" "before" "syncthing folder 'agents'"
+  STUB_OUTPUT='[]' mktest::stub_function syncthing::_ignore_patterns '{"id":"agents","path":"/p"}'
   STUB_EXIT=1 mktest::stub_function lifecycle::fail
   syncthing::_validate_ignores '[{"id":"agents","path":"/p"}]'
   mktest::assert_stub_not_called lifecycle::fail
@@ -190,24 +189,21 @@ setup() {
 }
 
 @test "_validate_ignores passes an opt-out folder with no patterns" {
-  STUB_OUTPUT='[]' mktest::stub_function config::extended_list \
-    '{"id":"agents","path":"/p","manage_stignore":false}' "ignore_patterns" "before" "syncthing folder 'agents'"
+  STUB_OUTPUT='[]' mktest::stub_function syncthing::_ignore_patterns '{"id":"agents","path":"/p","manage_stignore":false}'
   STUB_EXIT=1 mktest::stub_function lifecycle::fail
   syncthing::_validate_ignores '[{"id":"agents","path":"/p","manage_stignore":false}]'
   mktest::assert_stub_not_called lifecycle::fail
 }
 
 @test "_validate_ignores fails an opt-out folder that still has patterns" {
-  STUB_OUTPUT='["x"]' mktest::stub_function config::extended_list \
-    '{"id":"agents","path":"/p","manage_stignore":false}' "ignore_patterns" "before" "syncthing folder 'agents'"
+  STUB_OUTPUT='["x"]' mktest::stub_function syncthing::_ignore_patterns '{"id":"agents","path":"/p","manage_stignore":false}'
   STUB_EXIT=1 mktest::stub_function lifecycle::fail
   run ! syncthing::_validate_ignores '[{"id":"agents","path":"/p","manage_stignore":false}]'
   MATCH="manage_stignore = false" mktest::assert_stub_called lifecycle::fail
 }
 
 @test "_validate_ignores warns on the all-empty no-op folder" {
-  STUB_OUTPUT='[]' mktest::stub_function config::extended_list \
-    '{"id":"agents","path":"/p","add_default_ignores":false}' "ignore_patterns" "before" "syncthing folder 'agents'"
+  STUB_OUTPUT='[]' mktest::stub_function syncthing::_ignore_patterns '{"id":"agents","path":"/p","add_default_ignores":false}'
   STUB_EXIT=1 mktest::stub_function lifecycle::fail
   syncthing::_validate_ignores '[{"id":"agents","path":"/p","add_default_ignores":false}]'
   mktest::assert_stub_not_called lifecycle::fail
@@ -354,16 +350,14 @@ setup() {
 # before the defaults: .stignore applies the first match, so the most specific
 # layer's negation has to come first to win.
 @test "_stignore_patterns emits the folder's patterns, additions first, before the defaults" {
-  STUB_OUTPUT='["custom1","custom2"]' mktest::stub_function config::extended_list \
-    '{"id":"agents"}' "ignore_patterns" "before" "syncthing folder 'agents'"
+  STUB_OUTPUT='["custom1","custom2"]' mktest::stub_function syncthing::_ignore_patterns '{"id":"agents"}'
   STUB_OUTPUT=$'default1\ndefault2' mktest::stub_function syncthing::_default_ignores
   run syncthing::_stignore_patterns '{"id":"agents"}'
   [ "$output" = "$(printf 'custom1\ncustom2\ndefault1\ndefault2')" ]
 }
 
 @test "_stignore_patterns omits defaults when add_default_ignores is false" {
-  STUB_OUTPUT='["custom1"]' mktest::stub_function config::extended_list \
-    '{"id":"agents","add_default_ignores":false}' "ignore_patterns" "before" "syncthing folder 'agents'"
+  STUB_OUTPUT='["custom1"]' mktest::stub_function syncthing::_ignore_patterns '{"id":"agents","add_default_ignores":false}'
   mktest::stub_function syncthing::_default_ignores
   run syncthing::_stignore_patterns '{"id":"agents","add_default_ignores":false}'
   [ "$output" = "custom1" ]
@@ -371,11 +365,17 @@ setup() {
 }
 
 @test "_stignore_patterns de-duplicates, keeping the first occurrence" {
-  STUB_OUTPUT='["shared","custom1"]' mktest::stub_function config::extended_list \
-    '{"id":"agents"}' "ignore_patterns" "before" "syncthing folder 'agents'"
+  STUB_OUTPUT='["shared","custom1"]' mktest::stub_function syncthing::_ignore_patterns '{"id":"agents"}'
   STUB_OUTPUT=$'shared\ndefault1' mktest::stub_function syncthing::_default_ignores
   run syncthing::_stignore_patterns '{"id":"agents"}'
   [ "$output" = "$(printf 'shared\ncustom1\ndefault1')" ]
+}
+
+@test "_ignore_patterns combines the folder's patterns with its additions first, naming the folder" {
+  STUB_OUTPUT='the-pattern-list' mktest::stub_function config::extended_list \
+    '{"id":"agents"}' "ignore_patterns" "before" "syncthing folder 'agents'"
+  run syncthing::_ignore_patterns '{"id":"agents"}'
+  [ "$output" = "the-pattern-list" ]
 }
 
 @test "_default_ignores lists the default ignore patterns, including a non-deletable .git" {

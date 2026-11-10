@@ -136,7 +136,7 @@ git_backup::_validate_ignores() {
     path=$(printf '%s' "$folder" | jq -r '.path // "?"')
     manage=$(printf '%s' "$folder" | jq -r 'if .manage_gitignore == null then true else .manage_gitignore end')
     add_defaults=$(printf '%s' "$folder" | jq -r 'if .add_default_ignores == null then true else .add_default_ignores end')
-    patterns=$(config::extended_list "$folder" ignore_patterns after "git_backup folder '$path'")
+    patterns=${ git_backup::_ignore_patterns "$folder"; }
     pattern_count=$(printf '%s' "$patterns" | jq -r 'length')
     if [ "$manage" != "true" ] && [ "$pattern_count" -gt 0 ]; then
       lifecycle::fail "git_backup: folder '$path' sets manage_gitignore = false but has ignore patterns — drop one (machinekit can't both manage .gitignore and leave it alone)."
@@ -236,17 +236,30 @@ git_backup::_apply_gitignore() {
 # Emit the folder's ordered, de-duplicated ignore lines. .gitignore applies the
 # last matching pattern, so the most specific layer goes last, letting its `!`
 # negations win: the defaults unless add_default_ignores is false, then the
-# inherited ignore_patterns, then a machine type's additional_ignore_patterns.
-# A duplicate keeps its last position for the same reason.
+# folder's patterns.
 git_backup::_gitignore_patterns() {
-  local folder="$1" path
-  path=$(printf '%s' "$folder" | jq -r '.path // "?"')
+  local folder="$1" patterns
+  patterns=${ git_backup::_ignore_patterns "$folder"; }
   {
     if [ "$(printf '%s' "$folder" | jq -r 'if .add_default_ignores == null then true else .add_default_ignores end')" = "true" ]; then
       git_backup::_default_ignores
     fi
-    config::extended_list "$folder" ignore_patterns after "git_backup folder '$path'" | jq -r '.[]'
-  } | awk 'NF { line[NR] = $0; last[$0] = NR } END { for (i = 1; i <= NR; i++) if ((i in line) && last[line[i]] == i) print line[i] }'
+    printf '%s' "$patterns" | jq -r '.[]'
+  } | git_backup::_dedup_keep_last
+}
+
+# The folder's ignore_patterns with a machine type's additional_ignore_patterns
+# after them, as a JSON array.
+git_backup::_ignore_patterns() {
+  local folder="$1" path
+  path=$(printf '%s' "$folder" | jq -r '.path // "?"')
+  config::extended_list "$folder" ignore_patterns after "git_backup folder '$path'"
+}
+
+# Drop blank lines and keep each line's last occurrence. git applies the last
+# pattern that matches, so the last copy of a repeated line is the one in effect.
+git_backup::_dedup_keep_last() {
+  awk 'NF { line[NR] = $0; last[$0] = NR } END { for (i = 1; i <= NR; i++) if ((i in line) && last[line[i]] == i) print line[i] }'
 }
 
 # Junk a backup repo should never carry. Syncthing keeps its own machine-local

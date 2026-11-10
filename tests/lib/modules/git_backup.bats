@@ -187,8 +187,7 @@ setup() {
 # --- _validate_ignores ---
 
 @test "_validate_ignores passes the common defaults-on, no-patterns folder" {
-  STUB_OUTPUT='[]' mktest::stub_function config::extended_list \
-    '{"path":"/a","remote":"r1"}' "ignore_patterns" "after" "git_backup folder '/a'"
+  STUB_OUTPUT='[]' mktest::stub_function git_backup::_ignore_patterns '{"path":"/a","remote":"r1"}'
   STUB_EXIT=1 mktest::stub_function lifecycle::fail
   git_backup::_validate_ignores '[{"path":"/a","remote":"r1"}]'
   mktest::assert_stub_not_called lifecycle::fail
@@ -196,24 +195,21 @@ setup() {
 }
 
 @test "_validate_ignores passes an opt-out folder with no patterns" {
-  STUB_OUTPUT='[]' mktest::stub_function config::extended_list \
-    '{"path":"/a","remote":"r1","manage_gitignore":false}' "ignore_patterns" "after" "git_backup folder '/a'"
+  STUB_OUTPUT='[]' mktest::stub_function git_backup::_ignore_patterns '{"path":"/a","remote":"r1","manage_gitignore":false}'
   STUB_EXIT=1 mktest::stub_function lifecycle::fail
   git_backup::_validate_ignores '[{"path":"/a","remote":"r1","manage_gitignore":false}]'
   mktest::assert_stub_not_called lifecycle::fail
 }
 
 @test "_validate_ignores fails an opt-out folder that still has patterns" {
-  STUB_OUTPUT='["x"]' mktest::stub_function config::extended_list \
-    '{"path":"/a","remote":"r1","manage_gitignore":false}' "ignore_patterns" "after" "git_backup folder '/a'"
+  STUB_OUTPUT='["x"]' mktest::stub_function git_backup::_ignore_patterns '{"path":"/a","remote":"r1","manage_gitignore":false}'
   STUB_EXIT=1 mktest::stub_function lifecycle::fail
   run ! git_backup::_validate_ignores '[{"path":"/a","remote":"r1","manage_gitignore":false}]'
   MATCH="manage_gitignore = false" mktest::assert_stub_called lifecycle::fail
 }
 
 @test "_validate_ignores warns on the all-empty no-op folder" {
-  STUB_OUTPUT='[]' mktest::stub_function config::extended_list \
-    '{"path":"/a","remote":"r1","add_default_ignores":false}' "ignore_patterns" "after" "git_backup folder '/a'"
+  STUB_OUTPUT='[]' mktest::stub_function git_backup::_ignore_patterns '{"path":"/a","remote":"r1","add_default_ignores":false}'
   STUB_EXIT=1 mktest::stub_function lifecycle::fail
   git_backup::_validate_ignores '[{"path":"/a","remote":"r1","add_default_ignores":false}]'
   mktest::assert_stub_not_called lifecycle::fail
@@ -358,32 +354,36 @@ setup() {
 }
 
 # .gitignore applies the last matching pattern, so the most specific layer goes
-# last, letting its `!` negations win: the defaults, then the folder's patterns
-# with a machine type's additions after the inherited ones.
-@test "_gitignore_patterns emits the defaults, then the folder's patterns with additions last" {
+# last, letting its `!` negations win: the defaults, then the folder's patterns.
+@test "_gitignore_patterns emits the defaults, then the folder's patterns, de-duplicated" {
   STUB_OUTPUT=$'default1\ndefault2' mktest::stub_function git_backup::_default_ignores
-  STUB_OUTPUT='["build/","!default1"]' mktest::stub_function config::extended_list \
-    '{"path":"/a"}' "ignore_patterns" "after" "git_backup folder '/a'"
+  STUB_OUTPUT='["build/","!default1"]' mktest::stub_function git_backup::_ignore_patterns '{"path":"/a"}'
+  git_backup::_dedup_keep_last() { cat > "$BATS_TEST_TMPDIR/dedup_stdin"; printf 'the-deduped-lines\n'; }
   run git_backup::_gitignore_patterns '{"path":"/a"}'
-  [ "$output" = "$(printf 'default1\ndefault2\nbuild/\n!default1')" ]
+  [ "$output" = "the-deduped-lines" ]
+  [ "$(cat "$BATS_TEST_TMPDIR/dedup_stdin")" = "$(printf 'default1\ndefault2\nbuild/\n!default1')" ]
 }
 
 @test "_gitignore_patterns omits defaults when add_default_ignores is false" {
   mktest::stub_function git_backup::_default_ignores
-  STUB_OUTPUT='["build/"]' mktest::stub_function config::extended_list \
-    '{"path":"/a","add_default_ignores":false}' "ignore_patterns" "after" "git_backup folder '/a'"
+  STUB_OUTPUT='["build/"]' mktest::stub_function git_backup::_ignore_patterns '{"path":"/a","add_default_ignores":false}'
+  git_backup::_dedup_keep_last() { cat > "$BATS_TEST_TMPDIR/dedup_stdin"; }
   run git_backup::_gitignore_patterns '{"path":"/a","add_default_ignores":false}'
-  [ "$output" = "build/" ]
+  [ "$(cat "$BATS_TEST_TMPDIR/dedup_stdin")" = "build/" ]
   mktest::assert_stub_not_called git_backup::_default_ignores
+}
+
+@test "_ignore_patterns combines the folder's patterns with its additions last, naming the folder" {
+  STUB_OUTPUT='the-pattern-list' mktest::stub_function config::extended_list \
+    '{"path":"/a"}' "ignore_patterns" "after" "git_backup folder '/a'"
+  run git_backup::_ignore_patterns '{"path":"/a"}'
+  [ "$output" = "the-pattern-list" ]
 }
 
 # Keeping the last occurrence preserves what git sees: a repeated pattern still
 # lands after any `!` exception written between its two occurrences.
-@test "_gitignore_patterns de-duplicates, keeping the last occurrence" {
-  STUB_OUTPUT=$'default1\ndefault2' mktest::stub_function git_backup::_default_ignores
-  STUB_OUTPUT='["!default1","default1"]' mktest::stub_function config::extended_list \
-    '{"path":"/a"}' "ignore_patterns" "after" "git_backup folder '/a'"
-  run git_backup::_gitignore_patterns '{"path":"/a"}'
+@test "_dedup_keep_last keeps each line's last occurrence, in order, dropping blanks" {
+  run git_backup::_dedup_keep_last <<< $'default1\n\ndefault2\n!default1\ndefault1'
   [ "$output" = "$(printf 'default2\n!default1\ndefault1')" ]
 }
 

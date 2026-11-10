@@ -130,7 +130,7 @@ syncthing::_validate_ignores() {
     id=$(printf '%s' "$folder" | jq -r '.id // "?"')
     manage=$(printf '%s' "$folder" | jq -r 'if .manage_stignore == null then true else .manage_stignore end')
     add_defaults=$(printf '%s' "$folder" | jq -r 'if .add_default_ignores == null then true else .add_default_ignores end')
-    patterns=$(config::extended_list "$folder" ignore_patterns before "syncthing folder '$id'")
+    patterns=${ syncthing::_ignore_patterns "$folder"; }
     pattern_count=$(printf '%s' "$patterns" | jq -r 'length')
     if [ "$manage" != "true" ] && [ "$pattern_count" -gt 0 ]; then
       lifecycle::fail "syncthing: folder '$id' sets manage_stignore = false but has ignore patterns — drop one (machinekit can't both manage .stignore and leave it alone)."
@@ -231,14 +231,22 @@ syncthing::_apply_stignore() {
 # negations win: a machine type's additional_ignore_patterns, then the inherited
 # ignore_patterns, then the defaults unless add_default_ignores is false.
 syncthing::_stignore_patterns() {
-  local folder="$1" id
-  id=$(printf '%s' "$folder" | jq -r '.id // "?"')
+  local folder="$1" patterns
+  patterns=${ syncthing::_ignore_patterns "$folder"; }
   {
-    config::extended_list "$folder" ignore_patterns before "syncthing folder '$id'" | jq -r '.[]'
+    printf '%s' "$patterns" | jq -r '.[]'
     if [ "$(printf '%s' "$folder" | jq -r 'if .add_default_ignores == null then true else .add_default_ignores end')" = "true" ]; then
       syncthing::_default_ignores
     fi
   } | awk 'NF && !seen[$0]++'
+}
+
+# The folder's ignore_patterns with a machine type's additional_ignore_patterns
+# before them, as a JSON array.
+syncthing::_ignore_patterns() {
+  local folder="$1" id
+  id=$(printf '%s' "$folder" | jq -r '.id // "?"')
+  config::extended_list "$folder" ignore_patterns before "syncthing folder '$id'"
 }
 
 # Junk that should never replicate. (?d) marks them deletable so they can't block a
