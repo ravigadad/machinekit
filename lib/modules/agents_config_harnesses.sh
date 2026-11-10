@@ -25,12 +25,13 @@ unset _submodule_file
 # Each selected harness pulls in its own agent tool module. config::load runs
 # before the resolver calls requires, so reading the harnesses array is safe.
 agents_config_harnesses::requires() {
-  local harness
+  local harnesses harness
+  harnesses=${ agents_config_harnesses::_harnesses; }
   while IFS= read -r harness; do
     [ -n "$harness" ] || continue
     declare -F "agents_config_harnesses::${harness}::requires" >/dev/null 2>&1 \
       && "agents_config_harnesses::${harness}::requires"
-  done < <(agents_config_harnesses::_harnesses)
+  done <<< "$harnesses"
   # Pin success: the loop's exit status (non-zero when the last harness has no
   # optional requires — declare -F misses) would otherwise become this
   # function's return and silently trip the set -e caller.
@@ -47,14 +48,15 @@ agents_config_harnesses::after() {
 # Fail before any work on an unknown harness; dispatch each harness's own
 # preflight if it defines one. An empty/missing harnesses list is a clean no-op.
 agents_config_harnesses::preflight() {
-  local harness
+  local harnesses harness
+  harnesses=${ agents_config_harnesses::_harnesses; }
   while IFS= read -r harness; do
     [ -n "$harness" ] || continue
     agents_config_harnesses::_is_available "$harness" || lifecycle::fail \
       "agents_config_harnesses: unknown harness '$harness'. Available: $(agents_config_harnesses::_available | paste -sd ' ' -)."
     declare -F "agents_config_harnesses::${harness}::preflight" >/dev/null 2>&1 \
       && "agents_config_harnesses::${harness}::preflight"
-  done < <(agents_config_harnesses::_harnesses)
+  done <<< "$harnesses"
   # Pin success (see requires): a missing optional preflight must not become this
   # function's return and trip set -e.
   return 0
@@ -65,13 +67,14 @@ agents_config_harnesses::preflight() {
 # edits a config file).
 agents_config_harnesses::install() {
   logging::step "agents_config_harnesses install"
-  local agents_config_dir pending_harnesses=() harness
-  agents_config_dir="$(agents_config_setup::dir)"
+  local agents_config_dir harnesses pending_harnesses=() harness
+  agents_config_dir=${ agents_config_setup::dir; }
+  harnesses=${ agents_config_harnesses::_harnesses; }
   while IFS= read -r harness; do
     [ -n "$harness" ] || continue
     "agents_config_harnesses::${harness}::projection_present" "$agents_config_dir" \
       || pending_harnesses+=("$harness")
-  done < <(agents_config_harnesses::_harnesses)
+  done <<< "$harnesses"
   [ "${#pending_harnesses[@]}" -gt 0 ] || return 0
 
   if input::is_dry_run; then

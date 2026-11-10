@@ -60,7 +60,7 @@ fetch::into() {
 
 fetch::_git() {
   local source="$1" dest="$2" shallow="${3:-}" abs_source="$1"
-  fetch::_is_url "$source" || abs_source=$(fetch::_resolve_source_path "$source")
+  fetch::_is_url "$source" || abs_source=${ fetch::_resolve_source_path "$source"; }
 
   local ssh_was_setup=0
   fetch::_provision_ssh_for_clone && ssh_was_setup=1
@@ -75,12 +75,12 @@ fetch::_git() {
 # auth failure is recoverable or terminal.
 fetch::_provision_ssh_for_clone() {
   local existing_key generate
-  existing_key=$(context::get "existing_ssh_key_file" || true)
+  existing_key=${ context::get "existing_ssh_key_file" || true; }
   if [ -n "$existing_key" ]; then
     ssh::setup_key
     return 0
   fi
-  generate=$(context::get "ssh.key_generate" --coerce boolean --default false)
+  generate=${ context::get "ssh.key_generate" --coerce boolean --default false; }
   if [ "$generate" = "true" ]; then
     ssh::setup_key
     return 0
@@ -188,7 +188,7 @@ fetch::_handle_clone_auth_failure() {
 
 fetch::_cp() {
   local source="$1" dest="$2" abs_source
-  abs_source=$(fetch::_resolve_source_path "$source")
+  abs_source=${ fetch::_resolve_source_path "$source"; }
   logging::info "Copying $abs_source → $dest"
   mkdir -p "$dest"
   cp -R -- "$abs_source/." "$dest/"

@@ -58,14 +58,12 @@ setup() {
 # and quietly fall back to the default instance.
 @test "install stops when the versions table is malformed" {
   mktest::stub_function postgres_app::_assert_app_installed
-  STUB_EXIT=1 mktest::stub_function postgres::_requested_versions
+  STUB_EXIT=97 mktest::stub_function postgres::_requested_versions
   mktest::stub_function postgres_app::_check_requested
   mktest::stub_function postgres_app::_check_default
   mktest::stub_function postgres::ensure_superuser
-  # bats' run turns errexit off; machinekit runs under set -e, which is what stops it.
-  with_errexit() { set -e; "$@"; }
-  run with_errexit postgres_app::install
-  [ "$status" -ne 0 ]
+  run postgres_app::install
+  [ "$status" -eq 97 ]
   mktest::assert_stub_not_called postgres_app::_check_default
   mktest::assert_stub_not_called postgres_app::_check_requested
 }

@@ -11,7 +11,7 @@
 hooks::run_post_apply() {
   logging::step "post-apply hooks"
   local blueprints_dir common_dir
-  blueprints_dir="$(blueprints::dir)"
+  blueprints_dir=${ blueprints::dir; }
   common_dir="$blueprints_dir/common/hooks/post-apply"
   local found=false
 
@@ -21,7 +21,7 @@ hooks::run_post_apply() {
   fi
 
   local machine_type
-  machine_type="$(context::get "machine_type" 2>/dev/null || true)"
+  machine_type=${ context::get "machine_type" 2>/dev/null || true; }
   if [ -n "$machine_type" ]; then
     local mt_dir="$blueprints_dir/machine_types/$machine_type/hooks/post-apply"
     if [ -d "$mt_dir" ]; then

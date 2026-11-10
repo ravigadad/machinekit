@@ -8,10 +8,10 @@ _MK_CONFIG_LOADED=1
 
 config::load() {
   local blueprints_dir common_json type_json unmatched_path merged
-  blueprints_dir=$(blueprints::dir)
+  blueprints_dir=${ blueprints::dir; }
 
-  common_json=$(config::_common_json "$blueprints_dir")
-  type_json=$(config::_type_json "$blueprints_dir")
+  common_json=${ config::_common_json "$blueprints_dir"; }
+  type_json=${ config::_type_json "$blueprints_dir"; }
 
   unmatched_path=$(config::_unmatched_disable_path "$common_json" "$type_json")
   [ -z "$unmatched_path" ] || lifecycle::fail \
@@ -40,7 +40,7 @@ config::get_array() {
 # can validate the shape rather than choke on a misconfigured value.
 config::get_json() {
   local key="$1" default="${2:-null}" val
-  if val="$(context::get_json "config${key:+.$key}")"; then
+  if val=${ context::get_json "config${key:+.$key}"; }; then
     printf '%s\n' "$val"
   else
     printf '%s\n' "$default"
@@ -54,12 +54,12 @@ config::get_json() {
 # With KEY_FIELD, each entry's key fills that field unless the entry sets it itself,
 # so `[module.x.databases.hindsight]` alone means a database named hindsight; two
 # enabled entries that end up with the same value there are an error.
-# Shape errors are fatal, so call it as a plain `var=$(…)` assignment at least once
-# (in preflight): inside `< <(…)` or `local var=$(…)` the failure would not stop
-# the run.
+# Shape errors are fatal. Capture the result with `${ …; }`, which runs in the
+# current shell, so the failure ends the run; inside `$(…)`, a pipe or `< <(…)` it
+# would end only a subshell. Every reader of a collection follows the same rule.
 config::entries() {
   local key="$1" key_field="${2:-}" collection
-  collection=$(config::get_json "$key" "{}")
+  collection=${ config::get_json "$key" "{}"; }
   config::entries_from_json "$collection" "$key" "$key_field"
 }
 
@@ -84,7 +84,7 @@ config::entries_from_json() {
 # entry on verbatim, where config::entries' added field would travel with it.
 config::enabled_table() {
   local key="$1" collection shape_error
-  collection=$(config::get_json "$key" "{}")
+  collection=${ config::get_json "$key" "{}"; }
   shape_error=$(config::_collection_shape_error "$collection")
   config::_fail_on_shape_error "$key" "$shape_error"
   config::_enabled_table "$collection"
@@ -95,8 +95,8 @@ config::enabled_table() {
 # array. A machine type sets additional_LIST_NAME to add to a list it inherits,
 # since the config merge replaces lists whole. The caller places the additions
 # because only it knows what order means for that list: Syncthing ignore patterns
-# use the first match, .gitignore the last. LABEL names the entry in errors; call
-# it as a plain `var=$(…)` assignment for a malformed list to stop the run.
+# use the first match, .gitignore the last. LABEL names the entry in errors.
+# Capture it with `${ …; }`, as with config::entries.
 config::extended_list() {
   local entry="$1" list_name="$2" position="$3" label="$4" shape_error
   shape_error=$(config::_list_shape_error "$entry" "$list_name")
@@ -172,7 +172,7 @@ config::_common_json() {
 
 config::_type_json() {
   local blueprints_dir="$1" machine_type
-  machine_type=$(context::get "machine_type" 2>/dev/null || true)
+  machine_type=${ context::get "machine_type" 2>/dev/null || true; }
   [ -n "$machine_type" ] || { printf '{}'; return 0; }
   config::_parse_toml "$blueprints_dir/machine_types/$machine_type/machinekit.toml"
 }

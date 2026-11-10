@@ -10,8 +10,8 @@ _SSH_OVERWRITE_PROMPT="WARNING: An SSH key already exists at %s. Overwriting may
 
 ssh::setup_key() {
   local key_path existing_key_file generate
-  key_path=$(context::get "ssh.key_path" --default "$SSH_KEY_PATH" --store-default)
-  existing_key_file=$(context::get "existing_ssh_key_file" || true)
+  key_path=${ context::get "ssh.key_path" --default "$SSH_KEY_PATH" --store-default; }
+  existing_key_file=${ context::get "existing_ssh_key_file" || true; }
   existing_key_file="${existing_key_file/#\~/$HOME}"
 
   if [ -n "$existing_key_file" ]; then
@@ -19,7 +19,7 @@ ssh::setup_key() {
     [ -f "$key_path" ] && ssh::_confirm_overwrite "$key_path"
     ssh::_install_copy "$existing_key_file" "$key_path"
   else
-    generate=$(context::get "ssh.key_generate" --coerce boolean --default false)
+    generate=${ context::get "ssh.key_generate" --coerce boolean --default false; }
     if [ "$generate" = "true" ]; then
       [ -f "$key_path" ] && ssh::_confirm_overwrite "$key_path"
       ssh::_generate "$key_path"
@@ -51,7 +51,7 @@ ssh::_confirm_overwrite() {
   local key_path="$1" overwrite overwrite_prompt
   # shellcheck disable=SC2059
   printf -v overwrite_prompt "$_SSH_OVERWRITE_PROMPT" "$key_path"
-  overwrite=$(context::get "ssh.key_overwrite" --required --coerce boolean --prompt "$overwrite_prompt")
+  overwrite=${ context::get "ssh.key_overwrite" --required --coerce boolean --prompt "$overwrite_prompt"; }
   [ "$overwrite" = "true" ] || lifecycle::fail "SSH key not overwritten. Remove $key_path first, or omit the conflicting flag to use the existing key."
 }
 

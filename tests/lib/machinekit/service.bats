@@ -67,6 +67,15 @@ setup() {
   MATCH="os.family" mktest::assert_stub_called lifecycle::fail
 }
 
+@test "_install stops when reading the os family fails" {
+  STUB_EXIT=97 mktest::stub_function context::get "os.family"
+  STUB_EXIT=1 mktest::stub_function lifecycle::fail
+  mktest::stub_function service::_install_darwin
+  mktest::stub_function service::_install_linux
+  run service::_install "svc" "/fake/exec" "interval" "300"
+  [ "$status" -eq 97 ]
+}
+
 # --- _install_darwin ---
 
 @test "_install_darwin writes the system LaunchDaemon, threading the resolved parts, and reloads it" {
@@ -83,6 +92,17 @@ setup() {
   mktest::assert_stub_called sudo "tee" "$plist"
   mktest::assert_stub_called sudo "launchctl" "bootout" "system" "$plist"
   mktest::assert_stub_called sudo "launchctl" "bootstrap" "system" "$plist"
+}
+
+@test "_install_darwin stops when rendering the schedule fails" {
+  STUB_OUTPUT="com.machinekit.svc" mktest::stub_function service::_launchd_label "svc"
+  STUB_EXIT=97 mktest::stub_function service::_launchd_schedule_stanza "somekind" "someval"
+  mktest::stub_function service::_launchd_env_dict
+  mktest::stub_function service::_run_as_user
+  mktest::stub_function service::_plist_content
+  mktest::stub_function sudo
+  run service::_install_darwin "svc" "/fake/exec" "somekind" "someval"
+  [ "$status" -eq 97 ]
 }
 
 # --- _install_linux ---
@@ -102,6 +122,19 @@ setup() {
   MATCH="enable-linger" mktest::assert_stub_called sudo
   mktest::assert_stub_called systemctl "--user" "daemon-reload"
   mktest::assert_stub_called systemctl "--user" "enable" "--now" "machinekit-svc.timer"
+}
+
+@test "_install_linux stops when rendering the schedule fails" {
+  HOME="$BATS_TEST_TMPDIR"
+  STUB_OUTPUT="machinekit-svc" mktest::stub_function service::_systemd_unit_name "svc"
+  mktest::stub_function service::_systemd_env_lines
+  STUB_EXIT=97 mktest::stub_function service::_systemd_schedule_lines "somekind" "someval"
+  mktest::stub_function service::_systemd_service_content
+  mktest::stub_function service::_systemd_timer_content
+  mktest::stub_function sudo
+  mktest::stub_function systemctl
+  run service::_install_linux "svc" "/fake/exec" "somekind" "someval"
+  [ "$status" -eq 97 ]
 }
 
 # --- unit content generators (pure) ---
@@ -155,6 +188,12 @@ setup() {
   run service::_systemd_schedule_lines "calendar" "0 3 * * 0"
   [[ "$output" == *"OnCalendar=Sun *-*-* 03:00:00"* ]]
   [[ "$output" == *"Persistent=true"* ]]
+}
+
+@test "_systemd_schedule_lines stops when translating the calendar spec fails" {
+  STUB_EXIT=97 mktest::stub_function service::_cron_to_systemd_oncalendar "fake spec"
+  run service::_systemd_schedule_lines "calendar" "fake spec"
+  [ "$status" -eq 97 ]
 }
 
 # --- env renderers ---
@@ -287,6 +326,12 @@ setup() {
   mktest::assert_stub_not_called service::_cron_field_values
 }
 
+@test "_cron_to_launchd_calendar stops when expanding a field fails" {
+  STUB_EXIT=97 mktest::stub_function service::_cron_field_values "5" 0 59
+  run service::_cron_to_launchd_calendar "5 * * * *"
+  [ "$status" -eq 97 ]
+}
+
 # --- _cron_to_systemd_oncalendar (its own logic: compose the OnCalendar shape) ---
 
 @test "_cron_to_systemd_oncalendar composes weekday, date, and time from its helpers" {
@@ -310,6 +355,20 @@ setup() {
   mktest::assert_stub_not_called service::_dow_names
 }
 
+@test "_cron_to_systemd_oncalendar stops when naming the weekdays fails" {
+  STUB_EXIT=97 mktest::stub_function service::_dow_names "5"
+  mktest::stub_function service::_oncal_component
+  run service::_cron_to_systemd_oncalendar "1 2 3 4 5"
+  [ "$status" -eq 97 ]
+}
+
+@test "_cron_to_systemd_oncalendar stops when rendering a component fails" {
+  STUB_EXIT=97 mktest::stub_function service::_oncal_component "4" 1 12
+  mktest::stub_function service::_oncal_component
+  run service::_cron_to_systemd_oncalendar "1 2 3 4 *"
+  [ "$status" -eq 97 ]
+}
+
 # --- _oncal_component ---
 
 @test "_oncal_component passes a wildcard through without expanding" {
@@ -325,6 +384,12 @@ setup() {
   [ "$output" = "05,30" ]
 }
 
+@test "_oncal_component stops when expanding the field fails" {
+  STUB_EXIT=97 mktest::stub_function service::_cron_field_values "some.field" 0 59
+  run service::_oncal_component "some.field" 0 59
+  [ "$status" -eq 97 ]
+}
+
 # --- _dow_names ---
 
 @test "_dow_names maps the expanded weekday numbers to systemd day names" {
@@ -337,6 +402,12 @@ setup() {
   STUB_OUTPUT=$'0\n7' mktest::stub_function service::_cron_field_values "some.dow" 0 7
   run service::_dow_names "some.dow"
   [ "$output" = "Sun" ]
+}
+
+@test "_dow_names stops when expanding the field fails" {
+  STUB_EXIT=97 mktest::stub_function service::_cron_field_values "some.dow" 0 7
+  run service::_dow_names "some.dow"
+  [ "$status" -eq 97 ]
 }
 
 # --- _validate_cron ---

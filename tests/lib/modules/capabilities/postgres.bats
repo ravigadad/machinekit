@@ -229,6 +229,24 @@ setup() {
   [ "$output" = $'ALTER ROLE "we""ird" WITH LOGIN PASSWORD \'pw\'' ]
 }
 
+@test "ensure_role stops when updating the password fails" {
+  STUB_RETURN=1 mktest::stub_function input::is_dry_run
+  mktest::stub_function postgres::_role_exists "someuser"
+  STUB_EXIT=97 mktest::stub_function postgres::_psql_exec_stdin "postgres"
+  mktest::stub_function logging::debug
+  run postgres::ensure_role "someuser" "somepass"
+  [ "$status" -eq 97 ]
+}
+
+@test "ensure_role stops when creating the role fails" {
+  STUB_RETURN=1 mktest::stub_function input::is_dry_run
+  STUB_RETURN=1 mktest::stub_function postgres::_role_exists "someuser"
+  STUB_EXIT=97 mktest::stub_function postgres::_psql_exec_stdin "postgres"
+  run postgres::ensure_role "someuser" "somepass"
+  [ "$status" -eq 97 ]
+  mktest::assert_stub_not_called logging::success
+}
+
 # --- postgres::ensure_superuser ---
 
 @test "ensure_superuser creates the predictable postgres superuser" {
@@ -256,6 +274,14 @@ setup() {
   STUB_RETURN=1 mktest::stub_function fake_createuser "-s" "fake-superuser"
   postgres::ensure_superuser
   mktest::assert_stub_not_called logging::success
+}
+
+@test "ensure_superuser stops when resolving createuser fails" {
+  STUB_RETURN=1 mktest::stub_function input::is_dry_run
+  STUB_OUTPUT="fake-superuser" mktest::stub_function postgres::superuser
+  STUB_EXIT=97 mktest::stub_function postgres::_createuser_path
+  run postgres::ensure_superuser
+  [ "$status" -eq 97 ]
 }
 
 # --- postgres::ensure_extension_available ---
@@ -369,6 +395,12 @@ setup() {
   [ "$output" = "ran:an-arg" ]
 }
 
+@test "_dispatch stops when resolving the satisfier fails" {
+  STUB_EXIT=97 mktest::stub_function postgres::_satisfier
+  run postgres::_dispatch some_seam
+  [ "$status" -eq 97 ]
+}
+
 # --- postgres::_db_exists ---
 
 @test "_db_exists is true when the catalog query returns a row" {
@@ -381,6 +413,12 @@ setup() {
   STUB_OUTPUT="" mktest::stub_function postgres::_psql_exec \
     "postgres" "-tAc" "SELECT 1 FROM pg_database WHERE datname = 'somedb'"
   run ! postgres::_db_exists "somedb"
+}
+
+@test "_db_exists stops when the catalog query fails" {
+  STUB_EXIT=97 mktest::stub_function postgres::_psql_exec
+  run postgres::_db_exists "somedb"
+  [ "$status" -eq 97 ]
 }
 
 # --- postgres::_role_exists ---
@@ -397,6 +435,12 @@ setup() {
   run ! postgres::_role_exists "someuser"
 }
 
+@test "_role_exists stops when the catalog query fails" {
+  STUB_EXIT=97 mktest::stub_function postgres::_psql_exec
+  run postgres::_role_exists "someuser"
+  [ "$status" -eq 97 ]
+}
+
 # --- postgres::_psql_exec ---
 
 @test "_psql_exec runs psql with no rc file, quietly, as the postgres superuser" {
@@ -405,6 +449,13 @@ setup() {
   mktest::stub_function fake_psql
   postgres::_psql_exec "somedb" "-tAc" "some query"
   mktest::assert_stub_called fake_psql "-X" "-q" "-U" "fake-superuser" "-d" "somedb" "-tAc" "some query"
+}
+
+@test "_psql_exec stops when resolving psql fails" {
+  STUB_OUTPUT="fake-superuser" mktest::stub_function postgres::superuser
+  STUB_EXIT=97 mktest::stub_function postgres::_psql_path
+  run postgres::_psql_exec "somedb" "-tAc" "some query"
+  [ "$status" -eq 97 ]
 }
 
 # --- postgres::_psql_exec_stdin ---
@@ -420,12 +471,25 @@ setup() {
   [ "$output" = "SELECT 1" ]
 }
 
+@test "_psql_exec_stdin stops when resolving psql fails" {
+  STUB_OUTPUT="fake-superuser" mktest::stub_function postgres::superuser
+  STUB_EXIT=97 mktest::stub_function postgres::_psql_path
+  run postgres::_psql_exec_stdin somedb <<< "SELECT 1"
+  [ "$status" -eq 97 ]
+}
+
 # --- postgres::_psql_path ---
 
 @test "_psql_path resolves psql inside the resolved instance's bin directory" {
   STUB_OUTPUT="/fake/bin" mktest::stub_function postgres::_bin_dir
   run postgres::_psql_path
   [ "$output" = "/fake/bin/psql" ]
+}
+
+@test "_psql_path stops when resolving the bin directory fails" {
+  STUB_EXIT=97 mktest::stub_function postgres::_bin_dir
+  run postgres::_psql_path
+  [ "$status" -eq 97 ]
 }
 
 # --- postgres::_createuser_path ---
@@ -436,6 +500,12 @@ setup() {
   [ "$output" = "/fake/bin/createuser" ]
 }
 
+@test "_createuser_path stops when resolving the bin directory fails" {
+  STUB_EXIT=97 mktest::stub_function postgres::_bin_dir
+  run postgres::_createuser_path
+  [ "$status" -eq 97 ]
+}
+
 # --- postgres::pg_dump_path ---
 
 @test "pg_dump_path resolves pg_dump inside the resolved instance's bin directory" {
@@ -444,12 +514,24 @@ setup() {
   [ "$output" = "/fake/bin/pg_dump" ]
 }
 
+@test "pg_dump_path stops when resolving the bin directory fails" {
+  STUB_EXIT=97 mktest::stub_function postgres::_bin_dir
+  run postgres::pg_dump_path
+  [ "$status" -eq 97 ]
+}
+
 # --- postgres::pg_restore_path ---
 
 @test "pg_restore_path resolves pg_restore inside the resolved instance's bin directory" {
   STUB_OUTPUT="/fake/bin" mktest::stub_function postgres::_bin_dir
   run postgres::pg_restore_path
   [ "$output" = "/fake/bin/pg_restore" ]
+}
+
+@test "pg_restore_path stops when resolving the bin directory fails" {
+  STUB_EXIT=97 mktest::stub_function postgres::_bin_dir
+  run postgres::pg_restore_path
+  [ "$status" -eq 97 ]
 }
 
 # --- postgres::_bin_dir ---

@@ -29,7 +29,6 @@ setup() {
   mktest::stub_function preflight::resolve_inputs
   mktest::stub_function secrets_manager::ensure_ready
   mktest::stub_function secrets::assert_age_key_not_pooled
-  mktest::stub_function age::assert_key_source_type
   mktest::stub_function home::transforms::register_from_modules
   mktest::stub_function home::staging::build
   mktest::stub_function modules::run_preflights
@@ -43,7 +42,6 @@ setup() {
   mktest::assert_stub_called_in_order preflight::resolve_inputs
   mktest::assert_stub_called_in_order secrets_manager::ensure_ready
   mktest::assert_stub_called_in_order secrets::assert_age_key_not_pooled
-  mktest::assert_stub_called_in_order age::assert_key_source_type
   mktest::assert_stub_called_in_order home::transforms::register_from_modules
   mktest::assert_stub_called_in_order home::staging::build
   mktest::assert_stub_called_in_order modules::run_preflights
@@ -82,6 +80,12 @@ setup() {
   MATCH="not specified" mktest::assert_stub_called logging::info
 }
 
+@test "resolve_machine_type stops when reading the machine type fails" {
+  STUB_EXIT=97 mktest::stub_function context::get "machine_type" --prompt "Which machine type do you want to apply?" --default ""
+  run preflight::resolve_machine_type
+  [ "$status" -eq 97 ]
+}
+
 # --- preflight::resolve_active_modules ---
 
 # Base modules are always active, so an empty requested set still resolves to
@@ -97,6 +101,22 @@ setup() {
   mktest::assert_stub_called context::set_array "modules.active" bm1 bm2 dep
 }
 
+@test "resolve_active_modules stops when reading the config fails" {
+  STUB_EXIT=97 mktest::stub_function config::get_json "" "{}"
+  STUB_OUTPUT='[]' mktest::stub_function config::extended_list
+  STUB_OUTPUT='fake-module' mktest::stub_function resolver::resolve
+  mktest::stub_function context::set_array
+  run preflight::resolve_active_modules
+  [ "$status" -eq 97 ]
+}
+
+@test "resolve_active_modules stops when reading the module list fails" {
+  STUB_OUTPUT='{"fake":"config"}' mktest::stub_function config::get_json "" "{}"
+  STUB_EXIT=97 mktest::stub_function config::extended_list
+  run preflight::resolve_active_modules
+  [ "$status" -eq 97 ]
+}
+
 # A machine type adds to common's modules with additional_modules, since the config
 # merge would otherwise replace the list whole; extended_list owns that combination.
 @test "resolve_active_modules resolves the base set unioned with modules and additional_modules" {
@@ -108,3 +128,11 @@ setup() {
   preflight::resolve_active_modules
   mktest::assert_stub_called context::set_array "modules.active" bm1 bm2 foo bar extra1 baz
 }
+@test "resolve_active_modules stops when resolving the modules fails" {
+  STUB_OUTPUT='{"fake":"config"}' mktest::stub_function config::get_json "" "{}"
+  STUB_OUTPUT='[]' mktest::stub_function config::extended_list
+  STUB_EXIT=97 mktest::stub_function resolver::resolve
+  run preflight::resolve_active_modules
+  [ "$status" -eq 97 ]
+}
+

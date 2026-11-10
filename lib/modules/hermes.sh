@@ -33,7 +33,7 @@ hermes::install() {
 # CLI was installed this run — there's no reliable configured probe, so a fresh
 # install stands in for "not set up yet"; an already-present CLI stays quiet.
 hermes::postflight_instructions() {
-  [ "$(context::get "hermes.installed" --default false)" = "true" ] || return 0
+  [ "${ context::get "hermes.installed" --default false; }" = "true" ] || return 0
   printf "Run 'hermes' to finish setup — machinekit does not handle it.\n"
 }
 

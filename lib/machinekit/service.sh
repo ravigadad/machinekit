@@ -47,7 +47,7 @@ service::_install() {
   local label="$1" exec="$2" kind="$3" value="$4"
   shift 4
   local family
-  family=$(context::get os.family)
+  family=${ context::get os.family; }
   case "$family" in
     darwin) service::_install_darwin "$label" "$exec" "$kind" "$value" "$@" ;;
     linux)  service::_install_linux "$label" "$exec" "$kind" "$value" "$@" ;;
@@ -64,7 +64,7 @@ service::_install_darwin() {
   local launchd_label plist stanza env_dict user
   launchd_label=$(service::_launchd_label "$label")
   plist="/Library/LaunchDaemons/$launchd_label.plist"
-  stanza=$(service::_launchd_schedule_stanza "$kind" "$value")
+  stanza=${ service::_launchd_schedule_stanza "$kind" "$value"; }
   env_dict=$(service::_launchd_env_dict "$@")
   user=$(service::_run_as_user)
   service::_plist_content "$launchd_label" "$exec" "$user" "$stanza" "$env_dict" \
@@ -84,7 +84,7 @@ service::_install_linux() {
   description="machinekit $label"
   mkdir -p "$unit_dir"
   env_lines=$(service::_systemd_env_lines "$@")
-  schedule_lines=$(service::_systemd_schedule_lines "$kind" "$value")
+  schedule_lines=${ service::_systemd_schedule_lines "$kind" "$value"; }
   service::_systemd_service_content "$description" "$exec" "$env_lines" \
     > "$unit_dir/$unit_name.service"
   service::_systemd_timer_content "$description" "$schedule_lines" \
@@ -166,7 +166,7 @@ service::_systemd_schedule_lines() {
   local kind="$1" value="$2"
   case "$kind" in
     interval) printf 'OnActiveSec=%s\nOnUnitActiveSec=%s\n' "$value" "$value" ;;
-    calendar) printf 'OnCalendar=%s\nPersistent=true\n' "$(service::_cron_to_systemd_oncalendar "$value")" ;;
+    calendar) printf 'OnCalendar=%s\nPersistent=true\n' "${ service::_cron_to_systemd_oncalendar "$value"; }" ;;
     *) lifecycle::fail "service: unknown schedule kind '$kind'" ;;
   esac
 }
@@ -250,8 +250,10 @@ service::_cron_to_launchd_calendar() {
   for spec in "Minute:$minute:0:59" "Hour:$hour:0:23" "Day:$dom:1:31" "Month:$month:1:12" "Weekday:$dow:0:7"; do
     IFS=':' read -r key field range_min range_max <<<"$spec"
     [ "$field" = "*" ] && continue
+    local field_values
     local -a values expanded=()
-    mapfile -t values < <(service::_cron_field_values "$field" "$range_min" "$range_max")
+    field_values=${ service::_cron_field_values "$field" "$range_min" "$range_max"; }
+    mapfile -t values <<<"$field_values"
     local combo value
     for combo in "${combos[@]}"; do
       for value in "${values[@]}"; do
@@ -278,13 +280,13 @@ service::_cron_to_systemd_oncalendar() {
   local when="$1" minute hour dom month dow
   read -r minute hour dom month dow <<<"$when"
   local prefix=""
-  [ "$dow" != "*" ] && prefix="$(service::_dow_names "$dow") "
+  [ "$dow" != "*" ] && prefix="${ service::_dow_names "$dow"; } "
   printf '%s*-%s-%s %s:%s:00\n' \
     "$prefix" \
-    "$(service::_oncal_component "$month" 1 12)" \
-    "$(service::_oncal_component "$dom" 1 31)" \
-    "$(service::_oncal_component "$hour" 0 23)" \
-    "$(service::_oncal_component "$minute" 0 59)"
+    "${ service::_oncal_component "$month" 1 12; }" \
+    "${ service::_oncal_component "$dom" 1 31; }" \
+    "${ service::_oncal_component "$hour" 0 23; }" \
+    "${ service::_oncal_component "$minute" 0 59; }"
 }
 
 # One OnCalendar component: `*` for a wildcard, else the field's values zero-padded
@@ -292,8 +294,10 @@ service::_cron_to_systemd_oncalendar() {
 service::_oncal_component() {
   local field="$1" min="$2" max="$3"
   [ "$field" = "*" ] && { printf '*'; return 0; }
+  local field_values
   local -a values
-  mapfile -t values < <(service::_cron_field_values "$field" "$min" "$max")
+  field_values=${ service::_cron_field_values "$field" "$min" "$max"; }
+  mapfile -t values <<<"$field_values"
   local out="" value
   for value in "${values[@]}"; do
     out+="${out:+,}$(printf '%02d' "$value")"
@@ -305,8 +309,10 @@ service::_oncal_component() {
 # cron's 0 and 7 both mean Sunday.
 service::_dow_names() {
   local field="$1"
+  local field_values
   local -a names=(Sun Mon Tue Wed Thu Fri Sat) values
-  mapfile -t values < <(service::_cron_field_values "$field" 0 7)
+  field_values=${ service::_cron_field_values "$field" 0 7; }
+  mapfile -t values <<<"$field_values"
   local out="" value name
   for value in "${values[@]}"; do
     name=${names[$((value % 7))]}

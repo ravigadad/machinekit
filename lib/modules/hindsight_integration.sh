@@ -44,13 +44,16 @@ _HINDSIGHT_INTEGRATION_RETAIN_MODES="chunked full-session"
 # integration also pulls in its own agent tool module. config::load runs before
 # the resolver calls requires, so reading the integrations array here is safe.
 hindsight_integration::requires() {
-  hindsight_integration::declared_secrets | secrets::declared_backend_requirements
-  local integration
+  local declared_secrets
+  declared_secrets=${ hindsight_integration::declared_secrets; }
+  secrets::declared_backend_requirements <<< "$declared_secrets"
+  local integrations integration
+  integrations=${ hindsight_integration::_integrations; }
   while IFS= read -r integration; do
     [ -n "$integration" ] || continue
     declare -F "hindsight_integration::${integration}::requires" >/dev/null 2>&1 \
       && "hindsight_integration::${integration}::requires"
-  done < <(hindsight_integration::_integrations)
+  done <<< "$integrations"
   # Pin success: the loop's exit status (non-zero when the last integration has
   # no optional requires — declare -F misses) would otherwise become this
   # function's return and silently trip the set -e caller.
@@ -73,20 +76,21 @@ hindsight_integration::after() {
 # preconditions. The tenant key is generated when absent (this box may be the
 # first), so it is not required here.
 hindsight_integration::preflight() {
-  [ -n "$(hindsight_integration::_server_url)" ] \
-    || [ -n "$(hindsight_integration::_server_host)" ] \
+  [ -n "${ hindsight_integration::_server_url; }" ] \
+    || [ -n "${ hindsight_integration::_server_host; }" ] \
     || lifecycle::fail \
     "hindsight_integration: set [module.hindsight_integration] server_url, or server_host (the memory server's reachable host, typically its tailnet name)."
   hindsight_integration::_validate_bank_configs
   hindsight_integration::_validate_retain_settings
-  local integration
+  local integrations integration
+  integrations=${ hindsight_integration::_integrations; }
   while IFS= read -r integration; do
     [ -n "$integration" ] || continue
     hindsight_integration::_is_available "$integration" || lifecycle::fail \
       "hindsight_integration: unknown integration '$integration'. Available: $(hindsight_integration::_available | paste -sd ' ' -)."
     declare -F "hindsight_integration::${integration}::preflight" >/dev/null 2>&1 \
       && "hindsight_integration::${integration}::preflight"
-  done < <(hindsight_integration::_integrations)
+  done <<< "$integrations"
   # Pin success (see requires): the loop's exit status must not become this
   # function's return, or a missing optional preflight silently trips set -e.
   return 0
@@ -102,11 +106,12 @@ hindsight_integration::declared_secrets() {
 # that point them at the server.
 hindsight_integration::install() {
   logging::step "hindsight_integration install"
-  local integration
+  local integrations integration
+  integrations=${ hindsight_integration::_integrations; }
   while IFS= read -r integration; do
     [ -n "$integration" ] || continue
     "hindsight_integration::${integration}::install"
-  done < <(hindsight_integration::_integrations)
+  done <<< "$integrations"
   hindsight_integration::_ensure_configs
 }
 
@@ -117,11 +122,12 @@ hindsight_integration::install() {
 # to disk and may generate the tenant key. Regenerate / repoint = delete the
 # config(s) and re-apply.
 hindsight_integration::_ensure_configs() {
-  local pending=() integration
+  local integrations pending=() integration
+  integrations=${ hindsight_integration::_integrations; }
   while IFS= read -r integration; do
     [ -n "$integration" ] || continue
     "hindsight_integration::${integration}::config_present" || pending+=("$integration")
-  done < <(hindsight_integration::_integrations)
+  done <<< "$integrations"
   [ "${#pending[@]}" -gt 0 ] || return 0
 
   if input::is_dry_run; then
@@ -129,15 +135,13 @@ hindsight_integration::_ensure_configs() {
     return 0
   fi
 
-  # Standalone assignments, not `local x=$(…)`: resolve can lifecycle::fail (no
-  # age key), and in local/argument position set -e can't see the failure.
   local url token prefix recall_banks tools_banks retain_settings
-  url="$(hindsight_integration::_api_url)"
-  token="$(hindsight::secrets::resolve tenant_api_key)"
-  prefix="$(hindsight_integration::_bank_id_prefix)"
-  recall_banks="$(hindsight_integration::_auto_recall_banks)"
-  tools_banks="$(hindsight_integration::_tool_use_banks)"
-  retain_settings="$(hindsight_integration::_retain_settings_json)"
+  url=${ hindsight_integration::_api_url; }
+  token=${ hindsight::secrets::resolve tenant_api_key; }
+  prefix=${ hindsight_integration::_bank_id_prefix; }
+  recall_banks=${ hindsight_integration::_auto_recall_banks; }
+  tools_banks=${ hindsight_integration::_tool_use_banks; }
+  retain_settings=${ hindsight_integration::_retain_settings_json; }
   for integration in "${pending[@]}"; do
     "hindsight_integration::${integration}::write_config" \
       "$url" "$token" "$prefix" "$recall_banks" "$tools_banks" "$retain_settings"
@@ -152,9 +156,11 @@ hindsight_integration::_ensure_configs() {
 # tenant is consent-gated (the explicit-consent rule); the upsert is idempotent,
 # so any machine carrying config for a bank re-asserts it on apply.
 hindsight_integration::post_apply() {
+  local bank_names
   hindsight_integration::_has_bank_configs || return 0
   if input::is_dry_run; then
-    logging::dry_run "would apply Hindsight bank config (consent-gated) for: $(hindsight_integration::_configured_bank_names | paste -sd ' ' -)"
+    bank_names=${ hindsight_integration::_configured_bank_names; }
+    logging::dry_run "would apply Hindsight bank config (consent-gated) for: $(printf '%s\n' "$bank_names" | paste -sd ' ' -)"
     return 0
   fi
   if ! hindsight_integration::_configure_banks_consented; then
@@ -165,10 +171,8 @@ hindsight_integration::post_apply() {
   hindsight_integration::_configure_banks
 }
 
-# Standalone assignment for the url: _api_url can lifecycle::fail, and in
-# local/argument position set -e can't see the failure.
 hindsight_integration::_configure_banks() {
-  local url token tenant bank body
+  local url token tenant bank body bank_names
   # A not-yet-shared key is the only soft skip: resolving one and using it would
   # mint a fresh token that doesn't match the server's. This is deliberately the
   # `provided` check, not a token resolution — an undecryptable/rotated shared key
@@ -178,23 +182,23 @@ hindsight_integration::_configure_banks() {
     logging::warn "hindsight_integration: the fleet tenant key ($(hindsight::secrets::name tenant_api_key)) isn't shared yet (pool/manager); skipping bank config. Add it to your secrets manager and re-apply."
     return 0
   fi
-  url="$(hindsight_integration::_api_url)"
+  url=${ hindsight_integration::_api_url; }
   if ! hindsight::banks::server_reachable "$url"; then
     context::set "hindsight_integration.bank_config" unreachable
     logging::warn "hindsight_integration: $url not reachable; skipping bank config — it will apply on the next run once the server is up."
     return 0
   fi
-  # Standalone assignment (not `local x=$(…)`): the key is provided, so this takes
-  # secrets::resolve's provided branch, and a decrypt/fetch failure there must
-  # propagate fatally under set -e rather than be swallowed.
-  token="$(hindsight::secrets::resolve tenant_api_key)"
-  tenant="$(hindsight_integration::_bank_config_tenant)"
+  # The key is provided, so this takes secrets::resolve's provided branch, where a
+  # decrypt or fetch failure stops the run.
+  token=${ hindsight::secrets::resolve tenant_api_key; }
+  tenant=${ hindsight_integration::_bank_config_tenant; }
+  bank_names=${ hindsight_integration::_configured_bank_names; }
   while IFS= read -r bank; do
     [ -n "$bank" ] || continue
-    body="$(hindsight_integration::_bank_config_json "$bank")"
+    body=${ hindsight_integration::_bank_config_json "$bank"; }
     logging::info "hindsight_integration: configuring bank '$bank'..."
     hindsight::banks::configure "$url" "$token" "$tenant" "$bank" "$body"
-  done < <(hindsight_integration::_configured_bank_names)
+  done <<< "$bank_names"
   context::set "hindsight_integration.bank_config" applied
   logging::success "hindsight_integration: applied bank config to the Hindsight tenant."
 }
@@ -202,14 +206,15 @@ hindsight_integration::_configure_banks() {
 # postflight: what this machine wired up — the coding agents now pointed at the
 # memory server.
 hindsight_integration::postflight_info() {
-  local integrations="" integration
+  local integrations wired="" integration api_url
+  integrations=${ hindsight_integration::_integrations; }
   while IFS= read -r integration; do
     [ -n "$integration" ] || continue
-    integrations="${integrations:+$integrations, }$integration"
-  done < <(hindsight_integration::_integrations)
-  [ -n "$integrations" ] || return 0
-  printf 'Wired %s to the Hindsight server at %s.\n' \
-    "$integrations" "$(hindsight_integration::_api_url)"
+    wired="${wired:+$wired, }$integration"
+  done <<< "$integrations"
+  [ -n "$wired" ] || return 0
+  api_url=${ hindsight_integration::_api_url; }
+  printf 'Wired %s to the Hindsight server at %s.\n' "$wired" "$api_url"
 }
 
 # postflight: the steps still on the operator — share the fleet tenant key (only
@@ -221,7 +226,7 @@ hindsight_integration::postflight_instructions() {
     printf 'The fleet tenant key (%s) is not in your secrets manager — every hindsight box must resolve the same one. Add it and re-apply.\n' \
       "$(hindsight::secrets::name tenant_api_key)"
   fi
-  case "$(hindsight_integration::_bank_config_outcome)" in
+  case ${ hindsight_integration::_bank_config_outcome; } in
     unconsented)
       printf 'Bank missions were not applied (consent withheld) — re-apply with MACHINEKIT_HINDSIGHT_INTEGRATION_CONFIGURE_BANKS=1.\n' ;;
     unreachable)
@@ -249,8 +254,8 @@ hindsight_integration::_hindsight_server_active() {
 # edits), so the remote write never happens without an explicit yes.
 hindsight_integration::_configure_banks_consented() {
   local consent
-  consent="$(context::get "hindsight_integration.configure_banks" --default false --coerce boolean \
-    --prompt "$_HINDSIGHT_INTEGRATION_CONSENT_PROMPT")"
+  consent=${ context::get "hindsight_integration.configure_banks" --default false --coerce boolean \
+    --prompt "$_HINDSIGHT_INTEGRATION_CONSENT_PROMPT"; }
   [ "$consent" = "true" ]
 }
 
@@ -270,19 +275,22 @@ hindsight_integration::_is_available() {
 # non-standard setup (https, a path, a cloud host) goes in server_url; an agent
 # config's own apiPort applies only to a local daemon.
 hindsight_integration::_api_url() {
-  local url
-  url="$(hindsight_integration::_server_url)"
+  local url host port
+  url=${ hindsight_integration::_server_url; }
   if [ -n "$url" ]; then
     printf '%s\n' "$url"
     return 0
   fi
-  printf 'http://%s:%s\n' \
-    "$(hindsight_integration::_server_host)" \
-    "$(hindsight_integration::_api_port)"
+  host=${ hindsight_integration::_server_host; }
+  port=${ hindsight_integration::_api_port; }
+  printf 'http://%s:%s\n' "$host" "$port"
 }
 
+# Optional: missing/empty means no integrations. `|| true`: an unset key makes
+# config::get_array return 1, which the callers' standalone assignments would
+# propagate under set -e; an empty list is the right answer there.
 hindsight_integration::_integrations() {
-  config::get_array "module.hindsight_integration.integrations"
+  config::get_array "module.hindsight_integration.integrations" || true
 }
 
 hindsight_integration::_server_host() {
@@ -303,7 +311,7 @@ hindsight_integration::_bank_id_prefix() {
 
 # Banks whose memories fold into every session's auto-recall (read-only). A
 # plain list of names — membership is the opt-in. `|| true`: an unset key makes
-# config::get_array return 1, which a standalone $()-assignment would propagate
+# config::get_array return 1, which a standalone assignment would propagate
 # under set -e; an empty list is the right answer there, not a failure.
 hindsight_integration::_auto_recall_banks() {
   config::get_array "module.hindsight_integration.auto_recall_banks" || true
@@ -353,9 +361,9 @@ hindsight_integration::_retain_overlap_turns() {
 # them, which a quoted string breaks.
 hindsight_integration::_retain_settings_json() {
   local retain_mode retain_every_n_turns retain_overlap_turns
-  retain_mode="$(hindsight_integration::_retain_mode)"
-  retain_every_n_turns="$(hindsight_integration::_retain_every_n_turns)"
-  retain_overlap_turns="$(hindsight_integration::_retain_overlap_turns)"
+  retain_mode=${ hindsight_integration::_retain_mode; }
+  retain_every_n_turns=${ hindsight_integration::_retain_every_n_turns; }
+  retain_overlap_turns=${ hindsight_integration::_retain_overlap_turns; }
   jq -nc \
     --arg retain_mode "$retain_mode" \
     --argjson retain_every_n_turns "$retain_every_n_turns" \
@@ -375,16 +383,19 @@ hindsight_integration::_bank_configs_json() {
 }
 
 hindsight_integration::_configured_bank_names() {
-  hindsight_integration::_bank_configs_json | jq -r 'keys_unsorted[]'
+  local bank_configs
+  bank_configs=${ hindsight_integration::_bank_configs_json; }
+  printf '%s' "$bank_configs" | jq -r 'keys_unsorted[]'
 }
 
 hindsight_integration::_bank_config_json() {
-  local bank="$1"
-  hindsight_integration::_bank_configs_json | jq -c --arg bank "$bank" '.[$bank]'
+  local bank="$1" bank_configs
+  bank_configs=${ hindsight_integration::_bank_configs_json; }
+  printf '%s' "$bank_configs" | jq -c --arg bank "$bank" '.[$bank]'
 }
 
 hindsight_integration::_has_bank_configs() {
-  [ -n "$(hindsight_integration::_configured_bank_names)" ]
+  [ -n "${ hindsight_integration::_configured_bank_names; }" ]
 }
 
 # Reading the bank table is the check: the collection reader stops the run on a
@@ -399,9 +410,9 @@ hindsight_integration::_validate_bank_configs() {
 hindsight_integration::_validate_retain_settings() {
   hindsight_integration::_validate_retain_mode
   hindsight_integration::_validate_turn_count \
-    retain_every_n_turns "$(hindsight_integration::_retain_every_n_turns)" 1
+    retain_every_n_turns "${ hindsight_integration::_retain_every_n_turns; }" 1
   hindsight_integration::_validate_turn_count \
-    retain_overlap_turns "$(hindsight_integration::_retain_overlap_turns)" 0
+    retain_overlap_turns "${ hindsight_integration::_retain_overlap_turns; }" 0
 }
 
 # Fail on an unrecognized mode rather than pass it through. The client would
@@ -409,7 +420,7 @@ hindsight_integration::_validate_retain_settings() {
 # a one-character typo costs money on every retain and nothing ever says so.
 hindsight_integration::_validate_retain_mode() {
   local retain_mode
-  retain_mode="$(hindsight_integration::_retain_mode)"
+  retain_mode=${ hindsight_integration::_retain_mode; }
   case " $_HINDSIGHT_INTEGRATION_RETAIN_MODES " in
     *" $retain_mode "*) return 0 ;;
   esac

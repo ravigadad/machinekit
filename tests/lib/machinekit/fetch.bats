@@ -123,6 +123,15 @@ setup() {
   mktest::assert_stub_called fetch::_clone_with_recovery "https://github.com/user/bp" "$BATS_TEST_TMPDIR/dest" "0" "shallow"
 }
 
+@test "_git stops when resolving the source path fails" {
+  STUB_RETURN=1 mktest::stub_function fetch::_is_url "./fake-source"
+  STUB_EXIT=97 mktest::stub_function fetch::_resolve_source_path "./fake-source"
+  STUB_RETURN=1 mktest::stub_function fetch::_provision_ssh_for_clone
+  mktest::stub_function fetch::_clone_with_recovery
+  run fetch::_git "./fake-source" "$BATS_TEST_TMPDIR/dest"
+  [ "$status" -eq 97 ]
+}
+
 # --- fetch::_provision_ssh_for_clone ---
 
 @test "_provision_ssh_for_clone does nothing and reports false when no flags are given" {
@@ -148,6 +157,22 @@ setup() {
   run fetch::_provision_ssh_for_clone
   [ "$status" -eq 0 ]
   mktest::assert_stub_called ssh::setup_key
+}
+
+@test "_provision_ssh_for_clone stops when reading the existing key file fails" {
+  STUB_EXIT=97 mktest::stub_function context::get "existing_ssh_key_file"
+  STUB_OUTPUT="false" mktest::stub_function context::get "ssh.key_generate" "--coerce" "boolean" "--default" "false"
+  mktest::stub_function ssh::setup_key
+  run fetch::_provision_ssh_for_clone
+  [ "$status" -eq 97 ]
+}
+
+@test "_provision_ssh_for_clone stops when reading the generate flag fails" {
+  STUB_RETURN=1 mktest::stub_function context::get "existing_ssh_key_file"
+  STUB_EXIT=97 mktest::stub_function context::get "ssh.key_generate" "--coerce" "boolean" "--default" "false"
+  mktest::stub_function ssh::setup_key
+  run fetch::_provision_ssh_for_clone
+  [ "$status" -eq 97 ]
 }
 
 # --- fetch::_clone_with_recovery ---
@@ -310,6 +335,15 @@ setup() {
   STUB_OUTPUT="$src" mktest::stub_function fetch::_resolve_source_path "the-raw-source"
   fetch::_cp "the-raw-source" "$BATS_TEST_TMPDIR/dest"
   [ -f "$BATS_TEST_TMPDIR/dest/file.txt" ]
+}
+
+@test "_cp stops when resolving the source path fails" {
+  STUB_EXIT=97 mktest::stub_function fetch::_resolve_source_path "the-raw-source"
+  # Stubbed so a run that carries on can't copy from an empty source path.
+  mktest::stub_function mkdir
+  mktest::stub_function cp
+  run fetch::_cp "the-raw-source" "$BATS_TEST_TMPDIR/dest"
+  [ "$status" -eq 97 ]
 }
 
 # --- fetch::_is_url ---

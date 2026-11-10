@@ -19,7 +19,6 @@ preflight::run() {
   # is knowable) before module preflights, which ask whether their secrets exist.
   secrets_manager::ensure_ready
   secrets::assert_age_key_not_pooled
-  age::assert_key_source_type
   home::transforms::register_from_modules
   home::staging::build
 
@@ -43,7 +42,7 @@ preflight::resolve_inputs() {
 
 preflight::resolve_machine_type() {
   local t
-  t=$(context::get "machine_type" --prompt "Which machine type do you want to apply?" --default "") || true
+  t=${ context::get "machine_type" --prompt "Which machine type do you want to apply?" --default ""; } || true
   logging::info "Machine type: ${t:-not specified}"
 }
 
@@ -54,17 +53,19 @@ preflight::resolve_active_modules() {
   # A machine type's `modules` replaces common's (the config merge carries lists
   # whole), so a type adds to it with `additional_modules`. Order doesn't matter
   # here: the resolver puts dependencies first regardless.
-  local requested=("${MK_BASE_MODULES[@]}") mod module_list
-  module_list=$(config::extended_list "$(config::get_json "" "{}")" modules after "machinekit.toml")
+  local requested=("${MK_BASE_MODULES[@]}") mod config_json module_list
+  config_json=${ config::get_json "" "{}"; }
+  module_list=${ config::extended_list "$config_json" modules after "machinekit.toml"; }
   while IFS= read -r mod; do
     [ -n "$mod" ] || continue
     requested+=("$mod")
   done < <(printf '%s' "$module_list" | jq -r '.[]')
 
-  local ordered=()
+  local ordered=() resolved
+  resolved=${ resolver::resolve "${requested[@]}"; }
   while IFS= read -r mod; do
     ordered+=("$mod")
-  done < <(resolver::resolve "${requested[@]}")
+  done <<< "$resolved"
 
   context::set_array "modules.active" "${ordered[@]}"
   logging::info "Active modules: $(IFS=', '; printf '%s' "${ordered[*]}")"

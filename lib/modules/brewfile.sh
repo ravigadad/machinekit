@@ -3,12 +3,12 @@
 
 brewfile::install() {
   local blueprints_dir
-  blueprints_dir="$(blueprints::dir)"
+  blueprints_dir=${ blueprints::dir; }
 
   brewfile::_apply_one "$blueprints_dir/common/Brewfile" "common/Brewfile"
 
   local machine_type
-  machine_type="$(context::get "machine_type" 2>/dev/null || true)"
+  machine_type=${ context::get "machine_type" 2>/dev/null || true; }
   if [ -n "$machine_type" ]; then
     brewfile::_apply_one "$blueprints_dir/machine_types/$machine_type/Brewfile" "machine_types/$machine_type/Brewfile"
   fi
@@ -43,8 +43,8 @@ brewfile::_diff() {
     return 0
   fi
 
-  installed_formulae=$(brew::_installed formula)
-  installed_casks=$(brew::_installed cask)
+  installed_formulae=${ brew::_installed formula; }
+  installed_casks=${ brew::_installed cask; }
 
   while IFS= read -r line; do
     line="${line%%#*}"

@@ -36,7 +36,7 @@ openclaw::install() {
 # reliable onboarded probe, so a fresh install stands in for "not set up yet"; an
 # already-present CLI stays quiet.
 openclaw::postflight_instructions() {
-  [ "$(context::get "openclaw.installed" --default false)" = "true" ] || return 0
+  [ "${ context::get "openclaw.installed" --default false; }" = "true" ] || return 0
   printf "Run 'openclaw' to finish onboarding — machinekit does not handle it.\n"
 }
 

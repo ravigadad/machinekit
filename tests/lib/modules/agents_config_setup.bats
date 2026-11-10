@@ -57,6 +57,30 @@ setup() {
   MATCH="source" mktest::assert_stub_called lifecycle::fail
 }
 
+@test "preflight stops when reading the dir fails" {
+  STUB_EXIT=97 mktest::stub_function agents_config_setup::dir
+  run agents_config_setup::preflight
+  [ "$status" -eq 97 ]
+}
+
+@test "preflight stops when reading the source fails" {
+  STUB_OUTPUT="/agents" mktest::stub_function agents_config_setup::dir
+  STUB_RETURN=1 mktest::stub_function agents_config_setup::_present "/agents"
+  STUB_EXIT=97 mktest::stub_function agents_config_setup::_source
+  run agents_config_setup::preflight
+  [ "$status" -eq 97 ]
+}
+
+@test "preflight stops when reading the protocol override fails" {
+  STUB_OUTPUT="/agents" mktest::stub_function agents_config_setup::dir
+  STUB_RETURN=1 mktest::stub_function agents_config_setup::_present "/agents"
+  STUB_OUTPUT="https://example.invalid/agents" mktest::stub_function agents_config_setup::_source
+  STUB_EXIT=97 mktest::stub_function agents_config_setup::_source_protocol
+  mktest::stub_function fetch::resolve_protocol
+  run agents_config_setup::preflight
+  [ "$status" -eq 97 ]
+}
+
 # --- install ---
 
 @test "install skips a present dir in a normal run and fetches nothing" {
@@ -123,6 +147,60 @@ setup() {
   mktest::assert_stub_called logging::dry_run
 }
 
+@test "install stops when reading the dir fails" {
+  STUB_EXIT=97 mktest::stub_function agents_config_setup::dir
+  run agents_config_setup::install
+  [ "$status" -eq 97 ]
+}
+
+@test "install in dry-run stops when reading the source fails" {
+  STUB_OUTPUT="/agents" mktest::stub_function agents_config_setup::dir
+  STUB_RETURN=1 mktest::stub_function agents_config_setup::_present "/agents"
+  mktest::stub_function input::is_dry_run
+  STUB_EXIT=97 mktest::stub_function agents_config_setup::_source
+  run agents_config_setup::install
+  [ "$status" -eq 97 ]
+}
+
+@test "install stops when reading the source fails" {
+  STUB_OUTPUT="/agents" mktest::stub_function agents_config_setup::dir
+  STUB_RETURN=1 mktest::stub_function agents_config_setup::_present "/agents"
+  STUB_RETURN=1 mktest::stub_function input::is_dry_run
+  STUB_EXIT=97 mktest::stub_function agents_config_setup::_source
+  mktest::stub_function agents_config_setup::_source_protocol
+  mktest::stub_function fetch::resolve_protocol
+  mktest::stub_function fetch::into
+  mktest::stub_function agents_config_setup::_strip_git
+  run agents_config_setup::install
+  [ "$status" -eq 97 ]
+}
+
+@test "install stops when reading the protocol override fails" {
+  STUB_OUTPUT="/agents" mktest::stub_function agents_config_setup::dir
+  STUB_RETURN=1 mktest::stub_function agents_config_setup::_present "/agents"
+  STUB_RETURN=1 mktest::stub_function input::is_dry_run
+  STUB_OUTPUT="https://example.invalid/agents" mktest::stub_function agents_config_setup::_source
+  STUB_EXIT=97 mktest::stub_function agents_config_setup::_source_protocol
+  mktest::stub_function fetch::resolve_protocol
+  mktest::stub_function fetch::into
+  mktest::stub_function agents_config_setup::_strip_git
+  run agents_config_setup::install
+  [ "$status" -eq 97 ]
+}
+
+@test "install stops when resolving the protocol fails" {
+  STUB_OUTPUT="/agents" mktest::stub_function agents_config_setup::dir
+  STUB_RETURN=1 mktest::stub_function agents_config_setup::_present "/agents"
+  STUB_RETURN=1 mktest::stub_function input::is_dry_run
+  STUB_OUTPUT="https://example.invalid/agents" mktest::stub_function agents_config_setup::_source
+  STUB_OUTPUT="cp" mktest::stub_function agents_config_setup::_source_protocol
+  STUB_EXIT=97 mktest::stub_function fetch::resolve_protocol "https://example.invalid/agents" "cp"
+  mktest::stub_function fetch::into
+  mktest::stub_function agents_config_setup::_strip_git
+  run agents_config_setup::install
+  [ "$status" -eq 97 ]
+}
+
 # --- _strip_git ---
 
 @test "_strip_git removes the dir's .git, leaving content intact" {
@@ -155,6 +233,12 @@ setup() {
   STUB_OUTPUT="~/custom/agents" mktest::stub_function config::get "module.agents_config_setup.dir" "--default" "$HOME/.agents"
   run agents_config_setup::dir
   [ "$output" = "$HOME/custom/agents" ]
+}
+
+@test "dir stops when reading the dir key fails" {
+  STUB_EXIT=97 mktest::stub_function config::get "module.agents_config_setup.dir" "--default" "$HOME/.agents"
+  run agents_config_setup::dir
+  [ "$status" -eq 97 ]
 }
 
 @test "_source reads the source key, defaulting to empty" {

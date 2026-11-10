@@ -55,6 +55,12 @@ setup() {
   run ! postgres_brew::introspect::is_installed 14
 }
 
+@test "is_installed stops when naming the formula fails" {
+  STUB_EXIT=97 mktest::stub_function postgres_brew::introspect::formula
+  run postgres_brew::introspect::is_installed "17"
+  [ "$status" -eq 97 ]
+}
+
 # --- postgres_brew::introspect::latest_available_version ---
 
 @test "latest_available_version resolves the postgresql alias to its major via brew metadata" {
@@ -73,6 +79,13 @@ setup() {
   [ "$output" = "/fake/brew/var/fake-formula" ]
 }
 
+@test "data_dir stops when naming the formula fails" {
+  STUB_OUTPUT="/fake/prefix" mktest::stub_function brew --prefix
+  STUB_EXIT=97 mktest::stub_function postgres_brew::introspect::formula
+  run postgres_brew::introspect::data_dir "17"
+  [ "$status" -eq 97 ]
+}
+
 # --- postgres_brew::introspect::bin_dir ---
 
 @test "bin_dir resolves the keg-only bin directory for the version" {
@@ -82,12 +95,24 @@ setup() {
   [ "$output" = "/fake/keg/bin" ]
 }
 
+@test "bin_dir stops when naming the formula fails" {
+  STUB_EXIT=97 mktest::stub_function postgres_brew::introspect::formula
+  run postgres_brew::introspect::bin_dir "17"
+  [ "$status" -eq 97 ]
+}
+
 # --- postgres_brew::introspect::pg_ctl_path ---
 
 @test "pg_ctl_path points at pg_ctl inside the version's bin directory" {
   STUB_OUTPUT="/fake/bin" mktest::stub_function postgres_brew::introspect::bin_dir "14"
   run postgres_brew::introspect::pg_ctl_path 14
   [ "$output" = "/fake/bin/pg_ctl" ]
+}
+
+@test "pg_ctl_path stops when locating the bin directory fails" {
+  STUB_EXIT=97 mktest::stub_function postgres_brew::introspect::bin_dir "14"
+  run postgres_brew::introspect::pg_ctl_path 14
+  [ "$status" -eq 97 ]
 }
 
 # --- postgres_brew::introspect::is_initialized ---
@@ -102,6 +127,12 @@ setup() {
   local datadir="$BATS_TEST_TMPDIR/datadir"; mkdir -p "$datadir"
   STUB_OUTPUT="$datadir" mktest::stub_function postgres_brew::introspect::data_dir "14"
   run ! postgres_brew::introspect::is_initialized 14
+}
+
+@test "is_initialized stops when locating the data directory fails" {
+  STUB_EXIT=97 mktest::stub_function postgres_brew::introspect::data_dir "14"
+  run postgres_brew::introspect::is_initialized 14
+  [ "$status" -eq 97 ]
 }
 
 # --- postgres_brew::introspect::configured_port ---
@@ -137,6 +168,12 @@ setup() {
   [ "$output" = "5432" ]
 }
 
+@test "configured_port stops when locating the data directory fails" {
+  STUB_EXIT=97 mktest::stub_function postgres_brew::introspect::data_dir "14"
+  run postgres_brew::introspect::configured_port 14
+  [ "$status" -eq 97 ]
+}
+
 # --- postgres_brew::introspect::is_running ---
 
 @test "is_running is true when pg_ctl reports the cluster up" {
@@ -153,6 +190,21 @@ setup() {
   STUB_RETURN=3 mktest::stub_function fake_pg_ctl "status" "-D" "/fake/datadir"
   run ! postgres_brew::introspect::is_running 14
   mktest::assert_stub_called fake_pg_ctl "status" "-D" "/fake/datadir"
+}
+
+@test "is_running stops when locating pg_ctl fails" {
+  STUB_EXIT=97 mktest::stub_function postgres_brew::introspect::pg_ctl_path "14"
+  STUB_OUTPUT="/fake/datadir" mktest::stub_function postgres_brew::introspect::data_dir "14"
+  run postgres_brew::introspect::is_running 14
+  [ "$status" -eq 97 ]
+}
+
+@test "is_running stops when locating the data directory fails" {
+  STUB_OUTPUT="fake_pg_ctl" mktest::stub_function postgres_brew::introspect::pg_ctl_path "14"
+  STUB_EXIT=97 mktest::stub_function postgres_brew::introspect::data_dir "14"
+  mktest::stub_function fake_pg_ctl
+  run postgres_brew::introspect::is_running 14
+  [ "$status" -eq 97 ]
 }
 
 # --- postgres_brew::introspect::instance_version ---
@@ -196,4 +248,18 @@ setup() {
   run postgres_brew::introspect::instance_version
   [ "$status" -ne 0 ]
   [ -z "$output" ]
+}
+
+@test "instance_version stops when listing the installed versions fails" {
+  STUB_EXIT=97 mktest::stub_function postgres_brew::introspect::installed_versions
+  run postgres_brew::introspect::instance_version
+  [ "$status" -eq 97 ]
+}
+
+@test "instance_version stops when reading an installed version's port fails" {
+  STUB_OUTPUT="14" mktest::stub_function postgres_brew::introspect::installed_versions
+  mktest::stub_function postgres_brew::introspect::is_initialized "14"
+  STUB_EXIT=97 mktest::stub_function postgres_brew::introspect::configured_port "14"
+  run postgres_brew::introspect::instance_version
+  [ "$status" -eq 97 ]
 }

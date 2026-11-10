@@ -11,8 +11,8 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../secrets.sh"
 # secrets no active module recognizes. Nothing to show is a plain message.
 secrets::render() {
   local rows orphans
-  rows="$(secrets::inventory)"
-  orphans="$(secrets::orphans)"
+  rows=${ secrets::inventory; }
+  orphans=${ secrets::orphans; }
 
   if [ -z "$rows" ] && [ -z "$orphans" ]; then
     logging::info "No secrets are needed or present for the active modules."

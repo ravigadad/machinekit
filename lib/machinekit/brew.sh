@@ -101,7 +101,7 @@ brew::restart_service() { brew::_service restart "$1" "${2:-system}"; }
 
 brew::_service() {
   local action="$1" formula="$2" scope="${3:-system}" family
-  family="$(context::get os.family)"
+  family=${ context::get os.family; }
   case "$family" in
     darwin)
       if [ "$scope" = user ]; then
@@ -120,11 +120,9 @@ brew::_service() {
 
 # brew::_is_installed KIND NAME — is the named formula/cask already present?
 brew::_is_installed() {
-  local kind="$1" name="$2"
-  # Warm cache in the current shell so the *_CACHED flag propagates; the
-  # subshell for command substitution would otherwise never update it.
-  brew::_installed "$kind" >/dev/null
-  grep -qxF "$name" <<< "$(brew::_installed "$kind")"
+  local kind="$1" name="$2" installed
+  installed=${ brew::_installed "$kind"; }
+  grep -qxF "$name" <<< "$installed"
 }
 
 # Absolute path to the brew binary. Callers running brew under sudo need this:

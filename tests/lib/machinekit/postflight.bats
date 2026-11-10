@@ -168,6 +168,33 @@ setup() {
   MATCH="synced" mktest::assert_stub_not_called logging::info
 }
 
+@test "_print_baseline stops when reading the machine type fails" {
+  mktest::stub_function input::is_dry_run
+  STUB_EXIT=97 mktest::stub_function context::get machine_type --default "(none)"
+  STUB_OUTPUT=7 mktest::stub_function context::get home.files_synced --default 0
+  STUB_OUTPUT=$'git' mktest::stub_function context::get_array modules.active
+  run postflight::_print_baseline
+  [ "$status" -eq 97 ]
+}
+
+@test "_print_baseline stops when reading the active modules fails" {
+  mktest::stub_function input::is_dry_run
+  STUB_OUTPUT=server mktest::stub_function context::get machine_type --default "(none)"
+  STUB_OUTPUT=7 mktest::stub_function context::get home.files_synced --default 0
+  STUB_EXIT=97 mktest::stub_function context::get_array modules.active
+  run postflight::_print_baseline
+  [ "$status" -eq 97 ]
+}
+
+@test "_print_baseline stops when reading the files-synced count fails" {
+  mktest::stub_function input::is_dry_run
+  STUB_OUTPUT=server mktest::stub_function context::get machine_type --default "(none)"
+  STUB_EXIT=97 mktest::stub_function context::get home.files_synced --default 0
+  STUB_OUTPUT=$'git' mktest::stub_function context::get_array modules.active
+  run postflight::_print_baseline
+  [ "$status" -eq 97 ]
+}
+
 # --- postflight::_print_exec_hint ---
 
 @test "_print_exec_hint logs the exec command" {

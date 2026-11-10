@@ -36,6 +36,14 @@ setup() {
   [ -z "$output" ]
 }
 
+@test "requires stops when declaring its secrets fails" {
+  STUB_EXIT=97 mktest::stub_function tailscale::declared_secrets
+  mktest::stub_function secrets::declared_backend_requirements
+  run tailscale::requires
+  [ "$status" -eq 97 ]
+  mktest::assert_stub_not_called secrets::declared_backend_requirements
+}
+
 # --- tailscale::preflight ---
 
 @test "preflight is a no-op for an untagged (user) device" {
@@ -65,6 +73,24 @@ setup() {
   MATCH="tailscale/default" mktest::assert_stub_called lifecycle::fail
 }
 
+@test "preflight stops when reading the tag fails" {
+  STUB_EXIT=97 mktest::stub_function tailscale::_tag
+  mktest::stub_function secrets::present
+  run tailscale::preflight
+  [ "$status" -eq 97 ]
+  mktest::assert_stub_not_called secrets::present
+}
+
+@test "preflight stops when building the secret name fails" {
+  STUB_OUTPUT="server" mktest::stub_function tailscale::_tag
+  STUB_EXIT=97 mktest::stub_function tailscale::_secret_name
+  mktest::stub_function secrets::present
+  mktest::stub_function lifecycle::fail
+  run tailscale::preflight
+  [ "$status" -eq 97 ]
+  mktest::assert_stub_not_called secrets::present
+}
+
 # --- tailscale::declared_secrets ---
 
 @test "declared_secrets declares the tailnet secret required and not generatable on a tagged device" {
@@ -82,6 +108,22 @@ setup() {
   [ "$status" -eq 0 ]
   [ -z "$output" ]
   mktest::assert_stub_not_called tailscale::_secret_name
+}
+
+@test "declared_secrets stops when reading the tag fails" {
+  STUB_EXIT=97 mktest::stub_function tailscale::_tag
+  mktest::stub_function tailscale::_secret_name
+  run tailscale::declared_secrets
+  [ "$status" -eq 97 ]
+  [ -z "$output" ]
+}
+
+@test "declared_secrets stops when building the secret name fails" {
+  STUB_OUTPUT="server" mktest::stub_function tailscale::_tag
+  STUB_EXIT=97 mktest::stub_function tailscale::_secret_name
+  run tailscale::declared_secrets
+  [ "$status" -eq 97 ]
+  [ -z "$output" ]
 }
 
 # --- tailscale::install ---
@@ -135,6 +177,18 @@ setup() {
   mktest::assert_stub_called brew::install_formula "tailscale"
   mktest::assert_stub_not_called tailscale::_start_daemon
   mktest::assert_stub_called logging::dry_run
+}
+
+@test "install stops when reading the OS family fails" {
+  STUB_RETURN=1 mktest::stub_function tailscale::_use_cask
+  STUB_EXIT=97 mktest::stub_function tailscale::_os_family
+  mktest::stub_function tailscale::_install_linux
+  mktest::stub_function brew::install_formula
+  STUB_RETURN=1 mktest::stub_function input::is_dry_run
+  mktest::stub_function tailscale::_start_daemon
+  run tailscale::install
+  [ "$status" -eq 97 ]
+  mktest::assert_stub_not_called brew::install_formula
 }
 
 # --- tailscale::_install_cask ---
@@ -223,6 +277,20 @@ setup() {
   run ! tailscale::_use_cask
 }
 
+@test "_use_cask stops when reading the tag fails" {
+  STUB_EXIT=97 mktest::stub_function tailscale::_tag
+  STUB_OUTPUT="darwin" mktest::stub_function tailscale::_os_family
+  run tailscale::_use_cask
+  [ "$status" -eq 97 ]
+}
+
+@test "_use_cask stops when reading the OS family fails" {
+  STUB_OUTPUT="" mktest::stub_function tailscale::_tag
+  STUB_EXIT=97 mktest::stub_function tailscale::_os_family
+  run tailscale::_use_cask
+  [ "$status" -eq 97 ]
+}
+
 # --- tailscale::post_apply ---
 
 @test "post_apply does nothing on an untagged device (sign-in is a postflight instruction now)" {
@@ -237,6 +305,14 @@ setup() {
   mktest::stub_function tailscale::_join "server"
   tailscale::post_apply
   mktest::assert_stub_called tailscale::_join "server"
+}
+
+@test "post_apply stops when reading the tag fails" {
+  STUB_EXIT=97 mktest::stub_function tailscale::_tag
+  mktest::stub_function tailscale::_join
+  run tailscale::post_apply
+  [ "$status" -eq 97 ]
+  mktest::assert_stub_not_called tailscale::_join
 }
 
 # --- tailscale::_membership_summary (single source for the live + postflight line) ---
@@ -255,6 +331,13 @@ setup() {
   [[ "$output" != *"hostname"* ]]
 }
 
+@test "_membership_summary stops when reading the hostname fails" {
+  STUB_EXIT=97 mktest::stub_function tailscale::_hostname
+  run tailscale::_membership_summary "server"
+  [ "$status" -eq 97 ]
+  [ -z "$output" ]
+}
+
 # --- tailscale::_signin_instruction ---
 
 @test "_signin_instruction points macOS users at the GUI app" {
@@ -267,6 +350,13 @@ setup() {
   STUB_OUTPUT="linux" mktest::stub_function tailscale::_os_family
   run tailscale::_signin_instruction
   [[ "$output" == *"tailscale up"* ]]
+}
+
+@test "_signin_instruction stops when reading the OS family fails" {
+  STUB_EXIT=97 mktest::stub_function tailscale::_os_family
+  run tailscale::_signin_instruction
+  [ "$status" -eq 97 ]
+  [ -z "$output" ]
 }
 
 # --- tailscale::postflight_info ---
@@ -293,6 +383,13 @@ setup() {
   [ -z "$output" ]
 }
 
+@test "postflight_info stops when reading the tag fails" {
+  STUB_EXIT=97 mktest::stub_function tailscale::_tag
+  mktest::stub_function tailscale::_is_connected
+  run tailscale::postflight_info
+  [ "$status" -eq 97 ]
+}
+
 # --- tailscale::postflight_instructions ---
 
 @test "postflight_instructions surfaces the manual sign-in step on an untagged device" {
@@ -315,6 +412,15 @@ setup() {
   run tailscale::postflight_instructions
   [[ "$output" == *"MACHINEKIT_TAILSCALE_JOIN=1"* ]]
   [[ "$output" == *"tag:server"* ]]
+}
+
+@test "postflight_instructions stops when reading the tag fails" {
+  STUB_EXIT=97 mktest::stub_function tailscale::_tag
+  mktest::stub_function tailscale::_signin_instruction
+  mktest::stub_function tailscale::_is_connected
+  run tailscale::postflight_instructions
+  [ "$status" -eq 97 ]
+  mktest::assert_stub_not_called tailscale::_signin_instruction
 }
 
 # --- tailscale::_join ---
@@ -359,6 +465,56 @@ setup() {
   mktest::assert_stub_called logging::warn
 }
 
+@test "_join stops when reading the consent signal fails" {
+  STUB_RETURN=1 mktest::stub_function tailscale::_is_connected
+  STUB_RETURN=1 mktest::stub_function input::is_dry_run
+  STUB_EXIT=97 mktest::stub_function context::get
+  mktest::stub_function tailscale::_up
+  run tailscale::_join "server"
+  [ "$status" -eq 97 ]
+  mktest::assert_stub_not_called tailscale::_up
+}
+
+@test "_join stops when building the secret name fails" {
+  STUB_RETURN=1 mktest::stub_function tailscale::_is_connected
+  STUB_RETURN=1 mktest::stub_function input::is_dry_run
+  STUB_OUTPUT="true" mktest::stub_function context::get "tailscale.join" --default false --coerce boolean \
+    --prompt "Join the tailnet now as tagged device tag:server? (y/n)"
+  STUB_EXIT=97 mktest::stub_function tailscale::_secret_name
+  mktest::stub_function secrets::resolve
+  mktest::stub_function tailscale::_up
+  run tailscale::_join "server"
+  [ "$status" -eq 97 ]
+  mktest::assert_stub_not_called tailscale::_up
+}
+
+@test "_join stops when resolving the secret fails" {
+  STUB_RETURN=1 mktest::stub_function tailscale::_is_connected
+  STUB_RETURN=1 mktest::stub_function input::is_dry_run
+  STUB_OUTPUT="true" mktest::stub_function context::get "tailscale.join" --default false --coerce boolean \
+    --prompt "Join the tailnet now as tagged device tag:server? (y/n)"
+  STUB_OUTPUT="tailscale/default" mktest::stub_function tailscale::_secret_name
+  STUB_EXIT=97 mktest::stub_function secrets::resolve "tailscale/default"
+  mktest::stub_function tailscale::_up
+  run tailscale::_join "server"
+  [ "$status" -eq 97 ]
+  mktest::assert_stub_not_called tailscale::_up
+}
+
+@test "_join stops when building the membership summary fails" {
+  STUB_RETURN=1 mktest::stub_function tailscale::_is_connected
+  STUB_RETURN=1 mktest::stub_function input::is_dry_run
+  STUB_OUTPUT="true" mktest::stub_function context::get "tailscale.join" --default false --coerce boolean \
+    --prompt "Join the tailnet now as tagged device tag:server? (y/n)"
+  STUB_OUTPUT="tailscale/default" mktest::stub_function tailscale::_secret_name
+  STUB_OUTPUT="fake-oauth-secret" mktest::stub_function secrets::resolve "tailscale/default"
+  mktest::stub_function tailscale::_up "fake-oauth-secret" "server"
+  STUB_EXIT=97 mktest::stub_function tailscale::_membership_summary "server"
+  run tailscale::_join "server"
+  [ "$status" -eq 97 ]
+  mktest::assert_stub_not_called logging::success
+}
+
 # --- tailscale::_up ---
 
 @test "_up brings tailscale up off-argv via file:/dev/stdin with the advertised tag" {
@@ -388,6 +544,15 @@ setup() {
   sudo() { cat > "$capture"; }
   tailscale::_up "fake-oauth-secret" "server"
   [ "$(cat "$capture")" = "fake-oauth-secret?ephemeral=false" ]
+}
+
+@test "_up stops when reading the hostname fails" {
+  STUB_OUTPUT="/opt/homebrew/bin/tailscale" mktest::stub_function tailscale::_bin
+  STUB_EXIT=97 mktest::stub_function tailscale::_hostname
+  mktest::stub_function sudo
+  run tailscale::_up "fake-oauth-secret" "server"
+  [ "$status" -eq 97 ]
+  mktest::assert_stub_not_called sudo
 }
 
 # --- tailscale::_bin ---
@@ -443,4 +608,11 @@ setup() {
   STUB_OUTPUT="work" mktest::stub_function tailscale::_tailnet
   run tailscale::_secret_name
   [ "$output" = "tailscale/work" ]
+}
+
+@test "_secret_name stops when reading the tailnet fails" {
+  STUB_EXIT=97 mktest::stub_function tailscale::_tailnet
+  run tailscale::_secret_name
+  [ "$status" -eq 97 ]
+  [ -z "$output" ]
 }

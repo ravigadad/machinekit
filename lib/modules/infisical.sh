@@ -65,9 +65,11 @@ infisical::ensure_ready() {
 # non-interactively (federated SSO has no programmatic credential), so fail
 # early and clearly rather than deep inside an impossible browser login.
 infisical::_authenticate() {
-  case "$(infisical::_auth_method)" in
+  local auth_method
+  auth_method=${ infisical::_auth_method; }
+  case "$auth_method" in
     universal)
-      _INFISICAL_TOKEN=$(infisical::_login_universal)
+      _INFISICAL_TOKEN=${ infisical::_login_universal; }
       # The client secret was needed only for that one login exchange. Scrub it
       # from the environment so it is not inherited by the children machinekit
       # later forks — gomplate renders expose the whole environment to templates
@@ -80,7 +82,7 @@ infisical::_authenticate() {
         "infisical: auth_method = user requires an interactive session; set auth_method = universal for headless machines."
       infisical::_login_user ;;
     *)
-      lifecycle::fail "infisical: unknown auth_method '$(infisical::_auth_method)' — expected 'universal' or 'user'." ;;
+      lifecycle::fail "infisical: unknown auth_method '$auth_method' — expected 'universal' or 'user'." ;;
   esac
 }
 
@@ -91,13 +93,14 @@ infisical::_authenticate() {
 # but failing export propagates under set -e: if the inventory can't be read,
 # presence can't be answered, so readiness fails loudly rather than guessing.
 infisical::_load_secret_names() {
-  local project_id
-  project_id="$(infisical::_default_project_id)"
+  local project_id environment
+  project_id=${ infisical::_default_project_id; }
   if [ -z "$project_id" ]; then
     _INFISICAL_SECRET_NAMES=""
     return 0
   fi
-  _INFISICAL_SECRET_NAMES="$(infisical::_export_secret_keys "$project_id" "$(infisical::_environment)" "/")"
+  environment=${ infisical::_environment; }
+  _INFISICAL_SECRET_NAMES=${ infisical::_export_secret_keys "$project_id" "$environment" "/"; }
 }
 
 # The secret keys at PATH in a project/env, one per line. The Infisical CLI has
@@ -162,16 +165,18 @@ infisical::has_reference() {
 # Existence is a key lookup, not a value fetch: `secrets get` exits 0 with empty
 # output for a missing key, so a fetch can't tell missing from present.
 infisical::_verify_explicit_references() {
-  local reference project_id env path name cache_key default_project_id
+  local references reference project_id env path name cache_key default_project_id default_environment
   declare -A key_sets_by_project_env_path
   # _INFISICAL_SECRET_NAMES already holds the default project/env's root keys
   # (loaded by _load_secret_names); reuse them so a root reference into that
   # project/env doesn't export a second time. The "//" is the "$project/$env/$path"
   # key with the root path "/".
-  default_project_id="$(infisical::_default_project_id)"
+  default_project_id=${ infisical::_default_project_id; }
   if [ -n "$default_project_id" ]; then
-    key_sets_by_project_env_path["$default_project_id/$(infisical::_environment)//"]="$_INFISICAL_SECRET_NAMES"
+    default_environment=${ infisical::_environment; }
+    key_sets_by_project_env_path["$default_project_id/$default_environment//"]="$_INFISICAL_SECRET_NAMES"
   fi
+  references=${ infisical::_configured_references; }
   while IFS= read -r reference; do
     [ -n "$reference" ] || continue
     infisical::_reference_wellformed "$reference" \
@@ -179,12 +184,12 @@ infisical::_verify_explicit_references() {
     { IFS= read -r project_id; IFS= read -r env; IFS= read -r path; IFS= read -r name; } < <(infisical::_reference_parts "$reference")
     cache_key="$project_id/$env/$path"
     if [ -z "${key_sets_by_project_env_path[$cache_key]+cached}" ]; then
-      key_sets_by_project_env_path[$cache_key]="$(infisical::_export_secret_keys "$project_id" "$env" "$path")"
+      key_sets_by_project_env_path[$cache_key]=${ infisical::_export_secret_keys "$project_id" "$env" "$path"; }
     fi
     if grep -Fxq -- "$name" <<< "${key_sets_by_project_env_path[$cache_key]}"; then
       _INFISICAL_VERIFIED_REFERENCES+="${_INFISICAL_VERIFIED_REFERENCES:+$'\n'}$reference"
     fi
-  done < <(infisical::_configured_references)
+  done <<< "$references"
 }
 
 # The explicit infisical:// references configured in [secrets.manager_refs], one
@@ -192,7 +197,7 @@ infisical::_verify_explicit_references() {
 # reads only its own scheme, leaving another manager's refs to that manager.
 infisical::_configured_references() {
   local refs_json
-  refs_json="$(config::get "secrets.manager_refs" 2>/dev/null || true)"
+  refs_json=${ config::get "secrets.manager_refs" 2>/dev/null || true; }
   [ -n "$refs_json" ] || return 0
   printf '%s' "$refs_json" | jq -r 'to_entries[] | .value' | grep '^infisical://' || true
 }
@@ -232,8 +237,11 @@ infisical::_fetch_explicit() {
 }
 
 infisical::_fetch_by_convention() {
-  local name="$1"
-  infisical::_get "$(infisical::_default_project_id)" "$(infisical::_environment)" "/" "$(infisical::_convention_key "$name")"
+  local name="$1" project_id environment key
+  project_id=${ infisical::_default_project_id; }
+  environment=${ infisical::_environment; }
+  key=${ infisical::_convention_key "$name"; }
+  infisical::_get "$project_id" "$environment" "/" "$key"
 }
 
 # The env-var-style key a bare logical name maps to by convention: slashes to
@@ -269,12 +277,11 @@ infisical::_get() {
 # argv — the client secret is the identity's non-expiring root of trust, and an
 # argv element is readable via ps / /proc/<pid>/cmdline by any local user, the
 # exact exposure universal auth's headless (possibly multi-user) deployment
-# invites. Resolved into locals first so a failed --secret resolution propagates
-# under set -e rather than being swallowed by the command substitution.
+# invites.
 infisical::_login_universal() {
   local client_id client_secret
-  client_id="$(infisical::_client_id)"
-  client_secret="$(infisical::_client_secret)"
+  client_id=${ infisical::_client_id; }
+  client_secret=${ infisical::_client_secret; }
   INFISICAL_UNIVERSAL_AUTH_CLIENT_ID="$client_id" \
   INFISICAL_UNIVERSAL_AUTH_CLIENT_SECRET="$client_secret" \
     infisical::_run login --method=universal-auth --silent --plain

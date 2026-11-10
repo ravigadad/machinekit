@@ -82,6 +82,42 @@ setup() {
   [ "$_MK_BLUEPRINTS_DIR" = "$final" ]
 }
 
+@test "fetch stops when reading the source fails" {
+  STUB_EXIT=97 mktest::stub_function context::get "blueprints.source" "--required"
+  STUB_RETURN=1 mktest::stub_function context::get "blueprints.source_protocol"
+  mktest::stub_function fetch::resolve_protocol
+  mktest::stub_function context::set
+  mktest::stub_function blueprints::_prepare_dest
+  mktest::stub_function fetch::into
+  mktest::stub_function input::is_dry_run
+  run blueprints::fetch
+  [ "$status" -eq 97 ]
+}
+
+@test "fetch stops when reading the protocol override fails" {
+  STUB_OUTPUT="/fake/source" mktest::stub_function context::get "blueprints.source" "--required"
+  STUB_EXIT=97 mktest::stub_function context::get "blueprints.source_protocol"
+  mktest::stub_function fetch::resolve_protocol
+  mktest::stub_function context::set
+  mktest::stub_function blueprints::_prepare_dest
+  mktest::stub_function fetch::into
+  mktest::stub_function input::is_dry_run
+  run blueprints::fetch
+  [ "$status" -eq 97 ]
+}
+
+@test "fetch stops when resolving the protocol fails" {
+  STUB_OUTPUT="/fake/source" mktest::stub_function context::get "blueprints.source" "--required"
+  STUB_RETURN=1 mktest::stub_function context::get "blueprints.source_protocol"
+  STUB_EXIT=97 mktest::stub_function fetch::resolve_protocol "/fake/source" ""
+  mktest::stub_function context::set
+  mktest::stub_function blueprints::_prepare_dest
+  mktest::stub_function fetch::into
+  mktest::stub_function input::is_dry_run
+  run blueprints::fetch
+  [ "$status" -eq 97 ]
+}
+
 # --- blueprints::dir ---
 
 @test "dir fails before fetch has been called" {

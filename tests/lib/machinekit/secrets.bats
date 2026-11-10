@@ -26,6 +26,13 @@ setup() {
   [ "$output" = "/bp/secrets/tailscale/default.age" ]
 }
 
+@test "_pool_file_path stops when finding the blueprints dir fails" {
+  STUB_EXIT=97 mktest::stub_function blueprints::dir
+  STUB_OUTPUT="secrets/fake/name.age" mktest::stub_function secrets::pool_path "fake/name.age"
+  run secrets::_pool_file_path "fake/name"
+  [ "$status" -eq 97 ]
+}
+
 # --- secrets::_manager_ref ---
 
 @test "_manager_ref returns the configured reference for NAME (literal key in the refs table)" {
@@ -56,6 +63,12 @@ setup() {
   [ "$output" = "infisical://p/e/DEPLOY" ]
 }
 
+@test "_manager_ref stops when reading the refs table fails" {
+  STUB_EXIT=97 mktest::stub_function config::get "secrets.manager_refs"
+  run secrets::_manager_ref "fake/name"
+  [ "$status" -eq 97 ]
+}
+
 # --- secrets::_reference_for ---
 
 @test "_reference_for returns the configured ref when one is set" {
@@ -68,6 +81,12 @@ setup() {
   STUB_OUTPUT="" mktest::stub_function secrets::_manager_ref "tailscale/default"
   run secrets::_reference_for "tailscale/default"
   [ "$output" = "tailscale/default" ]
+}
+
+@test "_reference_for stops when reading the configured reference fails" {
+  STUB_EXIT=97 mktest::stub_function secrets::_manager_ref "fake/name"
+  run secrets::_reference_for "fake/name"
+  [ "$status" -eq 97 ]
 }
 
 # --- secrets::_local_signal ---
@@ -103,6 +122,20 @@ setup() {
   run secrets::_local_signal "tailscale/default"
   [ "$status" -eq 0 ]
   [ -z "$output" ]
+}
+
+@test "_local_signal stops when reading the manager reference fails" {
+  STUB_EXIT=97 mktest::stub_function secrets::_manager_ref "fake/name"
+  mktest::stub_function secrets::_pool_file_path
+  run secrets::_local_signal "fake/name"
+  [ "$status" -eq 97 ]
+}
+
+@test "_local_signal stops when finding the pool file fails" {
+  STUB_OUTPUT="" mktest::stub_function secrets::_manager_ref "fake/name"
+  STUB_EXIT=97 mktest::stub_function secrets::_pool_file_path "fake/name"
+  run secrets::_local_signal "fake/name"
+  [ "$status" -eq 97 ]
 }
 
 # --- secrets::backend_for ---
@@ -161,6 +194,23 @@ setup() {
   [ "$output" = "none" ]
 }
 
+@test "backend_for stops when reading the local signal fails" {
+  STUB_EXIT=97 mktest::stub_function secrets::_local_signal "fake/name"
+  mktest::stub_function modules::capability_active "secrets_manager"
+  mktest::stub_function secrets_manager::has "fake/name"
+  run secrets::backend_for "fake/name"
+  [ "$status" -eq 97 ]
+}
+
+@test "backend_for stops when reading the manager reference fails" {
+  STUB_OUTPUT="ref" mktest::stub_function secrets::_local_signal "fake/name"
+  mktest::stub_function modules::capability_active "secrets_manager"
+  STUB_EXIT=97 mktest::stub_function secrets::_manager_ref "fake/name"
+  mktest::stub_function secrets_manager::has_reference
+  run secrets::backend_for "fake/name"
+  [ "$status" -eq 97 ]
+}
+
 # --- secrets::assert_age_key_not_pooled ---
 
 @test "assert_age_key_not_pooled fails when a pool file for the age key exists" {
@@ -176,6 +226,12 @@ setup() {
   mktest::stub_function lifecycle::fail
   secrets::assert_age_key_not_pooled
   mktest::assert_stub_not_called lifecycle::fail
+}
+
+@test "assert_age_key_not_pooled stops when finding the age key's pool file fails" {
+  STUB_EXIT=97 mktest::stub_function secrets::_pool_file_path "$_MK_SECRETS_AGE_KEY_NAME"
+  run secrets::assert_age_key_not_pooled
+  [ "$status" -eq 97 ]
 }
 
 # --- secrets::backend_requirements ---
@@ -206,6 +262,12 @@ setup() {
   [ -z "$output" ]
 }
 
+@test "backend_requirements stops when reading a name's local signal fails" {
+  STUB_EXIT=97 mktest::stub_function secrets::_local_signal "fake/name"
+  run secrets::backend_requirements <<< "fake/name"
+  [ "$status" -eq 97 ]
+}
+
 # --- secrets::declared_backend_requirements ---
 
 @test "declared_backend_requirements strips the declared-secret rows to names and classifies their backends" {
@@ -214,6 +276,12 @@ setup() {
   run secrets::declared_backend_requirements <<< $'git_backup/ssh_keys/deploy\ttrue\tfalse\ntailscale/default\ttrue\tfalse'
   [ "$output" = "age" ]
   [ "$(cat "$captured")" = $'git_backup/ssh_keys/deploy\ntailscale/default' ]
+}
+
+@test "declared_backend_requirements stops when classifying the backends fails" {
+  STUB_EXIT=97 mktest::stub_function secrets::backend_requirements
+  run secrets::declared_backend_requirements <<< $'fake/name\ttrue\tfalse'
+  [ "$status" -eq 97 ]
 }
 
 # --- secrets::present ---
@@ -226,6 +294,12 @@ setup() {
 @test "present is false when no backend resolves the name" {
   STUB_OUTPUT="none" mktest::stub_function secrets::backend_for "tailscale/default"
   run ! secrets::present "tailscale/default"
+}
+
+@test "present stops when finding the backend fails" {
+  STUB_EXIT=97 mktest::stub_function secrets::backend_for "fake/name"
+  run secrets::present "fake/name"
+  [ "$status" -eq 97 ]
 }
 
 # --- secrets::resolve ---
@@ -259,6 +333,30 @@ setup() {
   mktest::assert_stub_not_called secrets_manager::fetch
 }
 
+@test "resolve stops when finding the backend fails" {
+  STUB_EXIT=97 mktest::stub_function secrets::backend_for "fake/name"
+  mktest::stub_function age::decrypt
+  mktest::stub_function secrets_manager::fetch
+  run secrets::resolve "fake/name"
+  [ "$status" -eq 97 ]
+}
+
+@test "resolve stops when finding the manager reference fails" {
+  STUB_OUTPUT="manager" mktest::stub_function secrets::backend_for "fake/name"
+  STUB_EXIT=97 mktest::stub_function secrets::_reference_for "fake/name"
+  mktest::stub_function secrets_manager::fetch
+  run secrets::resolve "fake/name"
+  [ "$status" -eq 97 ]
+}
+
+@test "resolve stops when finding the pool file fails" {
+  STUB_OUTPUT="pool" mktest::stub_function secrets::backend_for "fake/name"
+  STUB_EXIT=97 mktest::stub_function secrets::_pool_file_path "fake/name"
+  mktest::stub_function age::decrypt
+  run secrets::resolve "fake/name"
+  [ "$status" -eq 97 ]
+}
+
 # --- secrets::in_pool ---
 
 @test "in_pool lists every .age in the pool, blueprint-relative and sorted" {
@@ -278,6 +376,12 @@ setup() {
   run secrets::in_pool
   [ "$status" -eq 0 ]
   [ -z "$output" ]
+}
+
+@test "in_pool stops when finding the blueprints dir fails" {
+  STUB_EXIT=97 mktest::stub_function blueprints::dir
+  run secrets::in_pool
+  [ "$status" -eq 97 ]
 }
 
 # --- secrets::needed ---
@@ -321,6 +425,19 @@ setup() {
   mktest::assert_stub_not_called secrets::backend_for
 }
 
+@test "inventory stops when reading the declared secrets fails" {
+  STUB_EXIT=97 mktest::stub_function secrets::needed
+  run secrets::inventory
+  [ "$status" -eq 97 ]
+}
+
+@test "inventory stops when finding a secret's backend fails" {
+  STUB_OUTPUT=$'fake/name\ttrue\tfalse' mktest::stub_function secrets::needed
+  STUB_EXIT=97 mktest::stub_function secrets::backend_for "fake/name"
+  run secrets::inventory
+  [ "$status" -eq 97 ]
+}
+
 # --- secrets::orphans ---
 
 @test "orphans lists pool secrets no active module declares" {
@@ -338,6 +455,19 @@ setup() {
   run secrets::orphans
   [ "$status" -eq 0 ]
   [ -z "$output" ]
+}
+
+@test "orphans stops when reading the declared secrets fails" {
+  STUB_EXIT=97 mktest::stub_function secrets::needed
+  run secrets::orphans
+  [ "$status" -eq 97 ]
+}
+
+@test "orphans stops when listing the pool fails" {
+  STUB_OUTPUT=$'fake/name\ttrue\tfalse' mktest::stub_function secrets::needed
+  STUB_EXIT=97 mktest::stub_function secrets::in_pool
+  run secrets::orphans
+  [ "$status" -eq 97 ]
 }
 
 # --- secrets::blueprints_dir ---
@@ -367,6 +497,21 @@ setup() {
   MATCH="remote" mktest::assert_stub_called lifecycle::fail
 }
 
+@test "blueprints_dir stops when reading the override fails" {
+  STUB_EXIT=97 mktest::stub_function context::get "secrets.blueprints_dir"
+  STUB_OUTPUT="$BATS_TEST_TMPDIR" mktest::stub_function context::get "blueprints.source"
+  run secrets::blueprints_dir
+  [ "$status" -eq 97 ]
+}
+
+@test "blueprints_dir stops when reading the blueprints source fails" {
+  STUB_RETURN=1 mktest::stub_function context::get "secrets.blueprints_dir"
+  STUB_EXIT=97 mktest::stub_function context::get "blueprints.source"
+  STUB_EXIT=1 mktest::stub_function lifecycle::fail
+  run secrets::blueprints_dir
+  [ "$status" -eq 97 ]
+}
+
 # --- secrets::dest_path ---
 
 @test "dest_path returns an absolute target unchanged" {
@@ -380,6 +525,12 @@ setup() {
   run secrets::dest_path secrets/hindsight/llm_api_key.age
   [ "$status" -eq 0 ]
   [ "$output" = "/work/bp/secrets/hindsight/llm_api_key.age" ]
+}
+
+@test "dest_path stops when finding the working tree fails" {
+  STUB_EXIT=97 mktest::stub_function secrets::blueprints_dir
+  run secrets::dest_path secrets/fake/name.age
+  [ "$status" -eq 97 ]
 }
 
 # --- secrets::place ---

@@ -127,11 +127,11 @@ postgres::ensure_role() {
   escaped_password="${password//\'/\'\'}"
   if postgres::_role_exists "$name"; then
     statement="ALTER ROLE \"$escaped_name\" WITH LOGIN PASSWORD '$escaped_password'"
-    printf '%s\n' "$statement" | postgres::_psql_exec_stdin postgres
+    postgres::_psql_exec_stdin postgres < <(printf '%s\n' "$statement")
     logging::debug "postgres: updated role $name password"
   else
     statement="CREATE ROLE \"$escaped_name\" WITH LOGIN PASSWORD '$escaped_password'"
-    printf '%s\n' "$statement" | postgres::_psql_exec_stdin postgres
+    postgres::_psql_exec_stdin postgres < <(printf '%s\n' "$statement")
     logging::success "postgres: created role $name."
   fi
 }
@@ -148,8 +148,8 @@ postgres::ensure_superuser() {
     return 0
   fi
   local superuser
-  superuser="$(postgres::superuser)"
-  if "$(postgres::_createuser_path)" -s "$superuser" 2>/dev/null; then
+  superuser=${ postgres::superuser; }
+  if "${ postgres::_createuser_path; }" -s "$superuser" 2>/dev/null; then
     logging::success "postgres: created superuser $superuser."
   else
     logging::debug "postgres: superuser $superuser already present"
@@ -186,8 +186,7 @@ postgres::_request_shape_error() {
 # version is an attribute that changes on upgrade, so it stays a field rather than
 # the key a machine type's override would have to follow. Keyed on the
 # capability's own config namespace, so both satisfiers read the same table: brew
-# makes it true, postgres_app checks it. Callers assign it on its own line, so a
-# malformed table stops the run instead of reading as "none configured".
+# makes it true, postgres_app checks it.
 postgres::_requested_versions() {
   config::entries "module.postgres.versions"
 }
@@ -231,16 +230,16 @@ postgres::_satisfier() {
 postgres::_dispatch() {
   local seam="$1"; shift
   local satisfier
-  satisfier="$(postgres::_satisfier)"
+  satisfier=${ postgres::_satisfier; }
   "${satisfier}::${seam}" "$@"
 }
 
 postgres::_db_exists() {
-  [ "$(postgres::_psql_exec postgres -tAc "SELECT 1 FROM pg_database WHERE datname = '$1'")" = "1" ]
+  [ "${ postgres::_psql_exec postgres -tAc "SELECT 1 FROM pg_database WHERE datname = '$1'"; }" = "1" ]
 }
 
 postgres::_role_exists() {
-  [ "$(postgres::_psql_exec postgres -tAc "SELECT 1 FROM pg_roles WHERE rolname = '$1'")" = "1" ]
+  [ "${ postgres::_psql_exec postgres -tAc "SELECT 1 FROM pg_roles WHERE rolname = '$1'"; }" = "1" ]
 }
 
 # -X skips any user psqlrc; -q keeps command tags off stdout so callers only see
@@ -248,7 +247,7 @@ postgres::_role_exists() {
 postgres::_psql_exec() {
   local db="$1"
   shift
-  "$(postgres::_psql_path)" -X -q -U "$(postgres::superuser)" -d "$db" "$@"
+  "${ postgres::_psql_path; }" -X -q -U "${ postgres::superuser; }" -d "$db" "$@"
 }
 
 # Like _psql_exec but reads the statement from stdin instead of an argv `-c`, so a
@@ -257,15 +256,15 @@ postgres::_psql_exec() {
 # role statements; the no-secret DDL and the SELECT checks stay on `-c`.
 postgres::_psql_exec_stdin() {
   local db="$1"
-  "$(postgres::_psql_path)" -X -q -U "$(postgres::superuser)" -d "$db"
+  "${ postgres::_psql_path; }" -X -q -U "${ postgres::superuser; }" -d "$db"
 }
 
 postgres::_psql_path() {
-  printf '%s/psql\n' "$(postgres::_bin_dir)"
+  printf '%s/psql\n' "${ postgres::_bin_dir; }"
 }
 
 postgres::_createuser_path() {
-  printf '%s/createuser\n' "$(postgres::_bin_dir)"
+  printf '%s/createuser\n' "${ postgres::_bin_dir; }"
 }
 
 # The dump/restore client tools of the resolved instance. Public, unlike the psql
@@ -274,11 +273,11 @@ postgres::_createuser_path() {
 # service — and so needs the resolved absolute paths handed to it. Restore is here
 # alongside dump because verifying a dump reads it back with pg_restore --list.
 postgres::pg_dump_path() {
-  printf '%s/pg_dump\n' "$(postgres::_bin_dir)"
+  printf '%s/pg_dump\n' "${ postgres::_bin_dir; }"
 }
 
 postgres::pg_restore_path() {
-  printf '%s/pg_restore\n' "$(postgres::_bin_dir)"
+  printf '%s/pg_restore\n' "${ postgres::_bin_dir; }"
 }
 
 # The bin directory of the resolved instance, from the active satisfier — brew's

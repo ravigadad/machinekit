@@ -30,6 +30,13 @@ setup() {
   MATCH="no secrets-manager module" mktest::assert_stub_called lifecycle::fail
 }
 
+@test "fetch stops when resolving the satisfier fails" {
+  STUB_EXIT=97 mktest::stub_function modules::capability_satisfier "secrets_manager"
+  mktest::stub_function lifecycle::fail
+  run secrets_manager::fetch "some-reference"
+  [ "$status" -eq 97 ]
+}
+
 # --- secrets_manager::ensure_ready ---
 
 @test "ensure_ready readies the active satisfier" {
@@ -43,6 +50,12 @@ setup() {
   STUB_RETURN=1 mktest::stub_function modules::capability_satisfier "secrets_manager"
   run secrets_manager::ensure_ready
   [ "$status" -eq 0 ]
+}
+
+@test "ensure_ready stops when resolving the satisfier fails" {
+  STUB_EXIT=97 mktest::stub_function modules::capability_satisfier "secrets_manager"
+  run secrets_manager::ensure_ready
+  [ "$status" -eq 97 ]
 }
 
 # --- secrets_manager::has ---
@@ -64,6 +77,12 @@ setup() {
   run ! secrets_manager::has "tailscale/default"
 }
 
+@test "has stops when resolving the satisfier fails" {
+  STUB_EXIT=97 mktest::stub_function modules::capability_satisfier "secrets_manager"
+  run secrets_manager::has "tailscale/default"
+  [ "$status" -eq 97 ]
+}
+
 # --- secrets_manager::has_reference ---
 
 @test "has_reference reflects the active satisfier's true answer" {
@@ -81,6 +100,12 @@ setup() {
 @test "has_reference is false when no satisfier is active" {
   STUB_RETURN=1 mktest::stub_function modules::capability_satisfier "secrets_manager"
   run ! secrets_manager::has_reference "infisical://p/e/x"
+}
+
+@test "has_reference stops when resolving the satisfier fails" {
+  STUB_EXIT=97 mktest::stub_function modules::capability_satisfier "secrets_manager"
+  run secrets_manager::has_reference "infisical://p/e/x"
+  [ "$status" -eq 97 ]
 }
 
 # --- secrets_manager::requires ---

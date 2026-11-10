@@ -12,7 +12,6 @@ setup() {
 
   FAKE_BP="$BATS_TEST_TMPDIR/blueprints"
   mkdir -p "$FAKE_BP/common"
-  STUB_OUTPUT="$FAKE_BP" mktest::stub_function blueprints::dir
 }
 
 # --- load guard ---
@@ -27,6 +26,7 @@ setup() {
 # --- config::load ---
 
 @test "load merges type TOML on top of common when machine_type is set" {
+  STUB_OUTPUT="$FAKE_BP" mktest::stub_function blueprints::dir
   STUB_OUTPUT="the-common-json" mktest::stub_function config::_common_json "$FAKE_BP"
   STUB_OUTPUT="the-type-json" mktest::stub_function config::_type_json "$FAKE_BP"
   STUB_OUTPUT="" mktest::stub_function config::_unmatched_disable_path "the-common-json" "the-type-json"
@@ -49,6 +49,39 @@ setup() {
   [ "$status" -eq 1 ]
   MATCH="module.fake.entries.typo" mktest::assert_stub_called lifecycle::fail
   mktest::assert_stub_not_called context::set
+}
+
+@test "load stops when finding the blueprints dir fails" {
+  STUB_EXIT=97 mktest::stub_function blueprints::dir
+  mktest::stub_function config::_common_json
+  mktest::stub_function config::_type_json
+  mktest::stub_function config::_unmatched_disable_path
+  mktest::stub_function config::_merge_json
+  mktest::stub_function context::set
+  run config::load
+  [ "$status" -eq 97 ]
+}
+
+@test "load stops when parsing the common config fails" {
+  STUB_OUTPUT="$FAKE_BP" mktest::stub_function blueprints::dir
+  STUB_EXIT=97 mktest::stub_function config::_common_json "$FAKE_BP"
+  mktest::stub_function config::_type_json
+  mktest::stub_function config::_unmatched_disable_path
+  mktest::stub_function config::_merge_json
+  mktest::stub_function context::set
+  run config::load
+  [ "$status" -eq 97 ]
+}
+
+@test "load stops when parsing the machine type's config fails" {
+  STUB_OUTPUT="$FAKE_BP" mktest::stub_function blueprints::dir
+  STUB_OUTPUT="the-common-json" mktest::stub_function config::_common_json "$FAKE_BP"
+  STUB_EXIT=97 mktest::stub_function config::_type_json "$FAKE_BP"
+  mktest::stub_function config::_unmatched_disable_path
+  mktest::stub_function config::_merge_json
+  mktest::stub_function context::set
+  run config::load
+  [ "$status" -eq 97 ]
 }
 
 # --- config::get ---
@@ -99,6 +132,12 @@ setup() {
   [ "$output" = "null" ]
 }
 
+@test "get_json stops when reading the store fails" {
+  STUB_EXIT=97 mktest::stub_function context::get_json "config.module.x"
+  run config::get_json "module.x"
+  [ "$status" -eq 97 ]
+}
+
 # --- config::entries ---
 
 @test "entries reads the collection at the config key and returns its entries" {
@@ -113,6 +152,13 @@ setup() {
   STUB_OUTPUT="the-entries" mktest::stub_function config::entries_from_json '{"fake":{}}' "module.fake.entries" ""
   run config::entries "module.fake.entries"
   [ "$output" = "the-entries" ]
+}
+
+@test "entries stops when reading the collection fails" {
+  STUB_EXIT=97 mktest::stub_function config::get_json "module.fake.entries" "{}"
+  mktest::stub_function config::entries_from_json
+  run config::entries "module.fake.entries"
+  [ "$status" -eq 97 ]
 }
 
 # --- config::entries_from_json ---
@@ -177,6 +223,15 @@ setup() {
   [ "$status" -eq 1 ]
   mktest::assert_stub_called config::_fail_on_shape_error "module.fake.entries" "the-shape-error"
   mktest::assert_stub_not_called config::_enabled_table
+}
+
+@test "enabled_table stops when reading the collection fails" {
+  STUB_EXIT=97 mktest::stub_function config::get_json "module.fake.entries" "{}"
+  mktest::stub_function config::_collection_shape_error
+  mktest::stub_function config::_fail_on_shape_error
+  mktest::stub_function config::_enabled_table
+  run config::enabled_table "module.fake.entries"
+  [ "$status" -eq 97 ]
 }
 
 # --- config::extended_list ---
@@ -376,6 +431,13 @@ setup() {
   STUB_OUTPUT="" mktest::stub_function context::get "machine_type"
   result=$(config::_type_json "$FAKE_BP")
   [ "$result" = "{}" ]
+}
+
+@test "_type_json stops when reading the machine type fails" {
+  STUB_EXIT=97 mktest::stub_function context::get "machine_type"
+  mktest::stub_function config::_parse_toml
+  run config::_type_json "$FAKE_BP"
+  [ "$status" -eq 97 ]
 }
 
 # --- config::_parse_toml ---

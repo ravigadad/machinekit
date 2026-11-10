@@ -27,7 +27,7 @@ _MK_HOME_IS_PRIVATE=0
 # before anything is installed); sync only applies it.
 home::sync() {
   local files_synced
-  files_synced="$(home::_planned_count)"
+  files_synced=${ home::_planned_count; }
   context::set "home.files_synced" "$files_synced"
   if input::is_dry_run; then
     home::dry_run::show_diff
@@ -40,7 +40,9 @@ home::sync() {
 # planned files. Mode-independent — apply and the dry-run preview both act on
 # exactly this set — so the summary count matches what actually happens.
 home::_planned_count() {
-  home::_build_plan | jq '[.[] | select(.suppressed | not)] | length'
+  local plan
+  plan=${ home::_build_plan; }
+  jq '[.[] | select(.suppressed | not)] | length' <<<"$plan"
 }
 
 # home::will_exist DEST_PATH — true if the absolute DEST_PATH will exist after
@@ -52,7 +54,7 @@ home::will_exist() {
   [ -e "$dest_path" ] && return 0
 
   local plan
-  plan="$(home::_build_plan)"
+  plan=${ home::_build_plan; }
   jq -e --arg d "$dest_path" \
     'any(.[]; .dest == $d and (.suppressed | not))' <<<"$plan" >/dev/null
 }
@@ -75,11 +77,11 @@ home::will_exist() {
 # file the user suppressed is a recorded decision, not a silent absence.
 home::_build_plan() {
   local staging
-  staging="$(home::staging::dir)"
+  staging=${ home::staging::dir; }
   local ignore_file="$staging/.mkignore"
 
-  {
-    local src src_rel dest key private suppressed
+  local records src src_rel dest key private suppressed
+  records=${
     while IFS= read -r src; do
       src_rel="${src#"$staging"/}"
       home::_decode_path "$src_rel"
@@ -102,7 +104,8 @@ home::_build_plan() {
         '{src:$src, src_rel:$src_rel, dest:$dest, key:$key, private:$private, suppressed:$suppressed, pipeline:$ARGS.positional}' \
         --args "${_MK_HOME_TRANSFORM_PIPELINE[@]}"
     done < <(find "$staging" -type f | sort)
-  } | jq -s '.'
+  }
+  jq -s '.' <<<"$records"
 }
 
 # Stream every planned file to CALLBACK: any PREFIX args first, then the record's
@@ -114,7 +117,7 @@ home::_build_plan() {
 home::_each_planned_file() {
   local callback="$1"; shift
   local plan
-  plan="$(home::_build_plan)"
+  plan=${ home::_build_plan; }
 
   local src src_rel dest key private suppressed pipeline_str
   local -a pipeline
@@ -251,7 +254,7 @@ home::_write_file() {
 home::_conflict_action() {
   local dest_rel="$1" resolved_path="$2" dest_path="$3"
   local behavior
-  behavior=$(input::conflict_behavior)
+  behavior=${ input::conflict_behavior; }
 
   if [ -z "$behavior" ]; then
     if input::is_interactive >/dev/null; then

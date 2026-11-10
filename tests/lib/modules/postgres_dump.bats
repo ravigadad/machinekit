@@ -47,6 +47,45 @@ setup() {
   mktest::assert_stub_not_called service::validate_cron
 }
 
+@test "preflight stops when reading the databases fails" {
+  STUB_EXIT=97 mktest::stub_function postgres_dump::_databases
+  run postgres_dump::preflight
+  [ "$status" -eq 97 ]
+}
+
+@test "preflight stops when reading the default directory fails" {
+  STUB_OUTPUT='[{"name":"somedb"}]' mktest::stub_function postgres_dump::_databases
+  STUB_EXIT=97 mktest::stub_function postgres_dump::_directory
+  STUB_OUTPUT="9" mktest::stub_function postgres_dump::_retain_count
+  STUB_OUTPUT="0 3 * * *" mktest::stub_function postgres_dump::_schedule
+  mktest::stub_function postgres_dump::_validate_databases
+  mktest::stub_function service::validate_cron
+  run postgres_dump::preflight
+  [ "$status" -eq 97 ]
+}
+
+@test "preflight stops when reading the default retain count fails" {
+  STUB_OUTPUT='[{"name":"somedb"}]' mktest::stub_function postgres_dump::_databases
+  STUB_OUTPUT="/fake/dumps" mktest::stub_function postgres_dump::_directory
+  STUB_EXIT=97 mktest::stub_function postgres_dump::_retain_count
+  STUB_OUTPUT="0 3 * * *" mktest::stub_function postgres_dump::_schedule
+  mktest::stub_function postgres_dump::_validate_databases
+  mktest::stub_function service::validate_cron
+  run postgres_dump::preflight
+  [ "$status" -eq 97 ]
+}
+
+@test "preflight stops when reading the schedule fails" {
+  STUB_OUTPUT='[{"name":"somedb"}]' mktest::stub_function postgres_dump::_databases
+  STUB_OUTPUT="/fake/dumps" mktest::stub_function postgres_dump::_directory
+  STUB_OUTPUT="9" mktest::stub_function postgres_dump::_retain_count
+  STUB_EXIT=97 mktest::stub_function postgres_dump::_schedule
+  mktest::stub_function postgres_dump::_validate_databases
+  mktest::stub_function service::validate_cron
+  run postgres_dump::preflight
+  [ "$status" -eq 97 ]
+}
+
 # --- install ---
 
 @test "install lays down the manifest, the dump script, and the service" {
@@ -77,6 +116,20 @@ setup() {
   postgres_dump::install
   mktest::assert_stub_not_called postgres_dump::_write_manifest
   mktest::assert_stub_called logging::dry_run
+}
+
+@test "install stops when reading the databases fails" {
+  STUB_EXIT=97 mktest::stub_function postgres_dump::_databases
+  run postgres_dump::install
+  [ "$status" -eq 97 ]
+}
+
+@test "install in dry-run stops when reading the schedule fails" {
+  STUB_OUTPUT='[{"name":"somedb"}]' mktest::stub_function postgres_dump::_databases
+  mktest::stub_function input::is_dry_run
+  STUB_EXIT=97 mktest::stub_function postgres_dump::_schedule
+  run postgres_dump::install
+  [ "$status" -eq 97 ]
 }
 
 # --- postflight_info ---
@@ -111,6 +164,28 @@ setup() {
   STUB_OUTPUT="" mktest::stub_function postgres_dump::_databases
   run postgres_dump::postflight_info
   [ -z "$output" ]
+}
+
+@test "postflight_info stops when reading the databases fails" {
+  STUB_EXIT=97 mktest::stub_function postgres_dump::_databases
+  run postgres_dump::postflight_info
+  [ "$status" -eq 97 ]
+}
+
+@test "postflight_info stops when reading the default directory fails" {
+  STUB_OUTPUT='[{"name":"somedb"}]' mktest::stub_function postgres_dump::_databases
+  STUB_EXIT=97 mktest::stub_function postgres_dump::_directory
+  STUB_OUTPUT="0 3 * * *" mktest::stub_function postgres_dump::_schedule
+  run postgres_dump::postflight_info
+  [ "$status" -eq 97 ]
+}
+
+@test "postflight_info stops when reading the schedule fails" {
+  STUB_OUTPUT='[{"name":"somedb"}]' mktest::stub_function postgres_dump::_databases
+  STUB_OUTPUT="/fake/dumps" mktest::stub_function postgres_dump::_directory
+  STUB_EXIT=97 mktest::stub_function postgres_dump::_schedule
+  run postgres_dump::postflight_info
+  [ "$status" -eq 97 ]
 }
 
 # --- _validate_databases ---
@@ -179,6 +254,32 @@ setup() {
   [ "$(grep -c 'manifest-row' "$manifest")" -eq 2 ]
 }
 
+@test "_write_manifest stops when reading the databases fails" {
+  STUB_EXIT=97 mktest::stub_function postgres_dump::_databases
+  run postgres_dump::_write_manifest
+  [ "$status" -eq 97 ]
+}
+
+@test "_write_manifest stops when reading the default directory fails" {
+  STUB_OUTPUT="$BATS_TEST_TMPDIR/out/manifest.tsv" mktest::stub_function postgres_dump::_manifest_path
+  STUB_OUTPUT='[{"name":"somedb"}]' mktest::stub_function postgres_dump::_databases
+  STUB_EXIT=97 mktest::stub_function postgres_dump::_directory
+  STUB_OUTPUT="7" mktest::stub_function postgres_dump::_retain_count
+  mktest::stub_function postgres_dump::_manifest_row
+  run postgres_dump::_write_manifest
+  [ "$status" -eq 97 ]
+}
+
+@test "_write_manifest stops when reading the default retain count fails" {
+  STUB_OUTPUT="$BATS_TEST_TMPDIR/out/manifest.tsv" mktest::stub_function postgres_dump::_manifest_path
+  STUB_OUTPUT='[{"name":"somedb"}]' mktest::stub_function postgres_dump::_databases
+  STUB_OUTPUT="/fake/dumps" mktest::stub_function postgres_dump::_directory
+  STUB_EXIT=97 mktest::stub_function postgres_dump::_retain_count
+  mktest::stub_function postgres_dump::_manifest_row
+  run postgres_dump::_write_manifest
+  [ "$status" -eq 97 ]
+}
+
 # --- _manifest_row ---
 
 @test "_manifest_row emits the name with the module's directory and retain_count" {
@@ -241,6 +342,66 @@ setup() {
     "MK_POSTGRES_DUMP_PG_RESTORE=/b/pg_restore" \
     "MK_POSTGRES_DUMP_USER=fake-superuser" \
     "MK_POSTGRES_DUMP_PORT=7777"
+}
+
+@test "_install_service stops when reading the schedule fails" {
+  STUB_OUTPUT="/s/dump.sh" mktest::stub_function postgres_dump::_dump_script_path
+  STUB_EXIT=97 mktest::stub_function postgres_dump::_schedule
+  STUB_OUTPUT="/m/manifest.tsv" mktest::stub_function postgres_dump::_manifest_path
+  STUB_OUTPUT="/n/notify" mktest::stub_function postgres_dump::_notify
+  STUB_OUTPUT="/b/pg_dump" mktest::stub_function postgres::pg_dump_path
+  STUB_OUTPUT="/b/pg_restore" mktest::stub_function postgres::pg_restore_path
+  STUB_OUTPUT="fake-superuser" mktest::stub_function postgres::superuser
+  STUB_OUTPUT="7777" mktest::stub_function postgres::port
+  mktest::stub_function service::install_calendar
+  run postgres_dump::_install_service
+  [ "$status" -eq 97 ]
+  mktest::assert_stub_not_called service::install_calendar
+}
+
+@test "_install_service stops when reading the notify command fails" {
+  STUB_OUTPUT="/s/dump.sh" mktest::stub_function postgres_dump::_dump_script_path
+  STUB_OUTPUT="0 3 * * *" mktest::stub_function postgres_dump::_schedule
+  STUB_OUTPUT="/m/manifest.tsv" mktest::stub_function postgres_dump::_manifest_path
+  STUB_EXIT=97 mktest::stub_function postgres_dump::_notify
+  STUB_OUTPUT="/b/pg_dump" mktest::stub_function postgres::pg_dump_path
+  STUB_OUTPUT="/b/pg_restore" mktest::stub_function postgres::pg_restore_path
+  STUB_OUTPUT="fake-superuser" mktest::stub_function postgres::superuser
+  STUB_OUTPUT="7777" mktest::stub_function postgres::port
+  mktest::stub_function service::install_calendar
+  run postgres_dump::_install_service
+  [ "$status" -eq 97 ]
+  mktest::assert_stub_not_called service::install_calendar
+}
+
+@test "_install_service stops when resolving pg_dump fails" {
+  STUB_OUTPUT="/s/dump.sh" mktest::stub_function postgres_dump::_dump_script_path
+  STUB_OUTPUT="0 3 * * *" mktest::stub_function postgres_dump::_schedule
+  STUB_OUTPUT="/m/manifest.tsv" mktest::stub_function postgres_dump::_manifest_path
+  STUB_OUTPUT="/n/notify" mktest::stub_function postgres_dump::_notify
+  STUB_EXIT=97 mktest::stub_function postgres::pg_dump_path
+  STUB_OUTPUT="/b/pg_restore" mktest::stub_function postgres::pg_restore_path
+  STUB_OUTPUT="fake-superuser" mktest::stub_function postgres::superuser
+  STUB_OUTPUT="7777" mktest::stub_function postgres::port
+  mktest::stub_function service::install_calendar
+  run postgres_dump::_install_service
+  [ "$status" -eq 97 ]
+  mktest::assert_stub_not_called service::install_calendar
+}
+
+@test "_install_service stops when resolving pg_restore fails" {
+  STUB_OUTPUT="/s/dump.sh" mktest::stub_function postgres_dump::_dump_script_path
+  STUB_OUTPUT="0 3 * * *" mktest::stub_function postgres_dump::_schedule
+  STUB_OUTPUT="/m/manifest.tsv" mktest::stub_function postgres_dump::_manifest_path
+  STUB_OUTPUT="/n/notify" mktest::stub_function postgres_dump::_notify
+  STUB_OUTPUT="/b/pg_dump" mktest::stub_function postgres::pg_dump_path
+  STUB_EXIT=97 mktest::stub_function postgres::pg_restore_path
+  STUB_OUTPUT="fake-superuser" mktest::stub_function postgres::superuser
+  STUB_OUTPUT="7777" mktest::stub_function postgres::port
+  mktest::stub_function service::install_calendar
+  run postgres_dump::_install_service
+  [ "$status" -eq 97 ]
+  mktest::assert_stub_not_called service::install_calendar
 }
 
 # --- config accessors + paths ---

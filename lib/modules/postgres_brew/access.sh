@@ -14,7 +14,7 @@
 # No runtime guard here: the capability's post_apply owns that decision before it
 # dispatches this seam.
 postgres_brew::access::configure() {
-  case "$(context::get os.family)" in
+  case "${ context::get os.family; }" in
     darwin)
       logging::debug "postgres: containers reach the host over loopback; no access changes needed"
       ;;
@@ -30,9 +30,9 @@ postgres_brew::access::_open_for_containers() {
     return 0
   fi
   local version subnet
-  version="$(postgres_brew::introspect::instance_version)" || lifecycle::fail \
+  version=${ postgres_brew::introspect::instance_version; } || lifecycle::fail \
     "postgres: no running instance found to open for containers."
-  subnet="$(container_manager::container_subnet)"
+  subnet=${ container_manager::container_subnet; }
   postgres_brew::access::_open_listen "$version"
   postgres_brew::access::_authorize_subnet "$version" "$subnet"
   postgres_brew::_restart "$version"
@@ -41,14 +41,14 @@ postgres_brew::access::_open_for_containers() {
 
 postgres_brew::access::_open_listen() {
   postgres_brew::access::_write_block \
-    "$(postgres_brew::introspect::data_dir "$1")/postgresql.conf" \
+    "${ postgres_brew::introspect::data_dir "$1"; }/postgresql.conf" \
     "listen_addresses = '*'"
 }
 
 postgres_brew::access::_authorize_subnet() {
   local version="$1" subnet="$2"
   postgres_brew::access::_write_block \
-    "$(postgres_brew::introspect::data_dir "$version")/pg_hba.conf" \
+    "${ postgres_brew::introspect::data_dir "$version"; }/pg_hba.conf" \
     "host all all $subnet scram-sha-256"
 }
 

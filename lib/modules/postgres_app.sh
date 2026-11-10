@@ -26,7 +26,7 @@ postgres_app::install() {
   logging::step "postgres install"
   postgres_app::_assert_app_installed
   local requested
-  requested="$(postgres::_requested_versions)"
+  requested=${ postgres::_requested_versions; }
   if [ -n "$requested" ]; then
     postgres_app::_check_requested "$requested"
   else

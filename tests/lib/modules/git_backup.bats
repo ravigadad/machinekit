@@ -37,6 +37,14 @@ setup() {
   [ -z "$output" ]
 }
 
+@test "requires stops when declaring its secrets fails" {
+  STUB_EXIT=97 mktest::stub_function git_backup::declared_secrets
+  mktest::stub_function secrets::declared_backend_requirements
+  run git_backup::requires
+  [ "$status" -eq 97 ]
+  mktest::assert_stub_not_called secrets::declared_backend_requirements
+}
+
 # --- preflight ---
 
 @test "preflight is a no-op when no folders are configured" {
@@ -64,6 +72,12 @@ setup() {
   mktest::assert_stub_not_called lifecycle::fail
 }
 
+@test "preflight stops when reading the folders fails" {
+  STUB_EXIT=97 mktest::stub_function git_backup::_folders
+  run git_backup::preflight
+  [ "$status" -eq 97 ]
+}
+
 # --- declared_secrets ---
 
 @test "declared_secrets declares each referenced ssh key required and not generatable" {
@@ -82,6 +96,12 @@ setup() {
   [ "$status" -eq 0 ]
   [ -z "$output" ]
   mktest::assert_stub_not_called git_backup::_secret_name
+}
+
+@test "declared_secrets stops when reading the key names fails" {
+  STUB_EXIT=97 mktest::stub_function git_backup::_referenced_key_names
+  run git_backup::declared_secrets
+  [ "$status" -eq 97 ]
 }
 
 # --- install ---
@@ -120,6 +140,20 @@ setup() {
   mktest::assert_stub_called git_backup::_install_service
 }
 
+@test "install stops when reading the folders fails" {
+  STUB_EXIT=97 mktest::stub_function git_backup::_folders
+  run git_backup::install
+  [ "$status" -eq 97 ]
+}
+
+@test "install in dry-run stops when reading the interval fails" {
+  STUB_OUTPUT='[{"path":"/a","remote":"r1"}]' mktest::stub_function git_backup::_folders
+  mktest::stub_function input::is_dry_run
+  STUB_EXIT=97 mktest::stub_function git_backup::_interval
+  run git_backup::install
+  [ "$status" -eq 97 ]
+}
+
 # --- postflight_info ---
 
 @test "postflight_info reports each folder's destination and delegates cadence to _human_interval" {
@@ -151,6 +185,20 @@ setup() {
   STUB_OUTPUT="" mktest::stub_function git_backup::_folders
   run git_backup::postflight_info
   [ -z "$output" ]
+}
+
+@test "postflight_info stops when reading the folders fails" {
+  STUB_EXIT=97 mktest::stub_function git_backup::_folders
+  run git_backup::postflight_info
+  [ "$status" -eq 97 ]
+}
+
+@test "postflight_info stops when reading the interval fails" {
+  STUB_OUTPUT='[{"path":"/a","remote":"r1"}]' mktest::stub_function git_backup::_folders
+  STUB_EXIT=97 mktest::stub_function git_backup::_interval
+  mktest::stub_function git_backup::_human_interval
+  run git_backup::postflight_info
+  [ "$status" -eq 97 ]
 }
 
 # --- _human_interval ---
@@ -216,6 +264,12 @@ setup() {
   mktest::assert_stub_called logging::warn
 }
 
+@test "_validate_ignores stops when reading a folder's ignore patterns fails" {
+  STUB_EXIT=97 mktest::stub_function git_backup::_ignore_patterns
+  run git_backup::_validate_ignores '[{"path":"/fake"}]'
+  [ "$status" -eq 97 ]
+}
+
 # --- _validate_keys ---
 
 @test "_validate_keys passes when the referenced key secret exists" {
@@ -236,6 +290,12 @@ setup() {
   MATCH="ssh_key 'agents'" mktest::assert_stub_called lifecycle::fail
 }
 
+@test "_validate_keys stops when reading the key names fails" {
+  STUB_EXIT=97 mktest::stub_function git_backup::_referenced_key_names
+  run git_backup::_validate_keys
+  [ "$status" -eq 97 ]
+}
+
 # --- _install_keys ---
 
 @test "_install_keys installs every referenced key" {
@@ -245,6 +305,12 @@ setup() {
   git_backup::_install_keys
   mktest::assert_stub_called git_backup::_install_key "k1"
   mktest::assert_stub_called git_backup::_install_key "k2"
+}
+
+@test "_install_keys stops when reading the key names fails" {
+  STUB_EXIT=97 mktest::stub_function git_backup::_referenced_key_names
+  run git_backup::_install_keys
+  [ "$status" -eq 97 ]
 }
 
 # --- _install_key ---
@@ -281,6 +347,21 @@ setup() {
   mktest::assert_stub_called git_backup::_manifest_row '{"path":"/a","remote":"r1"}' "defaultkey"
   mktest::assert_stub_called git_backup::_manifest_row '{"path":"/b","remote":"r2"}' "defaultkey"
   [ "$(grep -c 'manifest-row' "$manifest")" -eq 2 ]
+}
+
+@test "_write_manifest stops when reading the folders fails" {
+  STUB_EXIT=97 mktest::stub_function git_backup::_folders
+  run git_backup::_write_manifest
+  [ "$status" -eq 97 ]
+}
+
+@test "_write_manifest stops when reading the default ssh key fails" {
+  STUB_OUTPUT="$BATS_TEST_TMPDIR/out/manifest.tsv" mktest::stub_function git_backup::_manifest_path
+  STUB_OUTPUT='[{"path":"/a","remote":"r1"}]' mktest::stub_function git_backup::_folders
+  STUB_EXIT=97 mktest::stub_function git_backup::_default_ssh_key
+  mktest::stub_function git_backup::_manifest_row
+  run git_backup::_write_manifest
+  [ "$status" -eq 97 ]
 }
 
 # --- _manifest_row ---
@@ -327,6 +408,12 @@ setup() {
   mktest::assert_stub_not_called git_backup::_apply_gitignore
 }
 
+@test "_apply_gitignores stops when reading the folders fails" {
+  STUB_EXIT=97 mktest::stub_function git_backup::_folders
+  run git_backup::_apply_gitignores
+  [ "$status" -eq 97 ]
+}
+
 @test "_apply_gitignore pipes the folder's patterns into managed_block::ensure for its .gitignore" {
   local dir="$BATS_TEST_TMPDIR/repo"; mkdir "$dir"
   STUB_OUTPUT=$'a\nb' mktest::stub_function git_backup::_gitignore_patterns '{"path":"x"}'
@@ -353,6 +440,13 @@ setup() {
   mktest::assert_stub_not_called managed_block::ensure
 }
 
+@test "_apply_gitignore stops when building the patterns fails" {
+  mktest::stub_function managed_block::ensure
+  STUB_EXIT=97 mktest::stub_function git_backup::_gitignore_patterns
+  run git_backup::_apply_gitignore '{"path":"/fake"}' "$BATS_TEST_TMPDIR"
+  [ "$status" -eq 97 ]
+}
+
 # .gitignore applies the last matching pattern, so the most specific layer goes
 # last, letting its `!` negations win: the defaults, then the folder's patterns.
 @test "_gitignore_patterns emits the defaults, then the folder's patterns, de-duplicated" {
@@ -371,6 +465,12 @@ setup() {
   run git_backup::_gitignore_patterns '{"path":"/a","add_default_ignores":false}'
   [ "$(cat "$BATS_TEST_TMPDIR/dedup_stdin")" = "build/" ]
   mktest::assert_stub_not_called git_backup::_default_ignores
+}
+
+@test "_gitignore_patterns stops when reading the ignore patterns fails" {
+  STUB_EXIT=97 mktest::stub_function git_backup::_ignore_patterns
+  run git_backup::_gitignore_patterns '{"path":"/fake","add_default_ignores":false}'
+  [ "$status" -eq 97 ]
 }
 
 @test "_ignore_patterns combines the folder's patterns with its additions last, naming the folder" {
@@ -427,6 +527,28 @@ setup() {
     "MK_GIT_BACKUP_GIT=/b/git"
 }
 
+@test "_install_service stops when reading the interval fails" {
+  STUB_OUTPUT="/s/push.sh" mktest::stub_function git_backup::_push_script_path
+  STUB_OUTPUT="/m/manifest.tsv" mktest::stub_function git_backup::_manifest_path
+  STUB_OUTPUT="/n/notify" mktest::stub_function git_backup::_notify
+  STUB_OUTPUT="/b/git" mktest::stub_function git_backup::_git_path
+  STUB_EXIT=97 mktest::stub_function git_backup::_interval
+  mktest::stub_function service::install_interval
+  run git_backup::_install_service
+  [ "$status" -eq 97 ]
+}
+
+@test "_install_service stops when reading the notify command fails" {
+  STUB_OUTPUT="/s/push.sh" mktest::stub_function git_backup::_push_script_path
+  STUB_OUTPUT="/m/manifest.tsv" mktest::stub_function git_backup::_manifest_path
+  STUB_EXIT=97 mktest::stub_function git_backup::_notify
+  STUB_OUTPUT="/b/git" mktest::stub_function git_backup::_git_path
+  STUB_OUTPUT="300" mktest::stub_function git_backup::_interval
+  mktest::stub_function service::install_interval
+  run git_backup::_install_service
+  [ "$status" -eq 97 ]
+}
+
 # --- config accessors + paths ---
 
 @test "_folders returns the configured folders" {
@@ -480,6 +602,19 @@ setup() {
   STUB_OUTPUT="" mktest::stub_function git_backup::_folders
   run git_backup::_referenced_key_names
   [ -z "$output" ]
+}
+
+@test "_referenced_key_names stops when reading the folders fails" {
+  STUB_EXIT=97 mktest::stub_function git_backup::_folders
+  run git_backup::_referenced_key_names
+  [ "$status" -eq 97 ]
+}
+
+@test "_referenced_key_names stops when reading the default ssh key fails" {
+  STUB_OUTPUT='[{"ssh_key":"fake-key"}]' mktest::stub_function git_backup::_folders
+  STUB_EXIT=97 mktest::stub_function git_backup::_default_ssh_key
+  run git_backup::_referenced_key_names
+  [ "$status" -eq 97 ]
 }
 
 @test "_secret_name builds the bare logical secret name for a key name" {

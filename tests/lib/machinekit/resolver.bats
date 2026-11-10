@@ -91,6 +91,18 @@ setup() {
   MATCH="circular" mktest::assert_stub_called lifecycle::fail
 }
 
+@test "resolve stops when a module's requires hook fails" {
+  alpha::requires() { exit 97; }
+  run resolver::resolve alpha
+  [ "$status" -eq 97 ]
+}
+
+@test "resolve stops when a module's after hook fails" {
+  alpha::after() { exit 97; }
+  run resolver::resolve alpha
+  [ "$status" -eq 97 ]
+}
+
 # --- after edges (soft ordering) ---
 
 @test "resolve orders a module after an active after-target" {
@@ -217,4 +229,14 @@ setup() {
   result=$(resolver::resolve sat_a sat_b)
   printf '%s\n' "$result" | grep -q '^sat_a$'
   printf '%s\n' "$result" | grep -q '^sat_b$'
+}
+
+@test "_check_conflicts stops when reading the allow-multiple setting fails" {
+  sat_a::provides() { printf 'cap\n'; }
+  sat_b::provides() { printf 'cap\n'; }
+  _resolver_result=(sat_a sat_b)
+  STUB_EXIT=97 mktest::stub_function config::get "capability.cap.allow_multiple_satisfiers"
+  STUB_EXIT=1 mktest::stub_function lifecycle::fail
+  run resolver::_check_conflicts
+  [ "$status" -eq 97 ]
 }

@@ -241,6 +241,13 @@ setup() {
   mktest::assert_stub_called lifecycle::fail
 }
 
+@test "_service stops when reading the os family fails" {
+  STUB_EXIT=97 mktest::stub_function context::get "os.family"
+  STUB_EXIT=1 mktest::stub_function lifecycle::fail
+  run brew::start_service postgresql@18
+  [ "$status" -eq 97 ]
+}
+
 # --- brew::_is_installed ---
 
 @test "_is_installed returns true for a name in the list" {
@@ -261,6 +268,12 @@ setup() {
 @test "_is_installed checks the cask list for a cask" {
   STUB_OUTPUT="$(printf 'tailscale\nfirefox')" mktest::stub_function brew::_installed "cask"
   brew::_is_installed cask "tailscale"
+}
+
+@test "_is_installed stops when listing the installed packages fails" {
+  STUB_EXIT=97 mktest::stub_function brew::_installed "formula"
+  run brew::_is_installed formula "fake-formula"
+  [ "$status" -eq 97 ]
 }
 
 # --- brew::_bin ---

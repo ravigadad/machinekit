@@ -38,7 +38,7 @@ context::set() {
     esac
     shift
   done
-  store=$(context::_internal_storage_file)
+  store=${ context::_internal_storage_file; }
   local tmp_store
   tmp_store=$(mktemp "${store}.XXXXXX")
   # Write to a sibling tempfile first so a failure or interrupt never leaves
@@ -100,10 +100,10 @@ context::get() {
   [ "$is_secret" = 1 ] && secret_flag=(--secret)
 
   local val
-  if   val=$(context::_from_store "$key"); then :
-  elif val=$(context::_from_env   "$key" "${secret_flag[@]}"); then :
-  elif val=$(context::_from_user_config "$key" "${secret_flag[@]}"); then :
-  elif [ "$should_prompt" = 1 ] && val=$(context::_prompt "${_prompt_call[@]}"); then :
+  if   val=${ context::_from_store "$key"; }; then :
+  elif val=${ context::_from_env   "$key" "${secret_flag[@]}"; }; then :
+  elif val=${ context::_from_user_config "$key" "${secret_flag[@]}"; }; then :
+  elif [ "$should_prompt" = 1 ] && val=${ context::_prompt "${_prompt_call[@]}"; }; then :
   elif [ "$has_default" = 1 ]; then
     [ "$store_default" = 1 ] && context::set "$key" "$default"
     val="$default"
@@ -136,7 +136,7 @@ context::set_array() {
 # Returns 1 if the key is unset; emits each element on its own line.
 context::get_array() {
   local val
-  val=$(context::_from_store "$1") || return 1
+  val=${ context::_from_store "$1"; } || return 1
   printf '%s' "$val" | jq -e 'type == "array"' >/dev/null 2>&1 || return 1
   printf '%s' "$val" | jq -r '.[]'
 }
@@ -154,7 +154,7 @@ context::get_json() {
 # Emit the full context as a JSON object.
 context::json() {
   context::init_storage
-  cat "$(context::_internal_storage_file)"
+  cat "${ context::_internal_storage_file; }"
 }
 
 # context::seed_from_flags
@@ -270,7 +270,7 @@ context::_from_store() {
 context::_read_path() {
   context::init_storage
   local flag="$1" key="$2" store val
-  store=$(context::_internal_storage_file)
+  store=${ context::_internal_storage_file; }
   val=$(jq "$flag" --arg path "$key" \
     '($path | split(".")) as $p | getpath($p)' "$store")
   [ "$val" = "null" ] && return 1

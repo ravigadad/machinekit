@@ -69,6 +69,13 @@ setup() {
   mktest::assert_stub_called context::set "mode.interactive" "false"
 }
 
+@test "is_interactive stops when reading mode.interactive fails" {
+  STUB_EXIT=97 mktest::stub_function context::get "mode.interactive" "--coerce" "boolean"
+  mktest::stub_function context::set
+  run input::is_interactive
+  [ "$status" -eq 97 ]
+}
+
 # --- input::stdin_is_tty ---
 
 @test "stdin_is_tty is false when stdin is a pipe or redirect" {
@@ -101,6 +108,12 @@ setup() {
 @test "is_dry_run returns false when mode.dry_run is false" {
   STUB_OUTPUT="false" mktest::stub_function context::get "mode.dry_run" "--coerce" "boolean" "--default" "false"
   run ! input::is_dry_run
+}
+
+@test "is_dry_run stops when reading mode.dry_run fails" {
+  STUB_EXIT=97 mktest::stub_function context::get "mode.dry_run" "--coerce" "boolean" "--default" "false"
+  run input::is_dry_run
+  [ "$status" -eq 97 ]
 }
 
 # --- input::command_exists ---
@@ -139,4 +152,10 @@ setup() {
   STUB_RETURN=1 mktest::stub_function config::get "conflict_behavior"
   result=$(input::conflict_behavior)
   [ -z "$result" ]
+}
+
+@test "conflict_behavior stops when reading the config fails" {
+  STUB_EXIT=97 mktest::stub_function config::get "conflict_behavior"
+  run input::conflict_behavior
+  [ "$status" -eq 97 ]
 }

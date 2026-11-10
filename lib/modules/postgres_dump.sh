@@ -31,12 +31,12 @@ postgres_dump::requires() {
 # partway through install (or, worse, silently at 3am). No databases configured =
 # nothing to validate.
 postgres_dump::preflight() {
-  local databases
-  databases=$(postgres_dump::_databases)
+  local databases default_directory
+  databases=${ postgres_dump::_databases; }
   [ -n "$databases" ] || return 0
-  postgres_dump::_validate_databases "$databases" \
-    "$(postgres_dump::_directory)" "$(postgres_dump::_retain_count)"
-  service::validate_cron "$(postgres_dump::_schedule)"
+  default_directory=${ postgres_dump::_directory; }
+  postgres_dump::_validate_databases "$databases" "$default_directory" "${ postgres_dump::_retain_count; }"
+  service::validate_cron "${ postgres_dump::_schedule; }"
 }
 
 # Write the manifest, lay down the dump script, and schedule the one service that
@@ -44,13 +44,13 @@ postgres_dump::preflight() {
 postgres_dump::install() {
   logging::step "postgres_dump install"
   local databases
-  databases=$(postgres_dump::_databases)
+  databases=${ postgres_dump::_databases; }
   if [ -z "$databases" ]; then
     logging::debug "postgres_dump: no databases configured; nothing to dump"
     return 0
   fi
   if input::is_dry_run; then
-    logging::dry_run "would install the postgres-dump service (manifest, dump script, schedule '$(postgres_dump::_schedule)')"
+    logging::dry_run "would install the postgres-dump service (manifest, dump script, schedule '${ postgres_dump::_schedule; }')"
     return 0
   fi
   postgres_dump::_write_manifest
@@ -64,10 +64,10 @@ postgres_dump::install() {
 # dump surfaces later through the notify hook, not at apply time).
 postgres_dump::postflight_info() {
   local databases database name directory default_directory schedule
-  databases=$(postgres_dump::_databases)
+  databases=${ postgres_dump::_databases; }
   [ -n "$databases" ] || return 0
-  default_directory=$(postgres_dump::_directory)
-  schedule=$(postgres_dump::_schedule)
+  default_directory=${ postgres_dump::_directory; }
+  schedule=${ postgres_dump::_schedule; }
   while IFS= read -r database; do
     [ -n "$database" ] || continue
     name=$(printf '%s' "$database" | jq -r '.name')
@@ -109,10 +109,10 @@ postgres_dump::_write_manifest() {
   manifest=$(postgres_dump::_manifest_path)
   mkdir -p "$(dirname "$manifest")"
   : > "$manifest"
-  databases=$(postgres_dump::_databases)
+  databases=${ postgres_dump::_databases; }
   [ -n "$databases" ] || return 0
-  default_directory=$(postgres_dump::_directory)
-  default_retain_count=$(postgres_dump::_retain_count)
+  default_directory=${ postgres_dump::_directory; }
+  default_retain_count=${ postgres_dump::_retain_count; }
   while IFS= read -r database; do
     [ -n "$database" ] || continue
     postgres_dump::_manifest_row "$database" "$default_directory" "$default_retain_count" >> "$manifest"
@@ -150,11 +150,11 @@ postgres_dump::_install_service() {
   service::install_calendar \
     postgres-dump \
     "$(postgres_dump::_dump_script_path)" \
-    "$(postgres_dump::_schedule)" \
+    "${ postgres_dump::_schedule; }" \
     "MK_POSTGRES_DUMP_MANIFEST=$(postgres_dump::_manifest_path)" \
-    "MK_POSTGRES_DUMP_NOTIFY=$(postgres_dump::_notify)" \
-    "MK_POSTGRES_DUMP_PG_DUMP=$(postgres::pg_dump_path)" \
-    "MK_POSTGRES_DUMP_PG_RESTORE=$(postgres::pg_restore_path)" \
+    "MK_POSTGRES_DUMP_NOTIFY=${ postgres_dump::_notify; }" \
+    "MK_POSTGRES_DUMP_PG_DUMP=${ postgres::pg_dump_path; }" \
+    "MK_POSTGRES_DUMP_PG_RESTORE=${ postgres::pg_restore_path; }" \
     "MK_POSTGRES_DUMP_USER=$(postgres::superuser)" \
     "MK_POSTGRES_DUMP_PORT=$(postgres::port)"
 }

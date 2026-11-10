@@ -96,6 +96,21 @@ setup() {
   MATCH="auth_method 'bogus'" mktest::assert_stub_called lifecycle::fail
 }
 
+@test "_authenticate stops when reading the auth method fails" {
+  STUB_EXIT=97 mktest::stub_function infisical::_auth_method
+  STUB_EXIT=1 mktest::stub_function lifecycle::fail
+  run infisical::_authenticate
+  [ "$status" -eq 97 ]
+}
+
+@test "_authenticate stops when the universal-auth login fails" {
+  STUB_OUTPUT="universal" mktest::stub_function infisical::_auth_method
+  STUB_EXIT=97 mktest::stub_function infisical::_login_universal
+  STUB_OUTPUT="FAKE_ENV_VAR" mktest::stub_function context::env_var_name "infisical.client_secret"
+  run infisical::_authenticate
+  [ "$status" -eq 97 ]
+}
+
 # --- infisical::fetch ---
 
 @test "fetch dispatches an infisical:// reference to _fetch_explicit" {
@@ -173,6 +188,29 @@ setup() {
   infisical::_load_secret_names
   [ -z "$_INFISICAL_SECRET_NAMES" ]
   mktest::assert_stub_not_called infisical::_export_secret_keys
+}
+
+@test "_load_secret_names stops when reading the default project fails" {
+  STUB_EXIT=97 mktest::stub_function infisical::_default_project_id
+  mktest::stub_function infisical::_export_secret_keys
+  run infisical::_load_secret_names
+  [ "$status" -eq 97 ]
+}
+
+@test "_load_secret_names stops when reading the environment fails" {
+  STUB_OUTPUT="fake-project" mktest::stub_function infisical::_default_project_id
+  STUB_EXIT=97 mktest::stub_function infisical::_environment
+  mktest::stub_function infisical::_export_secret_keys
+  run infisical::_load_secret_names
+  [ "$status" -eq 97 ]
+}
+
+@test "_load_secret_names stops when exporting the secret keys fails" {
+  STUB_OUTPUT="fake-project" mktest::stub_function infisical::_default_project_id
+  STUB_OUTPUT="fake-env" mktest::stub_function infisical::_environment
+  STUB_EXIT=97 mktest::stub_function infisical::_export_secret_keys "fake-project" "fake-env" "/"
+  run infisical::_load_secret_names
+  [ "$status" -eq 97 ]
 }
 
 # --- infisical::_export_secret_keys ---
@@ -307,6 +345,12 @@ setup() {
   run infisical::_configured_references
   [ "$status" -eq 0 ]
   [ -z "$output" ]
+}
+
+@test "_configured_references stops when reading the manager refs fails" {
+  STUB_EXIT=97 mktest::stub_function config::get "secrets.manager_refs"
+  run infisical::_configured_references
+  [ "$status" -eq 97 ]
 }
 
 # --- infisical::_verify_explicit_references ---
@@ -449,6 +493,40 @@ setup() {
   [ "$_INFISICAL_VERIFIED_REFERENCES" = "infisical://q/staging/KEY" ]
 }
 
+@test "_verify_explicit_references stops when reading the default project fails" {
+  STUB_EXIT=97 mktest::stub_function infisical::_default_project_id
+  STUB_OUTPUT="" mktest::stub_function infisical::_configured_references
+  run infisical::_verify_explicit_references
+  [ "$status" -eq 97 ]
+}
+
+@test "_verify_explicit_references stops when reading the environment fails" {
+  STUB_OUTPUT="fake-project" mktest::stub_function infisical::_default_project_id
+  STUB_EXIT=97 mktest::stub_function infisical::_environment
+  STUB_OUTPUT="" mktest::stub_function infisical::_configured_references
+  run infisical::_verify_explicit_references
+  [ "$status" -eq 97 ]
+}
+
+@test "_verify_explicit_references stops when exporting a reference's secret keys fails" {
+  _INFISICAL_VERIFIED_REFERENCES=""
+  STUB_OUTPUT="" mktest::stub_function infisical::_default_project_id
+  STUB_OUTPUT="infisical://fake-project/fake-env/FAKE_KEY" mktest::stub_function infisical::_configured_references
+  mktest::stub_function infisical::_reference_wellformed
+  STUB_OUTPUT=$'fake-project\nfake-env\n/\nFAKE_KEY' \
+    mktest::stub_function infisical::_reference_parts "infisical://fake-project/fake-env/FAKE_KEY"
+  STUB_EXIT=97 mktest::stub_function infisical::_export_secret_keys "fake-project" "fake-env" "/"
+  run infisical::_verify_explicit_references
+  [ "$status" -eq 97 ]
+}
+
+@test "_verify_explicit_references stops when reading the configured references fails" {
+  STUB_OUTPUT="" mktest::stub_function infisical::_default_project_id
+  STUB_EXIT=97 mktest::stub_function infisical::_configured_references
+  run infisical::_verify_explicit_references
+  [ "$status" -eq 97 ]
+}
+
 # --- infisical::_fetch_by_convention ---
 
 @test "_fetch_by_convention converts the bare name and fetches from the default project/env" {
@@ -458,6 +536,33 @@ setup() {
   STUB_OUTPUT="fake-secret-value" mktest::stub_function infisical::_get "proj-123" "prod" "/" "TAILSCALE_DEFAULT"
   run infisical::_fetch_by_convention "tailscale/default"
   [ "$output" = "fake-secret-value" ]
+}
+
+@test "_fetch_by_convention stops when reading the default project fails" {
+  STUB_EXIT=97 mktest::stub_function infisical::_default_project_id
+  STUB_OUTPUT="fake-env" mktest::stub_function infisical::_environment
+  STUB_OUTPUT="FAKE_KEY" mktest::stub_function infisical::_convention_key "fake/name"
+  mktest::stub_function infisical::_get
+  run infisical::_fetch_by_convention "fake/name"
+  [ "$status" -eq 97 ]
+}
+
+@test "_fetch_by_convention stops when reading the environment fails" {
+  STUB_OUTPUT="fake-project" mktest::stub_function infisical::_default_project_id
+  STUB_EXIT=97 mktest::stub_function infisical::_environment
+  STUB_OUTPUT="FAKE_KEY" mktest::stub_function infisical::_convention_key "fake/name"
+  mktest::stub_function infisical::_get
+  run infisical::_fetch_by_convention "fake/name"
+  [ "$status" -eq 97 ]
+}
+
+@test "_fetch_by_convention stops when converting the name fails" {
+  STUB_OUTPUT="fake-project" mktest::stub_function infisical::_default_project_id
+  STUB_OUTPUT="fake-env" mktest::stub_function infisical::_environment
+  STUB_EXIT=97 mktest::stub_function infisical::_convention_key "fake/name"
+  mktest::stub_function infisical::_get
+  run infisical::_fetch_by_convention "fake/name"
+  [ "$status" -eq 97 ]
 }
 
 # --- infisical::_convention_key ---
@@ -524,6 +629,19 @@ setup() {
   [ "$output" = "TOKEN123" ]
   [ "$(cat "$env_file")" = "id=cid-123 secret=csecret-456" ]
   [ "$(cat "$args_file")" = "login --method=universal-auth --silent --plain" ]
+}
+
+@test "_login_universal stops when resolving the client id fails" {
+  STUB_EXIT=97 mktest::stub_function infisical::_client_id
+  run infisical::_login_universal
+  [ "$status" -eq 97 ]
+}
+
+@test "_login_universal stops when resolving the client secret fails" {
+  STUB_OUTPUT="fake-id" mktest::stub_function infisical::_client_id
+  STUB_EXIT=97 mktest::stub_function infisical::_client_secret
+  run infisical::_login_universal
+  [ "$status" -eq 97 ]
 }
 
 # --- infisical::_login_user ---

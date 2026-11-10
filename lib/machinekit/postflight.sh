@@ -36,10 +36,11 @@ postflight::run() {
 # machine type ran, how many modules were active, and how many home files synced
 # (home::sync records the count in context, in both dry-run and real mode).
 postflight::_print_baseline() {
-  local machine_type module_count files_synced
-  machine_type="$(context::get "machine_type" --default "(none)")"
-  module_count="$(context::get_array "modules.active" | grep -c '.' || true)"
-  files_synced="$(context::get "home.files_synced" --default 0)"
+  local machine_type active_modules module_count files_synced
+  machine_type=${ context::get "machine_type" --default "(none)"; }
+  active_modules=${ context::get_array "modules.active" || true; }
+  module_count=${ grep -c '.' <<< "$active_modules" || true; }
+  files_synced=${ context::get "home.files_synced" --default 0; }
 
   logging::step "Summary"
   logging::info "  machine type:       $machine_type"

@@ -71,7 +71,9 @@ _OFFSITE_BACKUP_DEFAULT_KEEP_MONTHLY="12"
 # secrets, which are themselves empty when no repositories are configured — so an
 # activated-but-unconfigured module adds no edge.
 offsite_backup::requires() {
-  offsite_backup::declared_secrets | secrets::declared_backend_requirements
+  local declared_secrets
+  declared_secrets=${ offsite_backup::declared_secrets; }
+  secrets::declared_backend_requirements <<< "$declared_secrets"
 }
 
 # Two secrets per repository. The password is mandatory — restic cannot open a
@@ -81,7 +83,7 @@ offsite_backup::requires() {
 # optional, since a local or sftp repository needs none.
 offsite_backup::declared_secrets() {
   local repositories name
-  repositories=$(offsite_backup::_repositories)
+  repositories=${ offsite_backup::_repositories; }
   [ -n "$repositories" ] || return 0
   while IFS= read -r name; do
     [ -n "$name" ] || continue
@@ -94,7 +96,7 @@ offsite_backup::declared_secrets() {
 # install — or, worse, silently at 3am. No repositories = nothing to validate.
 offsite_backup::preflight() {
   local repositories entry
-  repositories=$(offsite_backup::_repositories)
+  repositories=${ offsite_backup::_repositories; }
   [ -n "$repositories" ] || return 0
   offsite_backup::_validate_repositories "$repositories"
   while IFS= read -r entry; do
@@ -108,12 +110,11 @@ offsite_backup::preflight() {
 offsite_backup::_validate_repository() {
   local entry="$1" name paths
   name=$(offsite_backup::_name "$entry")
-  # A plain assignment, so a malformed paths collection stops the run here.
-  paths=$(offsite_backup::_paths "$entry")
+  paths=${ offsite_backup::_paths "$entry"; }
   offsite_backup::_validate_paths "$paths" "$name"
   offsite_backup::_validate_secrets "$name"
-  service::validate_cron "$(offsite_backup::_schedule "$entry")"
-  service::validate_cron "$(offsite_backup::_check_schedule "$entry")"
+  service::validate_cron "${ offsite_backup::_schedule "$entry"; }"
+  service::validate_cron "${ offsite_backup::_check_schedule "$entry"; }"
 }
 
 # Install restic and the run script once, then wire each repository. No
@@ -121,7 +122,7 @@ offsite_backup::_validate_repository() {
 offsite_backup::install() {
   logging::step "offsite_backup install"
   local repositories entry
-  repositories=$(offsite_backup::_repositories)
+  repositories=${ offsite_backup::_repositories; }
   if [ -z "$repositories" ]; then
     logging::debug "offsite_backup: no repositories configured; nothing to back up"
     return 0
@@ -145,7 +146,7 @@ offsite_backup::install() {
 offsite_backup::_install_repository() {
   local entry="$1" name paths
   name=$(offsite_backup::_name "$entry")
-  paths=$(offsite_backup::_paths "$entry")
+  paths=${ offsite_backup::_paths "$entry"; }
   # Order is the contract: creating the repository drives the run script with
   # this repository's secret files, so those must be on disk first.
   offsite_backup::_install_secret_files "$name"
@@ -158,24 +159,25 @@ offsite_backup::_install_repository() {
 # postflight: what leaves this machine, where to, and — because it is what deletes
 # remote history — the retention actually in force for each destination.
 offsite_backup::postflight_info() {
-  local repositories entry name repository path
-  repositories=$(offsite_backup::_repositories)
+  local repositories entry name repository paths path
+  repositories=${ offsite_backup::_repositories; }
   [ -n "$repositories" ] || return 0
   while IFS= read -r entry; do
     [ -n "$entry" ] || continue
     name=$(offsite_backup::_name "$entry")
     repository=$(offsite_backup::_repository "$entry")
+    paths=${ offsite_backup::_paths "$entry"; }
     while IFS= read -r path; do
       [ -n "$path" ] || continue
       printf 'Backing up %s to %s (%s) on schedule "%s".\n' \
-        "$path" "$name" "$repository" "$(offsite_backup::_schedule "$entry")"
-    done < <(offsite_backup::_paths "$entry" | jq -r '.[].path')
+        "$path" "$name" "$repository" "${ offsite_backup::_schedule "$entry"; }"
+    done < <(printf '%s' "$paths" | jq -r '.[].path')
     printf 'Repository %s: keeping %s daily, %s weekly, %s monthly snapshots; verified on schedule "%s".\n' \
       "$name" \
-      "$(offsite_backup::_keep_daily "$entry")" \
-      "$(offsite_backup::_keep_weekly "$entry")" \
-      "$(offsite_backup::_keep_monthly "$entry")" \
-      "$(offsite_backup::_check_schedule "$entry")"
+      "${ offsite_backup::_keep_daily "$entry"; }" \
+      "${ offsite_backup::_keep_weekly "$entry"; }" \
+      "${ offsite_backup::_keep_monthly "$entry"; }" \
+      "${ offsite_backup::_check_schedule "$entry"; }"
   done < <(printf '%s' "$repositories" | jq -c '.[]')
 }
 
@@ -184,12 +186,13 @@ offsite_backup::postflight_info() {
 # scheduled runs fail until it exists — so say so rather than letting it surface
 # at 3am.
 offsite_backup::postflight_instructions() {
-  local repositories entry
-  repositories=$(offsite_backup::_repositories)
+  local repositories entry name
+  repositories=${ offsite_backup::_repositories; }
   [ -n "$repositories" ] || return 0
   while IFS= read -r entry; do
     [ -n "$entry" ] || continue
-    [ "$(offsite_backup::_repository_ready "$(offsite_backup::_name "$entry")")" = "true" ] && continue
+    name=${ offsite_backup::_name "$entry"; }
+    [ "${ offsite_backup::_repository_ready "$name"; }" = "true" ] && continue
     printf 'The restic repository %s does not exist yet — re-apply with MACHINEKIT_OFFSITE_BACKUP_INIT_REPOSITORY=1 to create it, or run restic init yourself (see docs/modules.md).\n' \
       "$(offsite_backup::_repository "$entry")"
   done < <(printf '%s' "$repositories" | jq -c '.[]')
@@ -326,8 +329,8 @@ offsite_backup::_ensure_repository() {
 # an interactive yes is not answered blind.
 offsite_backup::_init_consented() {
   local repository="$1" consent
-  consent=$(context::get "offsite_backup.init_repository" --default false --coerce boolean \
-    --prompt "Create any declared restic repository that does not exist yet, starting with $repository? (y/n)")
+  consent=${ context::get "offsite_backup.init_repository" --default false --coerce boolean \
+    --prompt "Create any declared restic repository that does not exist yet, starting with $repository? (y/n)"; }
   [ "$consent" = "true" ]
 }
 
@@ -347,8 +350,10 @@ offsite_backup::_initialize_repository() {
 # environment that repository's service units are given.
 offsite_backup::_run_script_mode() {
   local mode="$1" entry="$2"
+  local common_env
   local -a repository_env
-  mapfile -t repository_env < <(offsite_backup::_common_service_env "$entry")
+  common_env=${ offsite_backup::_common_service_env "$entry"; }
+  mapfile -t repository_env <<< "$common_env"
   env "MK_OFFSITE_BACKUP_MODE=$mode" "${repository_env[@]}" "$(offsite_backup::_run_script_path)"
 }
 
@@ -360,7 +365,7 @@ offsite_backup::_common_service_env() {
   local entry="$1" name
   name=$(offsite_backup::_name "$entry")
   printf '%s\n' \
-    "MK_OFFSITE_BACKUP_NOTIFY=$(offsite_backup::_notify "$entry")" \
+    "MK_OFFSITE_BACKUP_NOTIFY=${ offsite_backup::_notify "$entry"; }" \
     "MK_OFFSITE_BACKUP_RESTIC=$(offsite_backup::_restic_path)" \
     "MK_OFFSITE_BACKUP_REPOSITORY=$(offsite_backup::_repository "$entry")" \
     "MK_OFFSITE_BACKUP_PASSWORD_FILE=$(offsite_backup::_password_file_path "$name")" \
@@ -370,18 +375,20 @@ offsite_backup::_common_service_env() {
 offsite_backup::_install_backup_service() {
   local entry="$1" name
   name=$(offsite_backup::_name "$entry")
+  local common_env
   local -a repository_env
-  mapfile -t repository_env < <(offsite_backup::_common_service_env "$entry")
+  common_env=${ offsite_backup::_common_service_env "$entry"; }
+  mapfile -t repository_env <<< "$common_env"
   service::install_calendar \
     "$(offsite_backup::_service_label "$name")" \
     "$(offsite_backup::_run_script_path)" \
-    "$(offsite_backup::_schedule "$entry")" \
+    "${ offsite_backup::_schedule "$entry"; }" \
     "MK_OFFSITE_BACKUP_MODE=backup" \
     "${repository_env[@]}" \
     "MK_OFFSITE_BACKUP_MANIFEST=$(offsite_backup::_manifest_path "$name")" \
-    "MK_OFFSITE_BACKUP_KEEP_DAILY=$(offsite_backup::_keep_daily "$entry")" \
-    "MK_OFFSITE_BACKUP_KEEP_WEEKLY=$(offsite_backup::_keep_weekly "$entry")" \
-    "MK_OFFSITE_BACKUP_KEEP_MONTHLY=$(offsite_backup::_keep_monthly "$entry")"
+    "MK_OFFSITE_BACKUP_KEEP_DAILY=${ offsite_backup::_keep_daily "$entry"; }" \
+    "MK_OFFSITE_BACKUP_KEEP_WEEKLY=${ offsite_backup::_keep_weekly "$entry"; }" \
+    "MK_OFFSITE_BACKUP_KEEP_MONTHLY=${ offsite_backup::_keep_monthly "$entry"; }"
 }
 
 # The same script on a rarer cadence: verification re-reads the repository, which
@@ -389,15 +396,17 @@ offsite_backup::_install_backup_service() {
 offsite_backup::_install_check_service() {
   local entry="$1" name
   name=$(offsite_backup::_name "$entry")
+  local common_env
   local -a repository_env
-  mapfile -t repository_env < <(offsite_backup::_common_service_env "$entry")
+  common_env=${ offsite_backup::_common_service_env "$entry"; }
+  mapfile -t repository_env <<< "$common_env"
   service::install_calendar \
     "$(offsite_backup::_service_label "$name")-check" \
     "$(offsite_backup::_run_script_path)" \
-    "$(offsite_backup::_check_schedule "$entry")" \
+    "${ offsite_backup::_check_schedule "$entry"; }" \
     "MK_OFFSITE_BACKUP_MODE=check" \
     "${repository_env[@]}" \
-    "MK_OFFSITE_BACKUP_READ_DATA=$(offsite_backup::_check_read_data "$entry")"
+    "MK_OFFSITE_BACKUP_READ_DATA=${ offsite_backup::_check_read_data "$entry"; }"
 }
 
 # --- config: the repository set and each entry's own fields ---
@@ -438,40 +447,40 @@ offsite_backup::_repository_setting() {
 
 offsite_backup::_schedule() {
   offsite_backup::_repository_setting "$1" schedule \
-    "$(config::get "module.offsite_backup.schedule" --default "$_OFFSITE_BACKUP_DEFAULT_SCHEDULE")"
+    "${ config::get "module.offsite_backup.schedule" --default "$_OFFSITE_BACKUP_DEFAULT_SCHEDULE"; }"
 }
 
 offsite_backup::_check_schedule() {
   offsite_backup::_repository_setting "$1" check_schedule \
-    "$(config::get "module.offsite_backup.check_schedule" --default "$_OFFSITE_BACKUP_DEFAULT_CHECK_SCHEDULE")"
+    "${ config::get "module.offsite_backup.check_schedule" --default "$_OFFSITE_BACKUP_DEFAULT_CHECK_SCHEDULE"; }"
 }
 
 offsite_backup::_keep_daily() {
   offsite_backup::_repository_setting "$1" keep_daily \
-    "$(config::get "module.offsite_backup.keep_daily" --default "$_OFFSITE_BACKUP_DEFAULT_KEEP_DAILY")"
+    "${ config::get "module.offsite_backup.keep_daily" --default "$_OFFSITE_BACKUP_DEFAULT_KEEP_DAILY"; }"
 }
 
 offsite_backup::_keep_weekly() {
   offsite_backup::_repository_setting "$1" keep_weekly \
-    "$(config::get "module.offsite_backup.keep_weekly" --default "$_OFFSITE_BACKUP_DEFAULT_KEEP_WEEKLY")"
+    "${ config::get "module.offsite_backup.keep_weekly" --default "$_OFFSITE_BACKUP_DEFAULT_KEEP_WEEKLY"; }"
 }
 
 offsite_backup::_keep_monthly() {
   offsite_backup::_repository_setting "$1" keep_monthly \
-    "$(config::get "module.offsite_backup.keep_monthly" --default "$_OFFSITE_BACKUP_DEFAULT_KEEP_MONTHLY")"
+    "${ config::get "module.offsite_backup.keep_monthly" --default "$_OFFSITE_BACKUP_DEFAULT_KEEP_MONTHLY"; }"
 }
 
 # Off by default: --read-data re-downloads every pack, so it is both slow and the
 # one operation with real egress cost on a paid-egress backend.
 offsite_backup::_check_read_data() {
   offsite_backup::_repository_setting "$1" check_read_data \
-    "$(config::get "module.offsite_backup.check_read_data" --default false --coerce boolean)"
+    "${ config::get "module.offsite_backup.check_read_data" --default false --coerce boolean; }"
 }
 
 # Optional notify command; empty lets the run script fall back to logger/journald.
 offsite_backup::_notify() {
   offsite_backup::_repository_setting "$1" notify \
-    "$(config::get "module.offsite_backup.notify" --default "")"
+    "${ config::get "module.offsite_backup.notify" --default ""; }"
 }
 
 # Whether install found or created this repository. Recorded by _ensure_repository

@@ -36,14 +36,16 @@ _GIT_BACKUP_SECRET_NAMESPACE="git_backup/ssh_keys"
 # preflight readiness — adds no edge, and ambient-SSH folders (no key, no
 # secret) declare nothing.
 git_backup::requires() {
-  git_backup::declared_secrets | secrets::declared_backend_requirements
+  local declared_secrets
+  declared_secrets=${ git_backup::declared_secrets; }
+  secrets::declared_backend_requirements <<< "$declared_secrets"
 }
 
 # Fail early on a misconfigured folder set, and remind that each folder is
 # single-writer. No folders configured = nothing to validate.
 git_backup::preflight() {
   local folders
-  folders=$(git_backup::_folders)
+  folders=${ git_backup::_folders; }
   [ -n "$folders" ] || return 0
   git_backup::_validate_folders "$folders"
   git_backup::_validate_ignores "$folders"
@@ -55,11 +57,12 @@ git_backup::preflight() {
 # Declares each referenced ssh key as a required secret — the push can't
 # decrypt a key that isn't there. A folder using ambient SSH references none.
 git_backup::declared_secrets() {
-  local name
+  local name key_names
+  key_names=${ git_backup::_referenced_key_names; }
   while IFS= read -r name; do
     [ -n "$name" ] || continue
     printf '%s\ttrue\tfalse\n' "$(git_backup::_secret_name "$name")"
-  done < <(git_backup::_referenced_key_names)
+  done <<< "$key_names"
 }
 
 # Install the keys, write the manifest, lay down the push script, and schedule the
@@ -67,13 +70,13 @@ git_backup::declared_secrets() {
 git_backup::install() {
   logging::step "git_backup install"
   local folders
-  folders=$(git_backup::_folders)
+  folders=${ git_backup::_folders; }
   if [ -z "$folders" ]; then
     logging::debug "git_backup: no folders configured; nothing to back up"
     return 0
   fi
   if input::is_dry_run; then
-    logging::dry_run "would install the git-backup service (ssh keys, manifest, push script, $(git_backup::_interval)s timer)"
+    logging::dry_run "would install the git-backup service (ssh keys, manifest, push script, ${ git_backup::_interval; }s timer)"
     return 0
   fi
   git_backup::_install_keys
@@ -88,10 +91,11 @@ git_backup::install() {
 # service runs on its own, so there is no next step to surface here (a bad deploy
 # key surfaces later through the push notifier, not at apply time).
 git_backup::postflight_info() {
-  local folders folder path remote cadence
-  folders=$(git_backup::_folders)
+  local folders folder path remote interval cadence
+  folders=${ git_backup::_folders; }
   [ -n "$folders" ] || return 0
-  cadence="$(git_backup::_human_interval "$(git_backup::_interval)")"
+  interval=${ git_backup::_interval; }
+  cadence=$(git_backup::_human_interval "$interval")
   while IFS= read -r folder; do
     [ -n "$folder" ] || continue
     path=$(printf '%s' "$folder" | jq -r '.path')
@@ -127,8 +131,8 @@ git_backup::_validate_folders() {
 # Each folder's ignore config must be coherent: refusing to manage .gitignore while
 # still listing patterns is a contradiction; managing it with neither defaults nor
 # patterns is a pointless empty block (warn, don't fail). Reading the patterns
-# here, as a plain assignment, is also what makes a malformed pattern list stop
-# the run in preflight rather than mid-install.
+# here is also what makes a malformed pattern list stop the run in preflight
+# rather than mid-install.
 git_backup::_validate_ignores() {
   local folders="$1" folder path manage add_defaults patterns pattern_count
   while IFS= read -r folder; do
@@ -151,21 +155,23 @@ git_backup::_validate_ignores() {
 # Every referenced ssh_key must have its encrypted secret in the pool, or the
 # decrypt at install would fail mid-run.
 git_backup::_validate_keys() {
-  local name
+  local name key_names
+  key_names=${ git_backup::_referenced_key_names; }
   while IFS= read -r name; do
     [ -n "$name" ] || continue
     secrets::present "$(git_backup::_secret_name "$name")" || lifecycle::fail \
       "git_backup: ssh_key '$name' is configured but no secret named $(git_backup::_secret_name "$name") — see docs/modules.md (git_backup)."
-  done < <(git_backup::_referenced_key_names)
+  done <<< "$key_names"
   return 0
 }
 
 git_backup::_install_keys() {
-  local name
+  local name key_names
+  key_names=${ git_backup::_referenced_key_names; }
   while IFS= read -r name; do
     [ -n "$name" ] || continue
     git_backup::_install_key "$name"
-  done < <(git_backup::_referenced_key_names)
+  done <<< "$key_names"
 }
 
 # Resolve one named ssh key to a private (600) file under a private (700) dir,
@@ -189,9 +195,9 @@ git_backup::_write_manifest() {
   manifest=$(git_backup::_manifest_path)
   mkdir -p "$(dirname "$manifest")"
   : > "$manifest"
-  folders=$(git_backup::_folders)
+  folders=${ git_backup::_folders; }
   [ -n "$folders" ] || return 0
-  default_ssh_key=$(git_backup::_default_ssh_key)
+  default_ssh_key=${ git_backup::_default_ssh_key; }
   while IFS= read -r folder; do
     [ -n "$folder" ] || continue
     git_backup::_manifest_row "$folder" "$default_ssh_key" >> "$manifest"
@@ -212,7 +218,7 @@ git_backup::_manifest_row() {
 
 git_backup::_apply_gitignores() {
   local folders folder path
-  folders=$(git_backup::_folders)
+  folders=${ git_backup::_folders; }
   [ -n "$folders" ] || return 0
   while IFS= read -r folder; do
     [ -n "$folder" ] || continue
@@ -227,10 +233,11 @@ git_backup::_apply_gitignores() {
 # dir holding just a .gitignore reads as "present" and would block its seed).
 # manage_gitignore = false leaves the file to the user.
 git_backup::_apply_gitignore() {
-  local folder="$1" path="$2"
+  local folder="$1" path="$2" patterns
   [ -d "$path" ] || return 0
   [ "$(printf '%s' "$folder" | jq -r 'if .manage_gitignore == null then true else .manage_gitignore end')" = "true" ] || return 0
-  git_backup::_gitignore_patterns "$folder" | managed_block::ensure "$path/.gitignore" "#"
+  patterns=${ git_backup::_gitignore_patterns "$folder"; }
+  printf '%s\n' "$patterns" | managed_block::ensure "$path/.gitignore" "#"
 }
 
 # Emit the folder's ordered, de-duplicated ignore lines. .gitignore applies the
@@ -283,12 +290,15 @@ git_backup::_install_push_script() {
 # directly (its shebang picks the interpreter); the launchd/systemd split is
 # service.sh's job.
 git_backup::_install_service() {
+  local interval notify
+  interval=${ git_backup::_interval; }
+  notify=${ git_backup::_notify; }
   service::install_interval \
     git-backup \
     "$(git_backup::_push_script_path)" \
-    "$(git_backup::_interval)" \
+    "$interval" \
     "MK_GIT_BACKUP_MANIFEST=$(git_backup::_manifest_path)" \
-    "MK_GIT_BACKUP_NOTIFY=$(git_backup::_notify)" \
+    "MK_GIT_BACKUP_NOTIFY=$notify" \
     "MK_GIT_BACKUP_GIT=$(git_backup::_git_path)"
 }
 
@@ -327,9 +337,9 @@ git_backup::_default_ssh_key() {
 # decrypt, validate, and require age for.
 git_backup::_referenced_key_names() {
   local folders default_ssh_key
-  folders=$(git_backup::_folders)
+  folders=${ git_backup::_folders; }
   [ -n "$folders" ] || return 0
-  default_ssh_key=$(git_backup::_default_ssh_key)
+  default_ssh_key=${ git_backup::_default_ssh_key; }
   printf '%s' "$folders" \
     | jq -r --arg default "$default_ssh_key" '.[] | (.ssh_key // $default) | select(. != "")' \
     | sort -u

@@ -40,14 +40,14 @@ _SYNCTHING_DEFAULT_FOLDER_TYPE="sendreceive"
 
 syncthing::preflight() {
   local folders peers
-  folders=$(syncthing::_folders)
-  peers=$(syncthing::_peers)
+  folders=${ syncthing::_folders; }
+  peers=${ syncthing::_peers; }
   [ -n "$folders" ] && syncthing::_validate_folders "$folders"
   [ -n "$folders" ] && syncthing::_validate_ignores "$folders"
   [ -n "$folders" ] && syncthing::_validate_folder_types "$folders"
   [ -n "$peers" ] && syncthing::_validate_peers "$peers"
-  # Validate the discovery posture now (called directly, so an unknown value's
-  # lifecycle::fail isn't swallowed the way it would be in _apply_discovery's loop).
+  # Built here only for its check, so an unknown posture stops the run before
+  # install rather than partway through it.
   syncthing::_discovery_options >/dev/null
   return 0
 }
@@ -71,7 +71,7 @@ syncthing::install() {
   local share_with=""
   if syncthing::_join_consented; then
     context::set "syncthing.joined" true
-    share_with=$(syncthing::_join)
+    share_with=${ syncthing::_join; }
   else
     context::set "syncthing.joined" false
     logging::warn "syncthing: mesh join not consented; folders stay local. Set MACHINEKIT_SYNCTHING_JOIN=1 to join."
@@ -121,8 +121,8 @@ syncthing::_validate_folder_types() {
 # Each folder's ignore config must be coherent: refusing to manage .stignore while
 # still listing patterns is a contradiction; managing it with neither defaults nor
 # patterns is a pointless empty block (warn, don't fail). Reading the patterns
-# here, as a plain assignment, is also what makes a malformed pattern list stop
-# the run in preflight rather than mid-install.
+# here is also what makes a malformed pattern list stop the run in preflight
+# rather than mid-install.
 syncthing::_validate_ignores() {
   local folders="$1" folder id manage add_defaults patterns pattern_count
   while IFS= read -r folder; do
@@ -161,7 +161,7 @@ syncthing::postflight_info() {
     printf 'Syncthing hub device ID: %s\n' "$(syncthing::_own_device_id)"
     return 0
   fi
-  [ "$(syncthing::_joined)" = "true" ] || return 0
+  [ "${ syncthing::_joined; }" = "true" ] || return 0
   printf 'Joined the Syncthing mesh via the hub.\n'
 }
 
@@ -172,7 +172,7 @@ syncthing::postflight_instructions() {
     printf "Add this device ID to a [module.syncthing.peers.<key>] entry in each client's config (introducer = true).\n"
     return 0
   fi
-  if [ "$(syncthing::_joined)" = "true" ]; then
+  if [ "${ syncthing::_joined; }" = "true" ]; then
     printf 'Approve this device on the hub (it appears there as a pending device), or re-apply the hub.\n'
   else
     printf 'Re-apply with MACHINEKIT_SYNCTHING_JOIN=1 to join the mesh.\n'
@@ -184,7 +184,7 @@ syncthing::postflight_instructions() {
 # on the folder id, so re-runs converge rather than duplicate.
 syncthing::_ensure_folders() {
   local share_with="$1" folder folders
-  folders=$(syncthing::_folders)
+  folders=${ syncthing::_folders; }
   [ -n "$folders" ] || return 0
   while IFS= read -r folder; do
     [ -n "$folder" ] || continue
@@ -221,9 +221,10 @@ syncthing::_folder_type() {
 # leaves the file entirely to the user; otherwise machinekit maintains its block
 # (the blueprint's patterns first, then the built-in defaults).
 syncthing::_apply_stignore() {
-  local folder="$1" path="$2"
+  local folder="$1" path="$2" patterns
   [ "$(printf '%s' "$folder" | jq -r 'if .manage_stignore == null then true else .manage_stignore end')" = "true" ] || return 0
-  syncthing::_stignore_patterns "$folder" | managed_block::ensure "$path/.stignore" "//"
+  patterns=${ syncthing::_stignore_patterns "$folder"; }
+  printf '%s\n' "$patterns" | managed_block::ensure "$path/.stignore" "//"
 }
 
 # Emit the folder's ordered, de-duplicated ignore lines. .stignore applies the
@@ -290,7 +291,7 @@ syncthing::_accept_pending() {
 # lists nobody (it accepts joiners instead). Reached only once join is consented.
 syncthing::_ensure_peers() {
   local peer peers
-  peers=$(syncthing::_peers)
+  peers=${ syncthing::_peers; }
   [ -n "$peers" ] || return 0
   while IFS= read -r peer; do
     [ -n "$peer" ] || continue
@@ -311,12 +312,10 @@ syncthing::_ensure_peer() {
   printf '%s\n' "$device_id"
 }
 
-# Apply the configured discovery posture. Capture the options first so a bad
-# preset's lifecycle::fail propagates — a process substitution would run the loop
-# in a subshell and swallow the exit.
+# Apply the configured discovery posture.
 syncthing::_apply_discovery() {
   local options option value
-  options=$(syncthing::_discovery_options)
+  options=${ syncthing::_discovery_options; }
   while read -r option value; do
     [ -n "$option" ] || continue
     syncthing::_cli_set_option "$option" "$value"
@@ -325,8 +324,8 @@ syncthing::_apply_discovery() {
 
 syncthing::_join_consented() {
   local consent
-  consent=$(context::get "syncthing.join" --default false --coerce boolean \
-    --prompt "Join the Syncthing mesh now (add peers and share folders)? (y/n)")
+  consent=${ context::get "syncthing.join" --default false --coerce boolean \
+    --prompt "Join the Syncthing mesh now (add peers and share folders)? (y/n)"; }
   [ "$consent" = "true" ]
 }
 
@@ -335,7 +334,7 @@ syncthing::_join_consented() {
 # it. No folders = nothing that could ever conflict, so nothing to install.
 syncthing::_install_conflict_notifier() {
   local folders
-  folders=$(syncthing::_folders)
+  folders=${ syncthing::_folders; }
   [ -n "$folders" ] || return 0
   syncthing::_write_conflict_manifest "$folders"
   syncthing::_install_conflict_scan_script
@@ -375,9 +374,9 @@ syncthing::_install_conflict_service() {
   service::install_interval \
     syncthing-conflicts \
     "$(syncthing::_conflict_scan_script_path)" \
-    "$(syncthing::_conflict_interval)" \
+    "${ syncthing::_conflict_interval; }" \
     "MK_SYNCTHING_CONFLICT_MANIFEST=$(syncthing::_conflict_manifest_path)" \
-    "MK_SYNCTHING_CONFLICT_NOTIFY=$(syncthing::_conflict_notify)"
+    "MK_SYNCTHING_CONFLICT_NOTIFY=${ syncthing::_conflict_notify; }"
 }
 
 # --- config accessors ---
@@ -394,7 +393,7 @@ syncthing::_peers() {
 
 # A hub absorbs joiners (accepts pending devices) instead of pre-listing them.
 syncthing::_is_hub() {
-  [ "$(config::get "module.syncthing.hub" --default false --coerce boolean)" = "true" ]
+  [ "${ config::get "module.syncthing.hub" --default false --coerce boolean; }" = "true" ]
 }
 
 # Whether this machine joined the mesh on this apply. install records the consent
@@ -415,7 +414,7 @@ syncthing::_discovery_preset() {
 # addresses; default emits nothing, leaving Syncthing's settings untouched.
 syncthing::_discovery_options() {
   local preset
-  preset=$(syncthing::_discovery_preset)
+  preset=${ syncthing::_discovery_preset; }
   case "$preset" in
     tailnet)
       printf '%s\n' \

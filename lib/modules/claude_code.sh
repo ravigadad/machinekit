@@ -28,7 +28,7 @@ claude_code::install() {
 # so a fresh install stands in for "not set up yet"; an already-present CLI stays
 # quiet.
 claude_code::postflight_instructions() {
-  [ "$(context::get "claude_code.installed" --default false)" = "true" ] || return 0
+  [ "${ context::get "claude_code.installed" --default false; }" = "true" ] || return 0
   printf "Run 'claude' and sign in to finish setup — machinekit does not handle auth.\n"
 }
 

@@ -19,7 +19,7 @@ input::detect_mode() {
 # prompts later.
 input::is_interactive() {
   local val
-  if val=$(context::get "mode.interactive" --coerce boolean); then
+  if val=${ context::get "mode.interactive" --coerce boolean; }; then
     if [ "$val" = "true" ] && [ ! -r "${MACHINEKIT_TTY:-/dev/tty}" ]; then
       lifecycle::fail "Interactive mode requires a readable tty at ${MACHINEKIT_TTY:-/dev/tty}"
     fi
@@ -49,7 +49,7 @@ input::stdout_is_tty() {
 
 input::is_dry_run() {
   local val
-  val=$(context::get "mode.dry_run" --coerce boolean --default false)
+  val=${ context::get "mode.dry_run" --coerce boolean --default false; }
   [ "$val" = "true" ]
 }
 
@@ -63,7 +63,7 @@ input::conflict_behavior() {
     return 0
   fi
   local val
-  val=$(config::get "conflict_behavior" 2>/dev/null) || true
+  val=${ config::get "conflict_behavior" 2>/dev/null; } || true
   if [ -n "$val" ]; then
     printf '%s\n' "$val"
   fi
