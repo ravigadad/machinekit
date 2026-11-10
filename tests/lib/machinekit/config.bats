@@ -29,10 +29,26 @@ setup() {
 @test "load merges type TOML on top of common when machine_type is set" {
   STUB_OUTPUT="the-common-json" mktest::stub_function config::_common_json "$FAKE_BP"
   STUB_OUTPUT="the-type-json" mktest::stub_function config::_type_json "$FAKE_BP"
+  STUB_OUTPUT="" mktest::stub_function config::_unmatched_disable_path "the-common-json" "the-type-json"
   STUB_OUTPUT="the-merged-json" mktest::stub_function config::_merge_json "the-common-json" "the-type-json"
   mktest::stub_function context::set "config" "the-merged-json" --json
   config::load
   mktest::assert_stub_called context::set "config" "the-merged-json" --json
+}
+
+@test "load fails, naming the key, when the machine type turns off an entry common does not define" {
+  STUB_OUTPUT="$FAKE_BP" mktest::stub_function blueprints::dir
+  STUB_OUTPUT="the-common-json" mktest::stub_function config::_common_json "$FAKE_BP"
+  STUB_OUTPUT="the-type-json" mktest::stub_function config::_type_json "$FAKE_BP"
+  STUB_OUTPUT="module.fake.entries.typo" mktest::stub_function config::_unmatched_disable_path "the-common-json" "the-type-json"
+  STUB_EXIT=1 mktest::stub_function lifecycle::fail
+  mktest::stub_function config::_unmatched_disable_path
+  mktest::stub_function config::_merge_json
+  mktest::stub_function context::set
+  run config::load
+  [ "$status" -eq 1 ]
+  MATCH="module.fake.entries.typo" mktest::assert_stub_called lifecycle::fail
+  mktest::assert_stub_not_called context::set
 }
 
 # --- config::get ---
@@ -245,7 +261,7 @@ setup() {
 # --- config::_collection_shape_error ---
 
 @test "_collection_shape_error reports nothing for a well-formed collection" {
-  result=$(config::_collection_shape_error '{"fake-one":{"enabled":false},"fake_two":{"a":1},"three":{}}')
+  result=$(config::_collection_shape_error '{"fake-one":{"a":1,"enabled":false},"fake_two":{"a":1},"three":{}}')
   [ -z "$result" ]
 }
 
@@ -267,6 +283,16 @@ setup() {
 @test "_collection_shape_error reports a non-boolean enabled, naming the entry" {
   result=$(config::_collection_shape_error '{"fake":{"enabled":"no"}}')
   [[ "$result" == *"fake"*"enabled"* ]]
+}
+
+@test "_collection_shape_error accepts an entry that only sets enabled = false, as an inherited entry with no fields becomes once turned off" {
+  result=$(config::_collection_shape_error '{"fake":{"enabled":false}}')
+  [ -z "$result" ]
+}
+
+@test "_collection_shape_error accepts a disabled entry that keeps its inherited fields" {
+  result=$(config::_collection_shape_error '{"fake":{"path":"/fake","enabled":false}}')
+  [ -z "$result" ]
 }
 
 # --- config::_enabled_entries ---
@@ -390,6 +416,35 @@ setup() {
 @test "_first_table_list_path finds a list of tables nested inside a keyed entry" {
   result=$(config::_first_table_list_path '{"module":{"fake":{"entries":{"one":{"nested":[{"a":1}]}}}}}')
   [ "$result" = "module.fake.entries.one.nested" ]
+}
+
+# --- config::_unmatched_disable_path ---
+
+@test "_unmatched_disable_path names a machine-type entry that only turns off a key common does not define" {
+  result=$(config::_unmatched_disable_path '{"module":{"fake":{"entries":{"real":{"a":1}}}}}' \
+    '{"module":{"fake":{"entries":{"typo":{"enabled":false}}}}}')
+  [ "$result" = "module.fake.entries.typo" ]
+}
+
+@test "_unmatched_disable_path accepts turning off an inherited entry, even one with no fields" {
+  result=$(config::_unmatched_disable_path '{"module":{"fake":{"entries":{"bare":{},"full":{"a":1}}}}}' \
+    '{"module":{"fake":{"entries":{"bare":{"enabled":false},"full":{"enabled":false}}}}}')
+  [ -z "$result" ]
+}
+
+@test "_unmatched_disable_path ignores a machine-type entry that sets more than enabled = false" {
+  result=$(config::_unmatched_disable_path '{}' '{"module":{"fake":{"entries":{"new":{"a":1,"enabled":false}}}}}')
+  [ -z "$result" ]
+}
+
+@test "_unmatched_disable_path names the entry when common holds a plain value partway along its key" {
+  result=$(config::_unmatched_disable_path '{"module":{"fake":"a string"}}' '{"module":{"fake":{"entries":{"typo":{"enabled":false}}}}}')
+  [ "$result" = "module.fake.entries.typo" ]
+}
+
+@test "_unmatched_disable_path finds nothing without a machine type" {
+  result=$(config::_unmatched_disable_path '{"module":{"fake":{"entries":{"one":{"enabled":false}}}}}' '{}')
+  [ -z "$result" ]
 }
 
 # --- config::_merge_json ---

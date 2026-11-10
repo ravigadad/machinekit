@@ -7,11 +7,15 @@
 _MK_CONFIG_LOADED=1
 
 config::load() {
-  local blueprints_dir common_json type_json merged
+  local blueprints_dir common_json type_json unmatched_path merged
   blueprints_dir=$(blueprints::dir)
 
   common_json=$(config::_common_json "$blueprints_dir")
   type_json=$(config::_type_json "$blueprints_dir")
+
+  unmatched_path=$(config::_unmatched_disable_path "$common_json" "$type_json")
+  [ -z "$unmatched_path" ] || lifecycle::fail \
+    "config: the machine type's $unmatched_path only sets enabled = false, but common/machinekit.toml defines no $unmatched_path to turn off (check the spelling of the key)."
 
   merged=$(config::_merge_json "$common_json" "$type_json")
 
@@ -191,6 +195,19 @@ config::_parse_toml() {
 config::_first_table_list_path() {
   printf '%s' "$1" | jq -r '
     first(paths(type == "array" and any(.[]; type == "object")))
+    | map(tostring) | join(".")'
+}
+
+# The dotted key of the first machine-type table that holds nothing but
+# enabled = false where common defines nothing, or nothing. Such a table turns off
+# an entry that doesn't exist, usually because its key is misspelled, which leaves
+# the real entry on. It has to be caught here, with the layers still apart: after
+# the merge it looks the same as a correctly spelled key whose inherited entry has
+# no fields of its own.
+config::_unmatched_disable_path() {
+  jq -nr --argjson common "$1" --argjson type "$2" '
+    first($type | paths(type == "object" and . == {"enabled": false})
+      | select(. as $path | ($common | try getpath($path) catch null) == null))
     | map(tostring) | join(".")'
 }
 
