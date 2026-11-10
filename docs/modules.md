@@ -102,7 +102,15 @@ Nothing to do for the default. The `postgres` capability's default satisfier, `p
 Only if you list `postgres_app` (macOS only) to use [Postgres.app](https://postgresapp.com) as your provider is there manual setup, because machinekit never drives Postgres.app's lifecycle — it only checks and provisions into a server you run:
 
 1. **Install Postgres.app and start a server** *before* `apply`. By default machinekit provisions into whatever Postgres.app server is running on port 5432; if it finds no Postgres.app server there — or a non-Postgres.app postgres holding the port — it fails rather than provision into the wrong place.
-2. **Pin versions/ports (optional).** With `[module.postgres.versions.primary]` and `version = 17`, `port = 5432` under it machinekit verifies that exact server is running (same table `postgres_brew` would *create*; `postgres_app` only *checks* it). Without it, any Postgres.app server on 5432 is accepted.
+2. **Pin versions/ports (optional).** List each server you expect, under a key of your choosing. One must be on 5432:
+
+   ```toml
+   [module.postgres.versions.primary]
+   version = "17"
+   port = "5432"
+   ```
+
+   machinekit then verifies that each listed server is running. It's the same table `postgres_brew` would *create*; `postgres_app` only *checks* it. Without it, any Postgres.app server on 5432 is accepted.
 
 Extensions (e.g. `pgvector`, which `hindsight_server` uses) ship bundled with Postgres.app, so nothing extra is installed for them.
 

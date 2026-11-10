@@ -66,10 +66,10 @@
 # # installing the latest major if none exists. To pin specific majors to
 # # specific ports, list them — each entry is keyed by a handle of your choosing
 # # and needs both a version and a port, and exactly one must be 5432 (the
-# # instance consumers use). machinekit
-# # installs whichever are missing and verifies the rest; it never changes the
-# # port of an already-installed cluster, so a request must include every
-# # installed version (matching its current port) and may add more.
+# # instance consumers use). machinekit installs whichever are missing and
+# # verifies the rest; it never changes the port of an already-installed cluster,
+# # so a request must include every installed version (matching its current port)
+# # and may add more.
 # # The install behavior above is the default `postgres_brew` satisfier. The
 # # `postgres_app` satisfier (macOS) reads this same table but only *checks* it —
 # # it installs nothing, and fails if a listed server isn't already running.
@@ -183,7 +183,8 @@
 # # to the server's bank-config API using Hindsight's own field names:
 # # retain_mission / observations_mission / reflect_mission, and disposition traits
 # # disposition_skepticism / disposition_literalism / disposition_empathy (1–5).
-# # A bank named here is independent of the recall/tool_use lists above.
+# # A bank named here is independent of the recall/tool_use lists above. A
+# # machine type stops applying an inherited bank with `enabled = false` on it.
 # #
 # # This writes to the tenant (an upsert that can overwrite a bank's config), so it
 # # needs explicit consent: an interactive yes, or
@@ -413,20 +414,21 @@
 # # is what distinguishes one repository from another, so anything true of all of
 # # them carries no information, and a vendor name goes stale if you move the data.
 # # A repository is keyed by its name (set `name` to use a different one), which
-# # is lowercase letters, digits, and underscores; it names this
-# # repository's secrets, its files, and its two service units, so pick it once and
-# # leave it alone. Mirroring it in the repository string's last path segment keeps
+# # is lowercase letters, digits, and underscores; it names this repository's
+# # secrets, its files, and its two service units, so pick it once and leave it
+# # alone. Mirroring it in the repository string's last path segment keeps
 # # the bucket readable against this file. (Bucket names cannot contain underscores
 # # on most providers — they become DNS labels — while the prefix after the bucket
 # # can, so a hyphenated bucket holding snake_case prefixes is expected.)
 # [module.offsite_backup.repositories.database_dumps]
 # repository = "s3:s3.example-region.example.com/my-restic-bucket/database_dumps"
 # #
-# # Each path is keyed by a handle of your choosing and needs a `path` (a
-# # filesystem path can't be a TOML key). `max_age_hours` is per path, not per repository — it
-# # is the silent-failure alarm: if nothing under the path has changed in that
-# # long, the run notifies. Whatever writes there can stop while the upload keeps
-# # succeeding every night, and nothing else would tell you.
+# # Each path is keyed by a handle of your choosing and needs a `path`, since a
+# # key may use only letters, digits, underscores and hyphens. `max_age_hours` is
+# # per path, not per repository — it is the silent-failure alarm: if nothing
+# # under the path has changed in that long, the run notifies. Whatever writes
+# # there can stop while the upload keeps succeeding every night, and nothing
+# # else would tell you.
 # [module.offsite_backup.repositories.database_dumps.paths.dumps]
 # path = "~/postgres-dumps"
 # # max_age_hours = 36

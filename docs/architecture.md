@@ -318,23 +318,23 @@ This composition happens uniformly across the four moving pieces of a blueprint:
 - `hooks/post-apply/` — common hooks run first, then type hooks. Both run.
 - `machinekit.toml` — `common/machinekit.toml` is loaded; values in `machine_types/<type>/machinekit.toml` override on key conflict (below).
 
-### How machinekit.toml layers
-
-The two files are merged table by table: a type's value for a key replaces common's, and tables present in both are merged key by key all the way down. A list is a single value, so a type that sets a list replaces common's list whole.
-
-**Collections are keyed tables, never lists of tables.** Anything there can be several of — Syncthing folders and peers, backup folders, databases, repositories — is written as a table keyed by an identifier the blueprint chooses: `[module.syncthing.folders.agents]`, not `[[module.syncthing.folders]]`. Because the merge reaches each entry by its key, a type can change one inherited entry without restating the others, and add entries of its own. A module may use the key as a value it needs, such as a folder id or a database name, unless the entry sets that field itself; `[module.postgres_dump.databases.hindsight]` with nothing under it is a complete entry. Two enabled entries that end up with the same value in that field are an error. Keys use TOML's bare-key characters (letters, digits, `_`, `-`). The loader rejects a list of tables in either file, naming the file and key, because the merge would otherwise let one layer's list silently replace the other layer's table.
-
-**A type turns off an inherited entry with `enabled = false`**, for example `agents = { enabled = false }` under the collection's header. The entry stays in the merged config but no module acts on it. An `enabled = false` whose key matches no inherited entry is an error, so a misspelled key can't leave the real entry on.
-
-**A type adds to an inherited list with `additional_<name>`** next to it. `additional_modules` extends `modules`; `additional_ignore_patterns` on a Syncthing folder extends that folder's `ignore_patterns`. Where the additions go is up to the module that reads the list, because order means different things to different consumers. The per-module docs say which lists can be extended and where the additions land.
-
-All three rules are implemented in `lib/machinekit/config.sh` (`config::entries`, `config::extended_list`), which every module uses to read its collections and extensible lists.
-
 Without `--machine-type`, only the common layer applies. There is no implicit "default" type — the absence of a flag means "no type-specific layering." Users with a single-machine setup or a uniform fleet leave `machine_types/` empty (or omit the `--machine-type` flag) and have no need to think about layering at all.
 
 Machine types are how blueprints *express variation* across a fleet. They're not a tagging system or a capability flag set — those concerns live in `[modules.*]` config (iteration 2/3) and in the modules' own capability declarations.
 
 > Status: the directory structure ships in iteration 1. All four layers — `home/`, `Brewfile`, `hooks/post-apply/`, and `machinekit.toml` — are implemented (iteration 2). End-to-end validation with a non-default machine type is done.
+
+### How machinekit.toml layers
+
+The two files are merged table by table: a type's value for a key replaces common's, and tables present in both are merged key by key all the way down. A list is a single value, so a type that sets a list replaces common's list whole.
+
+**Collections are keyed tables, never lists of tables.** Any module setting that holds several entries is written as a table keyed by an identifier the blueprint chooses: `[module.syncthing.folders.agents]`, not `[[module.syncthing.folders]]`. Because the merge reaches each entry by its key, a type can change one inherited entry without restating the others, and add entries of its own. A module may use the key as a value it needs, such as a folder id or a database name, unless the entry sets that field itself; `[module.postgres_dump.databases.hindsight]` with nothing under it is a complete entry. Two enabled entries that end up with the same value in that field are an error. Keys use TOML's bare-key characters (letters, digits, `_`, `-`). The loader rejects a list of tables in either file, naming the file and key, because the merge would otherwise let one layer's list silently replace the other layer's table.
+
+**A type turns off an inherited entry with `enabled = false`**, for example `agents = { enabled = false }` under the collection's header. The entry stays in the merged config but no module acts on it. An `enabled = false` whose key matches no inherited entry is an error, so a misspelled key can't leave the real entry on.
+
+**A type adds to an inherited list with `additional_<name>`** next to it. `additional_modules` extends `modules`; `additional_ignore_patterns` on a Syncthing folder extends that folder's `ignore_patterns`. Where the additions go is up to the module that reads the list, because order means different things to different consumers. The per-module docs say which lists can be extended and where the additions land.
+
+All three rules are implemented in `lib/machinekit/config.sh`, alongside the readers modules use for their collections and extensible lists.
 
 ---
 
