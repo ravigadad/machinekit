@@ -17,6 +17,10 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/postgres_brew/access.sh"
 
 postgres_brew::provides() { printf 'postgres\n'; }
 
+postgres_brew::preflight() {
+  postgres::_validate_requested_versions
+}
+
 postgres_brew::install() {
   logging::step "postgres install"
   local requested

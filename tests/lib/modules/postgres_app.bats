@@ -21,6 +21,12 @@ setup() {
   [ "$result" = "postgres" ]
 }
 
+@test "preflight validates the requested versions" {
+  mktest::stub_function postgres::_validate_requested_versions
+  postgres_app::preflight
+  mktest::assert_stub_called postgres::_validate_requested_versions
+}
+
 # --- postgres_app::install ---
 
 @test "install checks the requested versions and ensures the superuser" {

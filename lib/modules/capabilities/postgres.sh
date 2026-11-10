@@ -202,6 +202,14 @@ postgres::_assert_valid_request() {
   [ -z "$err" ] || lifecycle::fail "postgres: $err"
 }
 
+# Validate the configured request in preflight, before any module has changed the
+# machine. Both satisfiers' preflights call it.
+postgres::_validate_requested_versions() {
+  local requested
+  requested=${ postgres::_requested_versions; }
+  [ -z "$requested" ] || postgres::_assert_valid_request "$requested"
+}
+
 # Decode the requested {version, port} table into version⇥port rows (TSV), the one
 # shape both satisfiers iterate — brew to install each, postgres_app to check each.
 # Centralized so the table's encoding lives in one place, alongside its validation.

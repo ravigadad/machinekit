@@ -16,6 +16,10 @@ _POSTGRES_APP_DIR="/Applications/Postgres.app"
 
 postgres_app::provides() { printf 'postgres\n'; }
 
+postgres_app::preflight() {
+  postgres::_validate_requested_versions
+}
+
 # Verify (never create) that the requested servers are running, then ensure the
 # predictable superuser. No install/start/stop: Postgres.app owns its lifecycle.
 postgres_app::install() {

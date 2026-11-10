@@ -320,6 +320,30 @@ setup() {
   MATCH="pinned to port 5432" mktest::assert_stub_called lifecycle::fail
 }
 
+# --- postgres::_validate_requested_versions ---
+
+@test "_validate_requested_versions validates the configured request" {
+  STUB_OUTPUT='the-version-array' mktest::stub_function postgres::_requested_versions
+  mktest::stub_function postgres::_assert_valid_request "the-version-array"
+  postgres::_validate_requested_versions
+  mktest::assert_stub_called postgres::_assert_valid_request "the-version-array"
+}
+
+@test "_validate_requested_versions has nothing to validate when no versions are configured" {
+  STUB_OUTPUT="" mktest::stub_function postgres::_requested_versions
+  mktest::stub_function postgres::_assert_valid_request
+  postgres::_validate_requested_versions
+  mktest::assert_stub_not_called postgres::_assert_valid_request
+}
+
+@test "_validate_requested_versions stops when the versions table is malformed" {
+  STUB_EXIT=97 mktest::stub_function postgres::_requested_versions
+  mktest::stub_function postgres::_assert_valid_request
+  run postgres::_validate_requested_versions
+  [ "$status" -eq 97 ]
+  mktest::assert_stub_not_called postgres::_assert_valid_request
+}
+
 # --- postgres::_requested_version_rows ---
 
 @test "_requested_version_rows decodes the versions table into version-tab-port rows" {
