@@ -371,7 +371,7 @@ hindsight_integration::_retain_settings_json() {
 # wiring lists above: a bank configured here need not be wired into this box, and
 # vice versa — the two axes don't have to line up.
 hindsight_integration::_bank_configs_json() {
-  config::enabled_table "module.hindsight_integration.additional_banks"
+  config::enabled_table "module.hindsight_integration.bank_configs"
 }
 
 hindsight_integration::_configured_bank_names() {

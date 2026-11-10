@@ -176,8 +176,8 @@
 # # at a different server or regenerate, delete the config(s) and re-apply.
 # #
 # # Bank missions/dispositions — apply the tenant-wide config for named banks from
-# # this machine. Banks are tenant-scoped (not per-machine): any box carrying an
-# # additional_banks.<name> table re-asserts it on apply, and the upsert is
+# # this machine. Banks are tenant-scoped (not per-machine): any box carrying a
+# # bank_configs.<name> table re-asserts it on apply, and the upsert is
 # # idempotent — so list these on whichever box you want to own the config (a
 # # server that also runs this module, or any client). Each table is sent verbatim
 # # to the server's bank-config API using Hindsight's own field names:
@@ -193,7 +193,7 @@
 # # and lands on the next apply.
 # # tenant = "default"       # the tenant path segment; override only for multi-tenant
 # #
-# # [module.hindsight_integration.additional_banks.music]
+# # [module.hindsight_integration.bank_configs.music]
 # # retain_mission = "Extract creative direction, influences, works in progress. Ignore software details."
 # # reflect_mission = "You are a creative collaborator who knows my musical sensibility."
 # # disposition_skepticism = 2

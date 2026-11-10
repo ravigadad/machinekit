@@ -642,9 +642,9 @@ setup() {
 
 # --- bank config readers ---
 
-@test "_bank_configs_json reads the enabled banks of the additional_banks collection" {
+@test "_bank_configs_json reads the enabled banks of the bank_configs collection" {
   STUB_OUTPUT='{"music":{"retain_mission":"m"}}' mktest::stub_function config::enabled_table \
-    "module.hindsight_integration.additional_banks"
+    "module.hindsight_integration.bank_configs"
   run hindsight_integration::_bank_configs_json
   [ "$output" = '{"music":{"retain_mission":"m"}}' ]
 }
