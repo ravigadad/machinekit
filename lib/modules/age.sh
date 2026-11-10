@@ -74,9 +74,9 @@ age::preflight() {
 # Prompts the user to confirm overwriting an existing key, failing if they decline.
 # Only called when a conflict is detected.
 age::_confirm_overwrite() {
-  local key_path="$1" problem_flag="$2" overwrite
+  local key_path="$1" problem_flag="$2" overwrite overwrite_prompt
   # shellcheck disable=SC2059
-  printf -v "overwrite_prompt" "$_AGE_OVERWRITE_PROMPT" "$key_path"
+  printf -v overwrite_prompt "$_AGE_OVERWRITE_PROMPT" "$key_path"
   overwrite=${ context::get "age.key_overwrite" --required --coerce boolean --prompt "$overwrite_prompt"; }
   [ "$overwrite" = "true" ] || lifecycle::fail "age key not overwritten. Remove $key_path first, or omit $problem_flag to use the existing key."
 }

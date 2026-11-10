@@ -229,6 +229,12 @@ setup() {
   age::_confirm_overwrite "/some/key.txt" "should not fail"
 }
 
+@test "_confirm_overwrite leaves no prompt variable behind in the caller's scope" {
+  STUB_OUTPUT="true" mktest::stub_function context::get
+  age::_confirm_overwrite "/some/key.txt" "--fake-flag"
+  [ -z "${overwrite_prompt+set}" ]
+}
+
 @test "_confirm_overwrite fails with the provided message when overwrite is declined" {
   STUB_OUTPUT="false" mktest::stub_function context::get
   STUB_EXIT=1 mktest::stub_function lifecycle::fail
