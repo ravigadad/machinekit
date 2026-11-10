@@ -117,6 +117,39 @@ offsite_backup::_validate_repository() {
   service::validate_cron "${ offsite_backup::_check_schedule "$entry"; }"
 }
 
+# The names of every file install may put in this module's own dirs, whatever the
+# config, so an apply with no record of past installs can find them.
+offsite_backup::installed_file_patterns() {
+  printf '%s\n' \
+    $'data\trestic_run.sh' \
+    $'data\tmanifest-*.tsv' \
+    $'config\t*/repository_password' \
+    $'config\t*/credentials'
+}
+
+# What install puts on this machine for the current config, so an apply can stop
+# and remove a dropped repository's services, which would otherwise keep pruning
+# it. restic itself stays installed. No repositories = nothing.
+offsite_backup::installed_artifacts() {
+  local repositories entry
+  repositories=${ offsite_backup::_repositories; }
+  [ -n "$repositories" ] || return 0
+  printf 'file\t%s\n' "$(offsite_backup::_run_script_path)"
+  while IFS= read -r entry; do
+    [ -n "$entry" ] || continue
+    offsite_backup::_repository_artifacts "$entry"
+  done < <(printf '%s' "$repositories" | jq -c '.[]')
+}
+
+offsite_backup::_repository_artifacts() {
+  local entry="$1" name
+  name=$(offsite_backup::_name "$entry")
+  printf 'service\t%s\n' "$(offsite_backup::_service_label "$name")" "$(offsite_backup::_check_service_label "$name")"
+  printf 'file\t%s\n' "$(offsite_backup::_manifest_path "$name")" "$(offsite_backup::_password_file_path "$name")"
+  offsite_backup::_has_credentials "$name" || return 0
+  printf 'file\t%s\n' "$(offsite_backup::_credentials_file_path "$name")"
+}
+
 # Install restic and the run script once, then wire each repository. No
 # repositories = nothing to install, not even restic.
 offsite_backup::install() {
@@ -251,8 +284,8 @@ offsite_backup::_install_secret_files() {
   password_secret=$(offsite_backup::_secret_name "$name" repository_password)
   offsite_backup::_write_secret_file "$(offsite_backup::_password_file_path "$name")" "$password_secret" \
     || lifecycle::fail "offsite_backup: no value resolved for the repository password secret $password_secret."
+  offsite_backup::_has_credentials "$name" || return 0
   credentials_secret=$(offsite_backup::_secret_name "$name" credentials)
-  secrets::present "$credentials_secret" || return 0
   offsite_backup::_write_secret_file "$(offsite_backup::_credentials_file_path "$name")" "$credentials_secret" \
     || lifecycle::fail "offsite_backup: the credentials secret $credentials_secret is declared but resolved to nothing."
 }
@@ -401,7 +434,7 @@ offsite_backup::_install_check_service() {
   common_env=${ offsite_backup::_common_service_env "$entry"; }
   mapfile -t repository_env <<< "$common_env"
   service::install_calendar \
-    "$(offsite_backup::_service_label "$name")-check" \
+    "$(offsite_backup::_check_service_label "$name")" \
     "$(offsite_backup::_run_script_path)" \
     "${ offsite_backup::_check_schedule "$entry"; }" \
     "MK_OFFSITE_BACKUP_MODE=check" \
@@ -505,6 +538,16 @@ offsite_backup::_service_label() {
   printf 'offsite-backup-%s\n' "${1//_/-}"
 }
 
+# A backend that needs credentials has a credentials secret; a local or sftp
+# repository has none, and gets no credentials file.
+offsite_backup::_has_credentials() {
+  secrets::present "$(offsite_backup::_secret_name "$1" credentials)"
+}
+
+offsite_backup::_check_service_label() {
+  printf '%s-check\n' "$(offsite_backup::_service_label "$1")"
+}
+
 # The restic binary the service units pin. This module installs it, so apply's
 # PATH (brew-prepended) resolves it; the detached daemon's minimal PATH would not,
 # hence pinning the absolute path.
@@ -513,17 +556,17 @@ offsite_backup::_restic_path() {
 }
 
 offsite_backup::_password_file_path() {
-  printf '%s\n' "${XDG_CONFIG_HOME:-$HOME/.config}/machinekit/offsite_backup/$1/repository_password"
+  printf '%s\n' "${ artifacts::module_config_dir offsite_backup; }/$1/repository_password"
 }
 
 offsite_backup::_credentials_file_path() {
-  printf '%s\n' "${XDG_CONFIG_HOME:-$HOME/.config}/machinekit/offsite_backup/$1/credentials"
+  printf '%s\n' "${ artifacts::module_config_dir offsite_backup; }/$1/credentials"
 }
 
 offsite_backup::_manifest_path() {
-  printf '%s\n' "${XDG_DATA_HOME:-$HOME/.local/share}/machinekit/offsite_backup/manifest-$1.tsv"
+  printf '%s\n' "${ artifacts::module_data_dir offsite_backup; }/manifest-$1.tsv"
 }
 
 offsite_backup::_run_script_path() {
-  printf '%s\n' "${XDG_DATA_HOME:-$HOME/.local/share}/machinekit/offsite_backup/restic_run.sh"
+  printf '%s\n' "${ artifacts::module_data_dir offsite_backup; }/restic_run.sh"
 }

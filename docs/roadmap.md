@@ -159,6 +159,12 @@ More as needed (prompt themes, password-manager CLIs as a secrets-fetch layer, a
 
 The [home transform pipeline](#home-transform-pipeline) makes a new one (e.g. decompression) a module declaration rather than new plumbing.
 
+### A failing command inside a capture ends the run
+
+Planned. bash turns `-e` off inside `$(…)` and `${ …; }`, so a command that fails partway through a captured function is skipped over, and the function carries on with partial results. Only `lifecycle::fail`, or a failure in the function's last command, ends the run. Today one capture is strict: the one that reads each module's installed items, because a short read there would offer live installs for removal.
+
+Turning on `shopt -s inherit_errexit` in the entry points would make every capture strict, but it can't be switched on by itself. With it on, a `${ f; }` whose function returns non-zero ends the whole run even when written `x=${ f; } || …` or `if x=${ f; }`, and many lookups return 1 to mean "not set" (`context::get` among them). The work is to move every capture that is allowed to fail onto a form that doesn't, either `$(…)` or a lookup that prints nothing instead of returning 1, and then turn the option on.
+
 ### Secrets pool inventory and delivery
 
 Shipped: `machinekit secrets list` reports which secrets the active modules need — each as required-or-not, generated-if-missing-or-not, and resolved via `pool`, `manager`, or `missing` — plus any stray pool files no active module claims. Modules declare their needs through a `<name>::declared_secrets` hook, using bare logical names (e.g. `tailscale/default`) rather than literal pool paths. It applies nothing to the machine, but when a secrets manager is active it authenticates to it (a network loop, possibly a browser login) so a manager-backed secret's source is reported truthfully, not guessed.
@@ -172,6 +178,10 @@ Shipped: `secrets::resolve` / `secrets::present` / `secrets::backend_for` (`lib/
 ### Per-entry config layering
 
 Shipped: a machine type can change, add to, or turn off one entry of something `common` declares several of, instead of restating the whole set. Collections such as Syncthing folders, backup folders, databases, and repositories are tables keyed by an identifier rather than lists of tables, so the config merge reaches each entry by its key; `enabled = false` turns an inherited entry off; and `additional_<name>` adds to an inherited list, generalizing `additional_modules`, with the module that reads the list deciding where the additions go. See [architecture.md § How machinekit.toml layers](./architecture.md#how-machinekittoml-layers).
+
+### Removing what is no longer configured
+
+Shipped: turning off or deleting an entry, or dropping a module, makes the next apply offer to remove the services, files and Syncthing folders installed for it, behind the same consent as any other outward act. Data is never removed. Modules declare what they install through a `<name>::installed_artifacts` hook, and each apply records the declared set so the next one can tell what dropped out. See [architecture.md § Removing what is no longer configured](./architecture.md#removing-what-is-no-longer-configured).
 
 The roadmap stops being prescriptive here. The architecture supports incremental addition; what gets added is a function of what the framework actually needs in use.
 

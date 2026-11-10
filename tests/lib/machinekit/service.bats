@@ -13,72 +13,89 @@ setup() {
 
 # --- install_interval ---
 
-@test "install_interval schedules the job on the interval kind" {
-  mktest::stub_function service::_install "svc" "/fake/exec" "interval" "300" "FOO=bar"
+@test "install_interval installs the job on the interval kind for this OS" {
+  mktest::stub_function service::_on_os install "svc" "/fake/exec" "interval" "300" "FOO=bar"
   service::install_interval "svc" "/fake/exec" "300" "FOO=bar"
-  mktest::assert_stub_called service::_install "svc" "/fake/exec" "interval" "300" "FOO=bar"
+  mktest::assert_stub_called service::_on_os install "svc" "/fake/exec" "interval" "300" "FOO=bar"
 }
 
 # --- install_calendar ---
 
-@test "install_calendar validates the cron spec, then schedules the calendar kind" {
+@test "install_calendar validates the cron spec, then installs the calendar kind for this OS" {
   mktest::stub_function service::validate_cron "0 3 * * 0"
-  mktest::stub_function service::_install "svc" "/fake/exec" "calendar" "0 3 * * 0" "FOO=bar"
+  mktest::stub_function service::_on_os install "svc" "/fake/exec" "calendar" "0 3 * * 0" "FOO=bar"
   service::install_calendar "svc" "/fake/exec" "0 3 * * 0" "FOO=bar"
   mktest::assert_stub_called_in_order service::validate_cron
-  mktest::assert_stub_called_in_order service::_install "svc" "/fake/exec" "calendar" "0 3 * * 0" "FOO=bar"
+  mktest::assert_stub_called_in_order service::_on_os install "svc" "/fake/exec" "calendar" "0 3 * * 0" "FOO=bar"
 }
 
 @test "install_calendar does not install when the cron spec is invalid" {
   # _validate_cron fails by exiting (lifecycle::fail), so install is skipped only
   # because the process is gone — not by a checked return. Model it as an exit.
   STUB_EXIT=1 mktest::stub_function service::validate_cron
-  mktest::stub_function service::_install
+  mktest::stub_function service::_on_os
   run service::install_calendar "svc" "/fake/exec" "bogus" "FOO=bar"
   [ "$status" -ne 0 ]
-  mktest::assert_stub_not_called service::_install
+  mktest::assert_stub_not_called service::_on_os
 }
 
-# --- _install (OS dispatch) ---
+# --- uninstall ---
 
-@test "_install dispatches to the darwin installer on macOS" {
+@test "uninstall removes the service for this OS" {
+  mktest::stub_function service::_on_os uninstall "svc"
+  service::uninstall "svc"
+  mktest::assert_stub_called service::_on_os uninstall "svc"
+}
+
+# --- installed_labels ---
+
+@test "installed_labels lists the installed services for this OS" {
+  STUB_OUTPUT=$'svc-one\nsvc-two' mktest::stub_function service::_on_os installed_labels
+  run service::installed_labels
+  [ "$output" = $'svc-one\nsvc-two' ]
+}
+
+# --- _on_os (OS dispatch) ---
+
+@test "_on_os runs the darwin form of the operation on macOS" {
   STUB_OUTPUT="darwin" mktest::stub_function context::get "os.family"
   mktest::stub_function service::_install_darwin "svc" "/fake/exec" "interval" "300" "FOO=bar"
   mktest::stub_function service::_install_linux
-  service::_install "svc" "/fake/exec" "interval" "300" "FOO=bar"
+  service::_on_os install "svc" "/fake/exec" "interval" "300" "FOO=bar"
   mktest::assert_stub_called service::_install_darwin "svc" "/fake/exec" "interval" "300" "FOO=bar"
   mktest::assert_stub_not_called service::_install_linux
 }
 
-@test "_install dispatches to the linux installer on Linux" {
+@test "_on_os runs the linux form of the operation on Linux" {
   STUB_OUTPUT="linux" mktest::stub_function context::get "os.family"
-  mktest::stub_function service::_install_darwin
-  mktest::stub_function service::_install_linux "svc" "/fake/exec" "interval" "300" "FOO=bar"
-  service::_install "svc" "/fake/exec" "interval" "300" "FOO=bar"
-  mktest::assert_stub_called service::_install_linux "svc" "/fake/exec" "interval" "300" "FOO=bar"
-  mktest::assert_stub_not_called service::_install_darwin
+  mktest::stub_function service::_uninstall_darwin
+  mktest::stub_function service::_uninstall_linux "svc"
+  service::_on_os uninstall "svc"
+  mktest::assert_stub_called service::_uninstall_linux "svc"
+  mktest::assert_stub_not_called service::_uninstall_darwin
 }
 
-@test "_install fails on an unsupported os.family" {
+@test "_on_os fails on an unsupported os.family" {
   STUB_OUTPUT="plan9" mktest::stub_function context::get "os.family"
   STUB_EXIT=1 mktest::stub_function lifecycle::fail
-  run service::_install "svc" "/fake/exec" "interval" "300"
+  run service::_on_os install "svc" "/fake/exec" "interval" "300"
   [ "$status" -ne 0 ]
   MATCH="os.family" mktest::assert_stub_called lifecycle::fail
 }
 
-@test "_install stops when reading the os family fails" {
+@test "_on_os stops when reading the os family fails" {
   STUB_EXIT=97 mktest::stub_function context::get "os.family"
   STUB_EXIT=1 mktest::stub_function lifecycle::fail
   mktest::stub_function service::_install_darwin
   mktest::stub_function service::_install_linux
-  run service::_install "svc" "/fake/exec" "interval" "300"
+  run service::_on_os install "svc" "/fake/exec" "interval" "300"
   [ "$status" -eq 97 ]
 }
 
 # --- _install_darwin ---
 
 @test "_install_darwin writes the system LaunchDaemon, threading the resolved parts, and reloads it" {
+  STUB_OUTPUT="/fake/daemons" mktest::stub_function service::_launchd_daemons_dir
   STUB_OUTPUT="com.machinekit.svc" mktest::stub_function service::_launchd_label "svc"
   STUB_OUTPUT="STANZA" mktest::stub_function service::_launchd_schedule_stanza "somekind" "someval"
   STUB_OUTPUT="ENVDICT" mktest::stub_function service::_launchd_env_dict "FOO=bar"
@@ -87,7 +104,7 @@ setup() {
   mktest::stub_function service::_plist_content "com.machinekit.svc" "/fake/exec" "alice" "STANZA" "ENVDICT"
   mktest::stub_function sudo
   service::_install_darwin "svc" "/fake/exec" "somekind" "someval" "FOO=bar"
-  local plist="/Library/LaunchDaemons/com.machinekit.svc.plist"
+  local plist="/fake/daemons/com.machinekit.svc.plist"
   mktest::assert_stub_called service::_plist_content "com.machinekit.svc" "/fake/exec" "alice" "STANZA" "ENVDICT"
   mktest::assert_stub_called sudo "tee" "$plist"
   mktest::assert_stub_called sudo "launchctl" "bootout" "system" "$plist"
@@ -95,6 +112,7 @@ setup() {
 }
 
 @test "_install_darwin stops when rendering the schedule fails" {
+  STUB_OUTPUT="/fake/daemons" mktest::stub_function service::_launchd_daemons_dir
   STUB_OUTPUT="com.machinekit.svc" mktest::stub_function service::_launchd_label "svc"
   STUB_EXIT=97 mktest::stub_function service::_launchd_schedule_stanza "somekind" "someval"
   mktest::stub_function service::_launchd_env_dict
@@ -108,7 +126,8 @@ setup() {
 # --- _install_linux ---
 
 @test "_install_linux writes the user units, threading the resolved parts, and enables the timer with linger" {
-  HOME="$BATS_TEST_TMPDIR"
+  local unit_dir="$BATS_TEST_TMPDIR/units"
+  STUB_OUTPUT="$unit_dir" mktest::stub_function service::_systemd_user_unit_dir
   STUB_OUTPUT="machinekit-svc" mktest::stub_function service::_systemd_unit_name "svc"
   STUB_OUTPUT="ENVLINES" mktest::stub_function service::_systemd_env_lines "FOO=bar"
   STUB_OUTPUT="SCHEDLINES" mktest::stub_function service::_systemd_schedule_lines "somekind" "someval"
@@ -117,15 +136,15 @@ setup() {
   mktest::stub_function sudo
   mktest::stub_function systemctl
   service::_install_linux "svc" "/fake/exec" "somekind" "someval" "FOO=bar"
-  [ "$(cat "$HOME/.config/systemd/user/machinekit-svc.service")" = "SERVICE" ]
-  [ "$(cat "$HOME/.config/systemd/user/machinekit-svc.timer")" = "TIMER" ]
+  [ "$(cat "$unit_dir/machinekit-svc.service")" = "SERVICE" ]
+  [ "$(cat "$unit_dir/machinekit-svc.timer")" = "TIMER" ]
   MATCH="enable-linger" mktest::assert_stub_called sudo
   mktest::assert_stub_called systemctl "--user" "daemon-reload"
   mktest::assert_stub_called systemctl "--user" "enable" "--now" "machinekit-svc.timer"
 }
 
 @test "_install_linux stops when rendering the schedule fails" {
-  HOME="$BATS_TEST_TMPDIR"
+  STUB_OUTPUT="$BATS_TEST_TMPDIR/units" mktest::stub_function service::_systemd_user_unit_dir
   STUB_OUTPUT="machinekit-svc" mktest::stub_function service::_systemd_unit_name "svc"
   mktest::stub_function service::_systemd_env_lines
   STUB_EXIT=97 mktest::stub_function service::_systemd_schedule_lines "somekind" "someval"
@@ -135,6 +154,108 @@ setup() {
   mktest::stub_function systemctl
   run service::_install_linux "svc" "/fake/exec" "somekind" "someval"
   [ "$status" -eq 97 ]
+}
+
+# --- _uninstall_darwin ---
+
+@test "_uninstall_darwin unloads the LaunchDaemon and deletes its plist" {
+  STUB_OUTPUT="/fake/daemons" mktest::stub_function service::_launchd_daemons_dir
+  STUB_OUTPUT="com.machinekit.svc" mktest::stub_function service::_launchd_label "svc"
+  mktest::stub_function sudo
+  service::_uninstall_darwin "svc"
+  local plist="/fake/daemons/com.machinekit.svc.plist"
+  mktest::assert_stub_called_in_order sudo "launchctl" "bootout" "system" "$plist"
+  mktest::assert_stub_called_in_order sudo "rm" "-f" "--" "$plist"
+}
+
+@test "_uninstall_darwin still deletes the plist when the daemon was not loaded" {
+  STUB_OUTPUT="/fake/daemons" mktest::stub_function service::_launchd_daemons_dir
+  STUB_OUTPUT="com.machinekit.svc" mktest::stub_function service::_launchd_label "svc"
+  local plist="/fake/daemons/com.machinekit.svc.plist"
+  STUB_RETURN=5 mktest::stub_function sudo "launchctl" "bootout" "system" "$plist"
+  mktest::stub_function sudo "rm" "-f" "--" "$plist"
+  service::_uninstall_darwin "svc"
+  mktest::assert_stub_called sudo "rm" "-f" "--" "$plist"
+}
+
+# --- _uninstall_linux ---
+
+@test "_uninstall_linux stops the timer and service, deletes both units, and reloads" {
+  local unit_dir="$BATS_TEST_TMPDIR/units"
+  mkdir -p "$unit_dir"
+  : > "$unit_dir/machinekit-svc.service"
+  : > "$unit_dir/machinekit-svc.timer"
+  : > "$unit_dir/machinekit-other.timer"
+  STUB_OUTPUT="$unit_dir" mktest::stub_function service::_systemd_user_unit_dir
+  STUB_OUTPUT="machinekit-svc" mktest::stub_function service::_systemd_unit_name "svc"
+  mktest::stub_function systemctl
+  service::_uninstall_linux "svc"
+  mktest::assert_stub_called_in_order systemctl "--user" "disable" "--now" "machinekit-svc.timer"
+  mktest::assert_stub_called_in_order systemctl "--user" "stop" "machinekit-svc.service"
+  mktest::assert_stub_called_in_order systemctl "--user" "daemon-reload"
+  [ ! -e "$unit_dir/machinekit-svc.service" ]
+  [ ! -e "$unit_dir/machinekit-svc.timer" ]
+  [ -e "$unit_dir/machinekit-other.timer" ]
+}
+
+@test "_uninstall_linux still deletes the units when the timer was not enabled" {
+  local unit_dir="$BATS_TEST_TMPDIR/units"
+  mkdir -p "$unit_dir"
+  : > "$unit_dir/machinekit-svc.timer"
+  STUB_OUTPUT="$unit_dir" mktest::stub_function service::_systemd_user_unit_dir
+  STUB_OUTPUT="machinekit-svc" mktest::stub_function service::_systemd_unit_name "svc"
+  STUB_RETURN=5 mktest::stub_function systemctl "--user" "disable" "--now" "machinekit-svc.timer"
+  STUB_RETURN=5 mktest::stub_function systemctl "--user" "stop" "machinekit-svc.service"
+  mktest::stub_function systemctl "--user" "daemon-reload"
+  service::_uninstall_linux "svc"
+  [ ! -e "$unit_dir/machinekit-svc.timer" ]
+}
+
+# --- _installed_labels_darwin ---
+
+@test "_installed_labels_darwin lists the label of each machinekit LaunchDaemon" {
+  local daemons_dir="$BATS_TEST_TMPDIR/daemons"
+  mkdir -p "$daemons_dir"
+  : > "$daemons_dir/com.machinekit.svc-one.plist"
+  : > "$daemons_dir/com.machinekit.svc-two.plist"
+  : > "$daemons_dir/com.example.other.plist"
+  STUB_OUTPUT="$daemons_dir" mktest::stub_function service::_launchd_daemons_dir
+  STUB_OUTPUT="com.machinekit." mktest::stub_function service::_launchd_label ""
+  run service::_installed_labels_darwin
+  [ "$status" -eq 0 ]
+  [ "$output" = $'svc-one\nsvc-two' ]
+}
+
+@test "_installed_labels_darwin lists nothing when no machinekit LaunchDaemon exists" {
+  STUB_OUTPUT="$BATS_TEST_TMPDIR/empty" mktest::stub_function service::_launchd_daemons_dir
+  STUB_OUTPUT="com.machinekit." mktest::stub_function service::_launchd_label ""
+  run service::_installed_labels_darwin
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+# --- _installed_labels_linux ---
+
+@test "_installed_labels_linux lists the label of each machinekit timer" {
+  local unit_dir="$BATS_TEST_TMPDIR/units"
+  mkdir -p "$unit_dir"
+  : > "$unit_dir/machinekit-svc-one.timer"
+  : > "$unit_dir/machinekit-svc-one.service"
+  : > "$unit_dir/machinekit-svc-two.timer"
+  : > "$unit_dir/other.timer"
+  STUB_OUTPUT="$unit_dir" mktest::stub_function service::_systemd_user_unit_dir
+  STUB_OUTPUT="machinekit-" mktest::stub_function service::_systemd_unit_name ""
+  run service::_installed_labels_linux
+  [ "$status" -eq 0 ]
+  [ "$output" = $'svc-one\nsvc-two' ]
+}
+
+@test "_installed_labels_linux lists nothing when no machinekit timer exists" {
+  STUB_OUTPUT="$BATS_TEST_TMPDIR/empty" mktest::stub_function service::_systemd_user_unit_dir
+  STUB_OUTPUT="machinekit-" mktest::stub_function service::_systemd_unit_name ""
+  run service::_installed_labels_linux
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
 }
 
 # --- unit content generators (pure) ---
@@ -450,6 +571,16 @@ setup() {
 @test "_systemd_unit_name namespaces the label under machinekit-" {
   run service::_systemd_unit_name "the-service-name"
   [ "$output" = "machinekit-the-service-name" ]
+}
+
+@test "_launchd_daemons_dir is the system LaunchDaemons dir" {
+  run service::_launchd_daemons_dir
+  [ "$output" = "/Library/LaunchDaemons" ]
+}
+
+@test "_systemd_user_unit_dir is the user unit dir under HOME" {
+  HOME="/fake/home" run service::_systemd_user_unit_dir
+  [ "$output" = "/fake/home/.config/systemd/user" ]
 }
 
 @test "_run_as_user prefers SUDO_USER (the real user behind a sudo'd apply)" {

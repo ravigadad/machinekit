@@ -163,6 +163,67 @@ offsite_backup/second_repo/credentials\tfalse\tfalse' ]
   [ "$status" -eq 97 ]
 }
 
+# --- installed_file_patterns ---
+
+@test "installed_file_patterns names the run script, each repository's manifest and each repository's secret files" {
+  run offsite_backup::installed_file_patterns
+  [ "$status" -eq 0 ]
+  [ "$output" = $'data\trestic_run.sh\ndata\tmanifest-*.tsv\nconfig\t*/repository_password\nconfig\t*/credentials' ]
+}
+
+# --- installed_artifacts ---
+
+@test "installed_artifacts declares the shared run script, then each repository's artifacts" {
+  STUB_OUTPUT='[{"name":"one"},{"name":"two"}]' mktest::stub_function offsite_backup::_repositories
+  STUB_OUTPUT="/fake/restic_run.sh" mktest::stub_function offsite_backup::_run_script_path
+  STUB_OUTPUT=$'service\tone' mktest::stub_function offsite_backup::_repository_artifacts '{"name":"one"}'
+  STUB_OUTPUT=$'service\ttwo' mktest::stub_function offsite_backup::_repository_artifacts '{"name":"two"}'
+  run offsite_backup::installed_artifacts
+  [ "$status" -eq 0 ]
+  [ "$output" = $'file\t/fake/restic_run.sh\nservice\tone\nservice\ttwo' ]
+}
+
+@test "installed_artifacts declares nothing when no repositories are configured" {
+  STUB_OUTPUT="" mktest::stub_function offsite_backup::_repositories
+  run offsite_backup::installed_artifacts
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "installed_artifacts stops when reading the repositories fails" {
+  STUB_EXIT=97 mktest::stub_function offsite_backup::_repositories
+  run offsite_backup::installed_artifacts
+  [ "$status" -eq 97 ]
+}
+
+# --- _repository_artifacts ---
+
+@test "_repository_artifacts declares both services, the manifest, and the password and credentials files" {
+  STUB_OUTPUT="fake_repo" mktest::stub_function offsite_backup::_name "$ENTRY"
+  STUB_OUTPUT="offsite-backup-fake-repo" mktest::stub_function offsite_backup::_service_label "fake_repo"
+  STUB_OUTPUT="offsite-backup-fake-repo-check" mktest::stub_function offsite_backup::_check_service_label "fake_repo"
+  STUB_OUTPUT="/fake/manifest.tsv" mktest::stub_function offsite_backup::_manifest_path "fake_repo"
+  STUB_OUTPUT="/fake/repository_password" mktest::stub_function offsite_backup::_password_file_path "fake_repo"
+  STUB_OUTPUT="/fake/credentials" mktest::stub_function offsite_backup::_credentials_file_path "fake_repo"
+  mktest::stub_function offsite_backup::_has_credentials "fake_repo"
+  run offsite_backup::_repository_artifacts "$ENTRY"
+  [ "$status" -eq 0 ]
+  [ "$output" = $'service\toffsite-backup-fake-repo\nservice\toffsite-backup-fake-repo-check\nfile\t/fake/manifest.tsv\nfile\t/fake/repository_password\nfile\t/fake/credentials' ]
+}
+
+@test "_repository_artifacts leaves out the credentials file when the repository has no credentials secret" {
+  STUB_OUTPUT="fake_repo" mktest::stub_function offsite_backup::_name "$ENTRY"
+  STUB_OUTPUT="offsite-backup-fake-repo" mktest::stub_function offsite_backup::_service_label "fake_repo"
+  STUB_OUTPUT="offsite-backup-fake-repo-check" mktest::stub_function offsite_backup::_check_service_label "fake_repo"
+  STUB_OUTPUT="/fake/manifest.tsv" mktest::stub_function offsite_backup::_manifest_path "fake_repo"
+  STUB_OUTPUT="/fake/repository_password" mktest::stub_function offsite_backup::_password_file_path "fake_repo"
+  mktest::stub_function offsite_backup::_credentials_file_path
+  STUB_RETURN=1 mktest::stub_function offsite_backup::_has_credentials "fake_repo"
+  run offsite_backup::_repository_artifacts "$ENTRY"
+  [ "$status" -eq 0 ]
+  [ "$output" = $'service\toffsite-backup-fake-repo\nservice\toffsite-backup-fake-repo-check\nfile\t/fake/manifest.tsv\nfile\t/fake/repository_password' ]
+}
+
 # --- install ---
 
 @test "install installs restic and the run script once, then wires each repository" {
@@ -506,7 +567,7 @@ offsite_backup/second_repo/credentials\tfalse\tfalse' ]
     mktest::stub_function offsite_backup::_secret_name "fake_repo" credentials
   STUB_OUTPUT="/fake/password" mktest::stub_function offsite_backup::_password_file_path "fake_repo"
   STUB_OUTPUT="/fake/credentials" mktest::stub_function offsite_backup::_credentials_file_path "fake_repo"
-  mktest::stub_function secrets::present "offsite_backup/fake_repo/credentials"
+  mktest::stub_function offsite_backup::_has_credentials "fake_repo"
   mktest::stub_function offsite_backup::_write_secret_file "/fake/password" "offsite_backup/fake_repo/repository_password"
   mktest::stub_function offsite_backup::_write_secret_file "/fake/credentials" "offsite_backup/fake_repo/credentials"
   offsite_backup::_install_secret_files "fake_repo"
@@ -523,7 +584,7 @@ offsite_backup/second_repo/credentials\tfalse\tfalse' ]
     mktest::stub_function offsite_backup::_secret_name "fake_repo" credentials
   STUB_OUTPUT="/fake/password" mktest::stub_function offsite_backup::_password_file_path "fake_repo"
   STUB_OUTPUT="/fake/credentials" mktest::stub_function offsite_backup::_credentials_file_path "fake_repo"
-  STUB_RETURN=1 mktest::stub_function secrets::present "offsite_backup/fake_repo/credentials"
+  STUB_RETURN=1 mktest::stub_function offsite_backup::_has_credentials "fake_repo"
   mktest::stub_function offsite_backup::_write_secret_file "/fake/password" "offsite_backup/fake_repo/repository_password"
   offsite_backup::_install_secret_files "fake_repo"
   mktest::assert_stub_not_called offsite_backup::_write_secret_file "/fake/credentials" "offsite_backup/fake_repo/credentials"
@@ -828,7 +889,7 @@ EOF
 
 @test "_install_check_service schedules the same script in check mode on this repository's own cadence" {
   STUB_OUTPUT="fake_repo" mktest::stub_function offsite_backup::_name "$ENTRY"
-  STUB_OUTPUT="offsite-backup-fake-repo" mktest::stub_function offsite_backup::_service_label "fake_repo"
+  STUB_OUTPUT="offsite-backup-fake-repo-check" mktest::stub_function offsite_backup::_check_service_label "fake_repo"
   STUB_OUTPUT="/s/restic_run.sh" mktest::stub_function offsite_backup::_run_script_path
   STUB_OUTPUT="0 4 * * 0" mktest::stub_function offsite_backup::_check_schedule "$ENTRY"
   STUB_OUTPUT="COMMON=env" mktest::stub_function offsite_backup::_common_service_env "$ENTRY"
@@ -846,7 +907,7 @@ EOF
 
 @test "_install_check_service stops when building the repository's environment fails" {
   STUB_OUTPUT="fake_repo" mktest::stub_function offsite_backup::_name "$ENTRY"
-  STUB_OUTPUT="offsite-backup-fake-repo" mktest::stub_function offsite_backup::_service_label "fake_repo"
+  STUB_OUTPUT="offsite-backup-fake-repo-check" mktest::stub_function offsite_backup::_check_service_label "fake_repo"
   STUB_OUTPUT="/s/restic_run.sh" mktest::stub_function offsite_backup::_run_script_path
   STUB_OUTPUT="0 4 * * 0" mktest::stub_function offsite_backup::_check_schedule "$ENTRY"
   STUB_EXIT=97 mktest::stub_function offsite_backup::_common_service_env "$ENTRY"
@@ -859,7 +920,7 @@ EOF
 
 @test "_install_check_service stops when reading the check schedule fails" {
   STUB_OUTPUT="fake_repo" mktest::stub_function offsite_backup::_name "$ENTRY"
-  STUB_OUTPUT="offsite-backup-fake-repo" mktest::stub_function offsite_backup::_service_label "fake_repo"
+  STUB_OUTPUT="offsite-backup-fake-repo-check" mktest::stub_function offsite_backup::_check_service_label "fake_repo"
   STUB_OUTPUT="/s/restic_run.sh" mktest::stub_function offsite_backup::_run_script_path
   STUB_EXIT=97 mktest::stub_function offsite_backup::_check_schedule "$ENTRY"
   STUB_OUTPUT="COMMON=env" mktest::stub_function offsite_backup::_common_service_env "$ENTRY"
@@ -872,7 +933,7 @@ EOF
 
 @test "_install_check_service stops when reading the read-data flag fails" {
   STUB_OUTPUT="fake_repo" mktest::stub_function offsite_backup::_name "$ENTRY"
-  STUB_OUTPUT="offsite-backup-fake-repo" mktest::stub_function offsite_backup::_service_label "fake_repo"
+  STUB_OUTPUT="offsite-backup-fake-repo-check" mktest::stub_function offsite_backup::_check_service_label "fake_repo"
   STUB_OUTPUT="/s/restic_run.sh" mktest::stub_function offsite_backup::_run_script_path
   STUB_OUTPUT="0 4 * * 0" mktest::stub_function offsite_backup::_check_schedule "$ENTRY"
   STUB_OUTPUT="COMMON=env" mktest::stub_function offsite_backup::_common_service_env "$ENTRY"
@@ -1056,6 +1117,25 @@ EOF
   [ "$output" = "offsite-backup-fake-repo" ]
 }
 
+@test "_has_credentials asks whether the repository's credentials secret exists" {
+  STUB_OUTPUT="offsite_backup/fake_repo/credentials" mktest::stub_function offsite_backup::_secret_name "fake_repo" credentials
+  mktest::stub_function secrets::present "offsite_backup/fake_repo/credentials"
+  offsite_backup::_has_credentials "fake_repo"
+}
+
+@test "_has_credentials is false when the repository has no credentials secret" {
+  STUB_OUTPUT="offsite_backup/fake_repo/credentials" mktest::stub_function offsite_backup::_secret_name "fake_repo" credentials
+  STUB_RETURN=1 mktest::stub_function secrets::present "offsite_backup/fake_repo/credentials"
+  run offsite_backup::_has_credentials "fake_repo"
+  [ "$status" -eq 1 ]
+}
+
+@test "_check_service_label is the repository's service label with a check suffix" {
+  STUB_OUTPUT="offsite-backup-fake-repo" mktest::stub_function offsite_backup::_service_label "fake_repo"
+  run offsite_backup::_check_service_label "fake_repo"
+  [ "$output" = "offsite-backup-fake-repo-check" ]
+}
+
 @test "_repository_ready reads the outcome install recorded for that repository" {
   STUB_OUTPUT="true" mktest::stub_function context::get \
     "offsite_backup.repositories.fake_repo.ready" "--default" false
@@ -1072,30 +1152,27 @@ EOF
   [ "$output" = "$fakebin/restic" ]
 }
 
-@test "_password_file_path locates the password under the repository's own config dir" {
-  HOME=/fake/home
-  unset XDG_CONFIG_HOME
+@test "_password_file_path places the password, under the repository's own dir in the module's own config dir" {
+  STUB_OUTPUT="/fake/config/offsite_backup" mktest::stub_function artifacts::module_config_dir offsite_backup
   run offsite_backup::_password_file_path "fake_repo"
-  [ "$output" = "/fake/home/.config/machinekit/offsite_backup/fake_repo/repository_password" ]
+  [ "$output" = "/fake/config/offsite_backup/fake_repo/repository_password" ]
 }
 
-@test "_credentials_file_path locates the credentials under the repository's own config dir" {
-  HOME=/fake/home
-  unset XDG_CONFIG_HOME
+@test "_credentials_file_path places the credentials, under the repository's own dir in the module's own config dir" {
+  STUB_OUTPUT="/fake/config/offsite_backup" mktest::stub_function artifacts::module_config_dir offsite_backup
   run offsite_backup::_credentials_file_path "fake_repo"
-  [ "$output" = "/fake/home/.config/machinekit/offsite_backup/fake_repo/credentials" ]
+  [ "$output" = "/fake/config/offsite_backup/fake_repo/credentials" ]
 }
 
-@test "_manifest_path gives each repository its own manifest" {
-  HOME=/fake/home
-  unset XDG_DATA_HOME
+@test "_manifest_path places each repository's own manifest in the module's own data dir" {
+  STUB_OUTPUT="/fake/data/offsite_backup" mktest::stub_function artifacts::module_data_dir offsite_backup
   run offsite_backup::_manifest_path "fake_repo"
-  [ "$output" = "/fake/home/.local/share/machinekit/offsite_backup/manifest-fake_repo.tsv" ]
+  [ "$output" = "/fake/data/offsite_backup/manifest-fake_repo.tsv" ]
 }
 
-@test "_run_script_path locates the one installed run script under the default data dir" {
-  HOME=/fake/home
-  unset XDG_DATA_HOME
+@test "_run_script_path places the one installed run script in the module's own data dir" {
+  STUB_OUTPUT="/fake/data/offsite_backup" mktest::stub_function artifacts::module_data_dir offsite_backup
   run offsite_backup::_run_script_path
-  [ "$output" = "/fake/home/.local/share/machinekit/offsite_backup/restic_run.sh" ]
+  [ "$output" = "/fake/data/offsite_backup/restic_run.sh" ]
 }
+

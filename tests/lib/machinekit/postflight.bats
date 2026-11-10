@@ -27,7 +27,7 @@ setup() {
 # --- postflight::_module_group ---
 
 @test "_module_group prints the heading once, then each emitting module's header and facts, in module order" {
-  STUB_OUTPUT=$'fake_a\nfake_b' mktest::stub_function context::get_array modules.active
+  STUB_OUTPUT=$'fake_a\nfake_b' mktest::stub_function modules::active_defining pf_info
   fake_a::pf_info() { printf 'alpha configured a thing\n'; }
   fake_b::pf_info() { printf 'beta configured a thing\n'; }
 
@@ -44,7 +44,7 @@ setup() {
 }
 
 @test "_module_group indents fact lines under the module header" {
-  STUB_OUTPUT=$'fake_a' mktest::stub_function context::get_array modules.active
+  STUB_OUTPUT=$'fake_a' mktest::stub_function modules::active_defining pf_info
   fake_a::pf_info() { printf 'a configured fact\n'; }
 
   postflight::_module_group pf_info "Group Title" ""
@@ -53,7 +53,7 @@ setup() {
 }
 
 @test "_module_group prints every line of a multi-line hook" {
-  STUB_OUTPUT=$'fake_a' mktest::stub_function context::get_array modules.active
+  STUB_OUTPUT=$'fake_a' mktest::stub_function modules::active_defining pf_info
   fake_a::pf_info() { printf 'line one\nline two\n'; }
 
   postflight::_module_group pf_info "Group Title" ""
@@ -63,7 +63,7 @@ setup() {
 }
 
 @test "_module_group wraps the module header in the group's color, reset after" {
-  STUB_OUTPUT=$'fake_a' mktest::stub_function context::get_array modules.active
+  STUB_OUTPUT=$'fake_a' mktest::stub_function modules::active_defining pf_info
   fake_a::pf_info() { printf 'a fact\n'; }
 
   postflight::_module_group pf_info "Group Title" "<color>"
@@ -72,19 +72,8 @@ setup() {
   mktest::assert_stub_called logging::info "<color>fake_a${MK_COLOR_RESET}"
 }
 
-@test "_module_group skips a module that does not define the hook" {
-  STUB_OUTPUT=$'fake_a\nfake_b' mktest::stub_function context::get_array modules.active
-  # fake_a defines no pf_info hook.
-  fake_b::pf_info() { printf 'beta configured a thing\n'; }
-
-  postflight::_module_group pf_info "Group Title" ""
-
-  MATCH="fake_a" mktest::assert_stub_not_called logging::info
-  MATCH="fake_b" mktest::assert_stub_called logging::info
-}
-
 @test "_module_group skips a module whose hook emits nothing" {
-  STUB_OUTPUT=$'fake_a\nfake_b' mktest::stub_function context::get_array modules.active
+  STUB_OUTPUT=$'fake_a\nfake_b' mktest::stub_function modules::active_defining pf_info
   fake_a::pf_info() { return 0; }
   fake_b::pf_info() { printf 'beta configured a thing\n'; }
 
@@ -95,13 +84,26 @@ setup() {
 }
 
 @test "_module_group prints no heading when no module emits" {
-  STUB_OUTPUT=$'fake_a' mktest::stub_function context::get_array modules.active
+  STUB_OUTPUT=$'fake_a' mktest::stub_function modules::active_defining pf_info
   fake_a::pf_info() { return 0; }
 
   postflight::_module_group pf_info "Group Title" ""
 
   mktest::assert_stub_not_called logging::step
   mktest::assert_stub_not_called logging::info
+}
+
+@test "_module_group stops when listing the modules that define the hook fails" {
+  STUB_EXIT=97 mktest::stub_function modules::active_defining pf_info
+  run postflight::_module_group pf_info "Group Title" ""
+  [ "$status" -eq 97 ]
+}
+
+@test "_module_group stops when a module's hook fails" {
+  STUB_OUTPUT=$'fake_a' mktest::stub_function modules::active_defining pf_info
+  STUB_EXIT=97 mktest::stub_function fake_a::pf_info
+  run postflight::_module_group pf_info "Group Title" ""
+  [ "$status" -eq 97 ]
 }
 
 # --- postflight::run ---

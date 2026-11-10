@@ -86,6 +86,38 @@ setup() {
   [ "$status" -eq 97 ]
 }
 
+# --- installed_file_patterns ---
+
+@test "installed_file_patterns names the manifest and the dump script" {
+  run postgres_dump::installed_file_patterns
+  [ "$status" -eq 0 ]
+  [ "$output" = $'data\tmanifest.tsv\ndata\tdump.sh' ]
+}
+
+# --- installed_artifacts ---
+
+@test "installed_artifacts declares the service, its manifest and its dump script" {
+  STUB_OUTPUT='[{"name":"the_db"}]' mktest::stub_function postgres_dump::_databases
+  STUB_OUTPUT="/fake/manifest.tsv" mktest::stub_function postgres_dump::_manifest_path
+  STUB_OUTPUT="/fake/dump.sh" mktest::stub_function postgres_dump::_dump_script_path
+  run postgres_dump::installed_artifacts
+  [ "$status" -eq 0 ]
+  [ "$output" = $'service\tpostgres-dump\nfile\t/fake/manifest.tsv\nfile\t/fake/dump.sh' ]
+}
+
+@test "installed_artifacts declares nothing when no databases are configured" {
+  STUB_OUTPUT="" mktest::stub_function postgres_dump::_databases
+  run postgres_dump::installed_artifacts
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "installed_artifacts stops when reading the databases fails" {
+  STUB_EXIT=97 mktest::stub_function postgres_dump::_databases
+  run postgres_dump::installed_artifacts
+  [ "$status" -eq 97 ]
+}
+
 # --- install ---
 
 @test "install lays down the manifest, the dump script, and the service" {
@@ -439,23 +471,15 @@ setup() {
   [ -z "$output" ]
 }
 
-@test "_manifest_path locates the manifest under the default data dir" {
-  HOME=/fake/home
-  unset XDG_DATA_HOME
+@test "_manifest_path places the manifest in the module's own data dir" {
+  STUB_OUTPUT="/fake/data/postgres_dump" mktest::stub_function artifacts::module_data_dir postgres_dump
   run postgres_dump::_manifest_path
-  [ "$output" = "/fake/home/.local/share/machinekit/postgres_dump/manifest.tsv" ]
+  [ "$output" = "/fake/data/postgres_dump/manifest.tsv" ]
 }
 
-@test "_manifest_path honors XDG_DATA_HOME" {
-  HOME=/fake/home
-  XDG_DATA_HOME=/fake/home/.xdg-data
-  run postgres_dump::_manifest_path
-  [ "$output" = "/fake/home/.xdg-data/machinekit/postgres_dump/manifest.tsv" ]
-}
-
-@test "_dump_script_path locates the installed dump script under the default data dir" {
-  HOME=/fake/home
-  unset XDG_DATA_HOME
+@test "_dump_script_path places the installed dump script in the module's own data dir" {
+  STUB_OUTPUT="/fake/data/postgres_dump" mktest::stub_function artifacts::module_data_dir postgres_dump
   run postgres_dump::_dump_script_path
-  [ "$output" = "/fake/home/.local/share/machinekit/postgres_dump/dump.sh" ]
+  [ "$output" = "/fake/data/postgres_dump/dump.sh" ]
 }
+

@@ -25,26 +25,29 @@ setup() {
 
 # --- preflight::run ---
 
-@test "run resolves inputs, readies the secrets manager, builds staging, then runs module preflights" {
+@test "run resolves inputs, readies the secrets manager, builds staging, runs module preflights, then plans removals" {
   mktest::stub_function preflight::resolve_inputs
   mktest::stub_function secrets_manager::ensure_ready
   mktest::stub_function secrets::assert_age_key_not_pooled
   mktest::stub_function home::transforms::register_from_modules
   mktest::stub_function home::staging::build
   mktest::stub_function modules::run_preflights
+  mktest::stub_function artifacts::plan
   preflight::run
   # Ordered: inputs resolve first; the secrets manager is readied before module
   # preflights, which ask whether their secrets exist; the age-key-not-pooled
   # invariant is asserted in the main shell (where its lifecycle::fail can halt);
   # the transform registry and staging tree are built from the resolved active
   # set; and the module preflights query the staging tree (via will_exist), so it
-  # must exist before they run.
+  # must exist before they run. Removals are planned last, once the module
+  # preflights have rejected any config the declarations would read.
   mktest::assert_stub_called_in_order preflight::resolve_inputs
   mktest::assert_stub_called_in_order secrets_manager::ensure_ready
   mktest::assert_stub_called_in_order secrets::assert_age_key_not_pooled
   mktest::assert_stub_called_in_order home::transforms::register_from_modules
   mktest::assert_stub_called_in_order home::staging::build
   mktest::assert_stub_called_in_order modules::run_preflights
+  mktest::assert_stub_called_in_order artifacts::plan
 }
 
 # --- preflight::resolve_inputs ---

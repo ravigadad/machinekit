@@ -104,6 +104,50 @@ setup() {
   [ "$status" -eq 97 ]
 }
 
+# --- installed_file_patterns ---
+
+@test "installed_file_patterns names the manifest, the push script and every ssh key file" {
+  run git_backup::installed_file_patterns
+  [ "$status" -eq 0 ]
+  [ "$output" = $'data\tmanifest.tsv\ndata\tpush.sh\nconfig\tssh_keys/*' ]
+}
+
+# --- installed_artifacts ---
+
+@test "installed_artifacts declares the service, its manifest and push script, and each referenced key file" {
+  STUB_OUTPUT='[{"path":"/fake/folder"}]' mktest::stub_function git_backup::_folders
+  STUB_OUTPUT="/fake/manifest.tsv" mktest::stub_function git_backup::_manifest_path
+  STUB_OUTPUT="/fake/push.sh" mktest::stub_function git_backup::_push_script_path
+  STUB_OUTPUT=$'deploy\nmirror' mktest::stub_function git_backup::_referenced_key_names
+  STUB_OUTPUT="/fake/keys/deploy" mktest::stub_function git_backup::_key_path deploy
+  STUB_OUTPUT="/fake/keys/mirror" mktest::stub_function git_backup::_key_path mirror
+  run git_backup::installed_artifacts
+  [ "$status" -eq 0 ]
+  [ "$output" = $'service\tgit-backup\nfile\t/fake/manifest.tsv\nfile\t/fake/push.sh\nfile\t/fake/keys/deploy\nfile\t/fake/keys/mirror' ]
+}
+
+@test "installed_artifacts declares nothing when no folders are configured" {
+  STUB_OUTPUT="" mktest::stub_function git_backup::_folders
+  run git_backup::installed_artifacts
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "installed_artifacts stops when reading the folders fails" {
+  STUB_EXIT=97 mktest::stub_function git_backup::_folders
+  run git_backup::installed_artifacts
+  [ "$status" -eq 97 ]
+}
+
+@test "installed_artifacts stops when reading the key names fails" {
+  STUB_OUTPUT='[{"path":"/fake/folder"}]' mktest::stub_function git_backup::_folders
+  mktest::stub_function git_backup::_manifest_path
+  mktest::stub_function git_backup::_push_script_path
+  STUB_EXIT=97 mktest::stub_function git_backup::_referenced_key_names
+  run git_backup::installed_artifacts
+  [ "$status" -eq 97 ]
+}
+
 # --- install ---
 
 @test "install is a no-op when no folders are configured" {
@@ -622,44 +666,21 @@ setup() {
   [ "$output" = "git_backup/ssh_keys/agents" ]
 }
 
-@test "_key_path locates the decrypted key under the default config dir" {
-  HOME=/fake/home
-  unset XDG_CONFIG_HOME
+@test "_key_path places the decrypted key in the module's own config dir" {
+  STUB_OUTPUT="/fake/config/git_backup" mktest::stub_function artifacts::module_config_dir git_backup
   run git_backup::_key_path "agents"
-  [ "$output" = "/fake/home/.config/machinekit/git_backup/ssh_keys/agents" ]
+  [ "$output" = "/fake/config/git_backup/ssh_keys/agents" ]
 }
 
-@test "_key_path honors XDG_CONFIG_HOME for the machinekit config dir" {
-  HOME=/fake/home
-  XDG_CONFIG_HOME=/fake/home/.xdg
-  run git_backup::_key_path "agents"
-  [ "$output" = "/fake/home/.xdg/machinekit/git_backup/ssh_keys/agents" ]
-}
-
-@test "_manifest_path locates the manifest under the default data dir" {
-  HOME=/fake/home
-  unset XDG_DATA_HOME
+@test "_manifest_path places the manifest in the module's own data dir" {
+  STUB_OUTPUT="/fake/data/git_backup" mktest::stub_function artifacts::module_data_dir git_backup
   run git_backup::_manifest_path
-  [ "$output" = "/fake/home/.local/share/machinekit/git_backup/manifest.tsv" ]
+  [ "$output" = "/fake/data/git_backup/manifest.tsv" ]
 }
 
-@test "_manifest_path honors XDG_DATA_HOME" {
-  HOME=/fake/home
-  XDG_DATA_HOME=/fake/home/.xdg-data
-  run git_backup::_manifest_path
-  [ "$output" = "/fake/home/.xdg-data/machinekit/git_backup/manifest.tsv" ]
-}
-
-@test "_push_script_path locates the installed push script under the default data dir" {
-  HOME=/fake/home
-  unset XDG_DATA_HOME
+@test "_push_script_path places the installed push script in the module's own data dir" {
+  STUB_OUTPUT="/fake/data/git_backup" mktest::stub_function artifacts::module_data_dir git_backup
   run git_backup::_push_script_path
-  [ "$output" = "/fake/home/.local/share/machinekit/git_backup/push.sh" ]
+  [ "$output" = "/fake/data/git_backup/push.sh" ]
 }
 
-@test "_push_script_path honors XDG_DATA_HOME" {
-  HOME=/fake/home
-  XDG_DATA_HOME=/fake/home/.xdg-data
-  run git_backup::_push_script_path
-  [ "$output" = "/fake/home/.xdg-data/machinekit/git_backup/push.sh" ]
-}

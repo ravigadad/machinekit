@@ -22,6 +22,7 @@ _POSTGRES_DUMP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 _POSTGRES_DUMP_DEFAULT_SCHEDULE="0 3 * * *"
 _POSTGRES_DUMP_DEFAULT_RETAIN_COUNT="7"
+_POSTGRES_DUMP_SERVICE_LABEL="postgres-dump"
 
 postgres_dump::requires() {
   printf 'postgres\n'
@@ -37,6 +38,24 @@ postgres_dump::preflight() {
   default_directory=${ postgres_dump::_directory; }
   postgres_dump::_validate_databases "$databases" "$default_directory" "${ postgres_dump::_retain_count; }"
   service::validate_cron "${ postgres_dump::_schedule; }"
+}
+
+# The names of every file install may put in this module's own dirs, whatever the
+# config, so an apply with no record of past installs can find them.
+postgres_dump::installed_file_patterns() {
+  printf '%s\n' \
+    $'data\tmanifest.tsv' \
+    $'data\tdump.sh'
+}
+
+# What install puts on this machine for the current config, so an apply can remove
+# it once the last database or the module is dropped. No databases = nothing.
+postgres_dump::installed_artifacts() {
+  local databases
+  databases=${ postgres_dump::_databases; }
+  [ -n "$databases" ] || return 0
+  printf 'service\t%s\n' "$_POSTGRES_DUMP_SERVICE_LABEL"
+  printf 'file\t%s\n' "$(postgres_dump::_manifest_path)" "$(postgres_dump::_dump_script_path)"
 }
 
 # Write the manifest, lay down the dump script, and schedule the one service that
@@ -148,7 +167,7 @@ postgres_dump::_install_dump_script() {
 # the launchd/systemd split is service.sh's job.
 postgres_dump::_install_service() {
   service::install_calendar \
-    postgres-dump \
+    "$_POSTGRES_DUMP_SERVICE_LABEL" \
     "$(postgres_dump::_dump_script_path)" \
     "${ postgres_dump::_schedule; }" \
     "MK_POSTGRES_DUMP_MANIFEST=$(postgres_dump::_manifest_path)" \
@@ -189,9 +208,9 @@ postgres_dump::_notify() {
 }
 
 postgres_dump::_manifest_path() {
-  printf '%s\n' "${XDG_DATA_HOME:-$HOME/.local/share}/machinekit/postgres_dump/manifest.tsv"
+  printf '%s\n' "${ artifacts::module_data_dir postgres_dump; }/manifest.tsv"
 }
 
 postgres_dump::_dump_script_path() {
-  printf '%s\n' "${XDG_DATA_HOME:-$HOME/.local/share}/machinekit/postgres_dump/dump.sh"
+  printf '%s\n' "${ artifacts::module_data_dir postgres_dump; }/dump.sh"
 }

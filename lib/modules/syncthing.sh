@@ -38,6 +38,8 @@ _SYNCTHING_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 _SYNCTHING_FOLDER_TYPES="sendreceive sendonly receiveonly receiveencrypted"
 _SYNCTHING_DEFAULT_FOLDER_TYPE="sendreceive"
 
+_SYNCTHING_CONFLICT_SERVICE_LABEL="syncthing-conflicts"
+
 syncthing::preflight() {
   local folders peers
   folders=${ syncthing::_folders; }
@@ -78,6 +80,48 @@ syncthing::install() {
   fi
   syncthing::_ensure_folders "$share_with"
   syncthing::_install_conflict_notifier
+}
+
+# The names of every file install may put in this module's own dirs, whatever the
+# config, so an apply with no record of past installs can find them.
+syncthing::installed_file_patterns() {
+  printf '%s\n' \
+    $'data\tconflict_manifest.txt' \
+    $'data\tconflict_scan.sh'
+}
+
+# What install puts on this machine for the current config, so an apply can remove
+# a dropped folder from the daemon and, once no folders remain, the conflict
+# notifier. The daemon, its identity and its peers stay. No folders = nothing.
+syncthing::installed_artifacts() {
+  local folders
+  folders=${ syncthing::_folders; }
+  [ -n "$folders" ] || return 0
+  printf 'service\t%s\n' "$_SYNCTHING_CONFLICT_SERVICE_LABEL"
+  printf 'file\t%s\n' "$(syncthing::_conflict_manifest_path)" "$(syncthing::_conflict_scan_script_path)"
+  printf '%s' "$folders" | jq -r '.[] | "folder\t\(.id)"'
+}
+
+# Removing a folder only takes it out of this daemon's config, so this machine
+# stops syncing it. Syncthing leaves the folder's files on disk.
+syncthing::remove_artifact() {
+  local kind="$1" name="$2"
+  case "$kind" in
+    folder) syncthing::_remove_folder "$name" ;;
+    *)
+      logging::warn "syncthing: no way to remove a $kind."
+      return 1
+      ;;
+  esac
+}
+
+# A folder the daemon no longer has is already removed. A daemon that can't list
+# its folders proves nothing either way, so that is a failure.
+syncthing::_remove_folder() {
+  local id="$1" folder_ids
+  folder_ids=$(syncthing::_cli_folder_ids) || return 1
+  grep -qxF -- "$id" <<< "$folder_ids" || return 0
+  syncthing::_cli_delete_folder "$id"
 }
 
 # Each folder entry must carry an id (stable + identical across machines, so the
@@ -372,7 +416,7 @@ syncthing::_install_conflict_scan_script() {
 # job.
 syncthing::_install_conflict_service() {
   service::install_interval \
-    syncthing-conflicts \
+    "$_SYNCTHING_CONFLICT_SERVICE_LABEL" \
     "$(syncthing::_conflict_scan_script_path)" \
     "${ syncthing::_conflict_interval; }" \
     "MK_SYNCTHING_CONFLICT_MANIFEST=$(syncthing::_conflict_manifest_path)" \
@@ -441,11 +485,11 @@ syncthing::_conflict_interval() {
 # --- conflict notifier paths ---
 
 syncthing::_conflict_manifest_path() {
-  printf '%s\n' "${XDG_DATA_HOME:-$HOME/.local/share}/machinekit/syncthing/conflict_manifest.txt"
+  printf '%s\n' "${ artifacts::module_data_dir syncthing; }/conflict_manifest.txt"
 }
 
 syncthing::_conflict_scan_script_path() {
-  printf '%s\n' "${XDG_DATA_HOME:-$HOME/.local/share}/machinekit/syncthing/conflict_scan.sh"
+  printf '%s\n' "${ artifacts::module_data_dir syncthing; }/conflict_scan.sh"
 }
 
 # --- external command seam (syncthing 2.x surface; isolated for easy correction) ---
@@ -461,6 +505,14 @@ syncthing::_generate() {
 
 syncthing::_own_device_id() {
   syncthing device-id
+}
+
+syncthing::_cli_folder_ids() {
+  syncthing cli config folders list
+}
+
+syncthing::_cli_delete_folder() {
+  syncthing cli config folders "$1" delete
 }
 
 # Device IDs awaiting approval (one per line): clients that connected knowing our

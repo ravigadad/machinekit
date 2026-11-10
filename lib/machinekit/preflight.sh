@@ -4,6 +4,8 @@
 # Resolves user inputs into context, fetches the blueprints into the local
 # cache, builds the home staging tree, then calls preflight on each active
 # module so modules can fail fast on missing config before any changes happen.
+# Last, it lists what is installed but no longer configured, so the operator sees
+# what the run will offer to remove before anything changes.
 # Staging is built here (not in home::sync) so a module's preflight can ask
 # home::will_exist whether a home file it depends on is going to be there.
 #
@@ -23,6 +25,7 @@ preflight::run() {
   home::staging::build
 
   modules::run_preflights
+  artifacts::plan
 
   logging::success "Preflight complete."
 }

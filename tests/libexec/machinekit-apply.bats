@@ -20,6 +20,7 @@ setup() {
   mktest::stub_function sudo::ensure
   mktest::stub_function preflight::run
   mktest::stub_function modules::run_installs
+  mktest::stub_function artifacts::remove_stale
   mktest::stub_function home::sync
   mktest::stub_function modules::run_post_apply
   mktest::stub_function hooks::run_post_apply
@@ -50,6 +51,7 @@ setup() {
   mktest::assert_stub_called_in_order sudo::ensure
   mktest::assert_stub_called_in_order preflight::run
   mktest::assert_stub_called_in_order modules::run_installs
+  mktest::assert_stub_called_in_order artifacts::remove_stale
   mktest::assert_stub_called_in_order home::sync
   mktest::assert_stub_called_in_order modules::run_post_apply
   mktest::assert_stub_called_in_order hooks::run_post_apply
@@ -74,6 +76,11 @@ setup() {
   run "$MACHINEKIT_DIR/libexec/machinekit-apply" --help
   [ "$status" -eq 0 ]
   [[ "$output" == *"Usage: machinekit apply"* ]]
+}
+
+@test "--help lists the removal consent flag with its env var" {
+  run "$MACHINEKIT_DIR/libexec/machinekit-apply" --help
+  [[ "$output" == *"--remove-unconfigured"*"MACHINEKIT_REMOVE_UNCONFIGURED=1"* ]]
 }
 
 @test "--version prints the version and exits 0" {

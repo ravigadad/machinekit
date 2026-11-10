@@ -29,6 +29,8 @@ _GIT_BACKUP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # secrets-manager reference.
 _GIT_BACKUP_SECRET_NAMESPACE="git_backup/ssh_keys"
 
+_GIT_BACKUP_SERVICE_LABEL="git-backup"
+
 # Depends on whichever backend(s) resolve the referenced keys: age for pool-file
 # keys, secrets_manager for explicitly-referenced ones (a blueprint may mix both
 # across keys). Derived from the declared secrets (declared_secrets), so a
@@ -62,6 +64,30 @@ git_backup::declared_secrets() {
   while IFS= read -r name; do
     [ -n "$name" ] || continue
     printf '%s\ttrue\tfalse\n' "$(git_backup::_secret_name "$name")"
+  done <<< "$key_names"
+}
+
+# The names of every file install may put in this module's own dirs, whatever the
+# config, so an apply with no record of past installs can find them.
+git_backup::installed_file_patterns() {
+  printf '%s\n' \
+    $'data\tmanifest.tsv' \
+    $'data\tpush.sh' \
+    $'config\tssh_keys/*'
+}
+
+# What install puts on this machine for the current config, so an apply can remove
+# what a dropped folder, key or module left behind. No folders = nothing.
+git_backup::installed_artifacts() {
+  local folders name key_names
+  folders=${ git_backup::_folders; }
+  [ -n "$folders" ] || return 0
+  printf 'service\t%s\n' "$_GIT_BACKUP_SERVICE_LABEL"
+  printf 'file\t%s\n' "$(git_backup::_manifest_path)" "$(git_backup::_push_script_path)"
+  key_names=${ git_backup::_referenced_key_names; }
+  while IFS= read -r name; do
+    [ -n "$name" ] || continue
+    printf 'file\t%s\n' "$(git_backup::_key_path "$name")"
   done <<< "$key_names"
 }
 
@@ -294,7 +320,7 @@ git_backup::_install_service() {
   interval=${ git_backup::_interval; }
   notify=${ git_backup::_notify; }
   service::install_interval \
-    git-backup \
+    "$_GIT_BACKUP_SERVICE_LABEL" \
     "$(git_backup::_push_script_path)" \
     "$interval" \
     "MK_GIT_BACKUP_MANIFEST=$(git_backup::_manifest_path)" \
@@ -352,13 +378,13 @@ git_backup::_secret_name() {
 }
 
 git_backup::_key_path() {
-  printf '%s\n' "${XDG_CONFIG_HOME:-$HOME/.config}/machinekit/git_backup/ssh_keys/$1"
+  printf '%s\n' "${ artifacts::module_config_dir git_backup; }/ssh_keys/$1"
 }
 
 git_backup::_manifest_path() {
-  printf '%s\n' "${XDG_DATA_HOME:-$HOME/.local/share}/machinekit/git_backup/manifest.tsv"
+  printf '%s\n' "${ artifacts::module_data_dir git_backup; }/manifest.tsv"
 }
 
 git_backup::_push_script_path() {
-  printf '%s\n' "${XDG_DATA_HOME:-$HOME/.local/share}/machinekit/git_backup/push.sh"
+  printf '%s\n' "${ artifacts::module_data_dir git_backup; }/push.sh"
 }

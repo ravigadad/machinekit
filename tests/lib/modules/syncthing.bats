@@ -157,6 +157,85 @@ setup() {
   mktest::assert_stub_not_called syncthing::_ensure_folders
 }
 
+# --- installed_file_patterns ---
+
+@test "installed_file_patterns names the conflict manifest and scan script" {
+  run syncthing::installed_file_patterns
+  [ "$status" -eq 0 ]
+  [ "$output" = $'data\tconflict_manifest.txt\ndata\tconflict_scan.sh' ]
+}
+
+# --- installed_artifacts ---
+
+@test "installed_artifacts declares the conflict service, its manifest and scan script, and each folder in the daemon" {
+  STUB_OUTPUT='[{"id":"folder-one","path":"/fake/one"},{"id":"folder-two","path":"/fake/two"}]' \
+    mktest::stub_function syncthing::_folders
+  STUB_OUTPUT="/fake/conflict_manifest.txt" mktest::stub_function syncthing::_conflict_manifest_path
+  STUB_OUTPUT="/fake/conflict_scan.sh" mktest::stub_function syncthing::_conflict_scan_script_path
+  run syncthing::installed_artifacts
+  [ "$status" -eq 0 ]
+  [ "$output" = $'service\tsyncthing-conflicts\nfile\t/fake/conflict_manifest.txt\nfile\t/fake/conflict_scan.sh\nfolder\tfolder-one\nfolder\tfolder-two' ]
+}
+
+@test "installed_artifacts declares nothing when no folders are configured" {
+  STUB_OUTPUT="" mktest::stub_function syncthing::_folders
+  run syncthing::installed_artifacts
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "installed_artifacts stops when reading the folders fails" {
+  STUB_EXIT=97 mktest::stub_function syncthing::_folders
+  run syncthing::installed_artifacts
+  [ "$status" -eq 97 ]
+}
+
+# --- remove_artifact ---
+
+@test "remove_artifact removes a folder from the daemon" {
+  mktest::stub_function syncthing::_remove_folder "the-folder"
+  syncthing::remove_artifact folder "the-folder"
+  mktest::assert_stub_called syncthing::_remove_folder "the-folder"
+}
+
+@test "remove_artifact passes on a failed folder removal" {
+  STUB_RETURN=1 mktest::stub_function syncthing::_remove_folder "the-folder"
+  run syncthing::remove_artifact folder "the-folder"
+  [ "$status" -eq 1 ]
+}
+
+@test "remove_artifact fails for a kind syncthing does not install" {
+  mktest::stub_function syncthing::_remove_folder
+  run syncthing::remove_artifact device "the-device"
+  [ "$status" -eq 1 ]
+  mktest::assert_stub_not_called syncthing::_remove_folder
+  MATCH="device" mktest::assert_stub_called logging::warn
+}
+
+# --- _remove_folder ---
+
+@test "_remove_folder deletes a folder the daemon has" {
+  STUB_OUTPUT=$'other\nthe-folder' mktest::stub_function syncthing::_cli_folder_ids
+  mktest::stub_function syncthing::_cli_delete_folder "the-folder"
+  syncthing::_remove_folder "the-folder"
+  mktest::assert_stub_called syncthing::_cli_delete_folder "the-folder"
+}
+
+@test "_remove_folder succeeds without deleting when the daemon no longer has the folder" {
+  STUB_OUTPUT=$'other' mktest::stub_function syncthing::_cli_folder_ids
+  mktest::stub_function syncthing::_cli_delete_folder
+  syncthing::_remove_folder "the-folder"
+  mktest::assert_stub_not_called syncthing::_cli_delete_folder
+}
+
+@test "_remove_folder fails when the daemon cannot list its folders" {
+  STUB_RETURN=1 mktest::stub_function syncthing::_cli_folder_ids
+  mktest::stub_function syncthing::_cli_delete_folder
+  run syncthing::_remove_folder "the-folder"
+  [ "$status" -eq 1 ]
+  mktest::assert_stub_not_called syncthing::_cli_delete_folder
+}
+
 # --- _validate_folders / _validate_peers (real jq) ---
 
 @test "_validate_folders passes a well-formed list" {
@@ -768,32 +847,16 @@ setup() {
 
 # --- conflict notifier paths ---
 
-@test "_conflict_manifest_path locates the manifest under the default data dir" {
-  HOME=/fake/home
-  unset XDG_DATA_HOME
+@test "_conflict_manifest_path places the manifest in the module's own data dir" {
+  STUB_OUTPUT="/fake/data/syncthing" mktest::stub_function artifacts::module_data_dir syncthing
   run syncthing::_conflict_manifest_path
-  [ "$output" = "/fake/home/.local/share/machinekit/syncthing/conflict_manifest.txt" ]
+  [ "$output" = "/fake/data/syncthing/conflict_manifest.txt" ]
 }
 
-@test "_conflict_manifest_path honors XDG_DATA_HOME" {
-  HOME=/fake/home
-  XDG_DATA_HOME=/fake/home/.xdg-data
-  run syncthing::_conflict_manifest_path
-  [ "$output" = "/fake/home/.xdg-data/machinekit/syncthing/conflict_manifest.txt" ]
-}
-
-@test "_conflict_scan_script_path locates the installed scan script under the default data dir" {
-  HOME=/fake/home
-  unset XDG_DATA_HOME
+@test "_conflict_scan_script_path places the installed scan script in the module's own data dir" {
+  STUB_OUTPUT="/fake/data/syncthing" mktest::stub_function artifacts::module_data_dir syncthing
   run syncthing::_conflict_scan_script_path
-  [ "$output" = "/fake/home/.local/share/machinekit/syncthing/conflict_scan.sh" ]
-}
-
-@test "_conflict_scan_script_path honors XDG_DATA_HOME" {
-  HOME=/fake/home
-  XDG_DATA_HOME=/fake/home/.xdg-data
-  run syncthing::_conflict_scan_script_path
-  [ "$output" = "/fake/home/.xdg-data/machinekit/syncthing/conflict_scan.sh" ]
+  [ "$output" = "/fake/data/syncthing/conflict_scan.sh" ]
 }
 
 # --- external command seam (real `syncthing`/`brew` stubbed; asserts our
@@ -819,6 +882,19 @@ setup() {
   STUB_OUTPUT="DEVICE-ABC" mktest::stub_function syncthing "device-id"
   run syncthing::_own_device_id
   [ "$output" = "DEVICE-ABC" ]
+}
+
+@test "_cli_folder_ids lists the daemon's folder ids" {
+  STUB_OUTPUT=$'folder-one\nfolder-two' mktest::stub_function syncthing "cli" "config" "folders" "list"
+  run syncthing::_cli_folder_ids
+  [ "$status" -eq 0 ]
+  [ "$output" = $'folder-one\nfolder-two' ]
+}
+
+@test "_cli_delete_folder deletes the folder from the daemon's config" {
+  mktest::stub_function syncthing "cli" "config" "folders" "the-folder" "delete"
+  syncthing::_cli_delete_folder "the-folder"
+  mktest::assert_stub_called syncthing "cli" "config" "folders" "the-folder" "delete"
 }
 
 @test "_cli_pending_devices lists the device ids awaiting approval" {

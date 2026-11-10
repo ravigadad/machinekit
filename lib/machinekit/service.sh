@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# service — installs a long-lived scheduled service under the OS-native scheduler:
-# a macOS system LaunchDaemon or a Linux user systemd timer. It owns the launchd
-# vs systemd split so consumers (git_backup, and later periodic jobs) describe only
-# *what* to run and *when*, never the per-OS unit mechanics.
+# service — installs and removes a long-lived scheduled service under the
+# OS-native scheduler: a macOS system LaunchDaemon or a Linux user systemd timer.
+# It owns the launchd vs systemd split so a module describes only *what* to run and
+# *when*, never the per-OS unit mechanics.
 #
 # Two triggers, one shared install core: install_interval fires every N seconds
 # monotonically (drifting with reboots — right for "every few minutes");
@@ -29,7 +29,7 @@
 service::install_interval() {
   local label="$1" exec="$2" seconds="$3"
   shift 3
-  service::_install "$label" "$exec" interval "$seconds" "$@"
+  service::_on_os install "$label" "$exec" interval "$seconds" "$@"
 }
 
 # Fire EXEC at the cron-style WHEN (`minute hour day month weekday`, single values
@@ -38,19 +38,32 @@ service::install_calendar() {
   local label="$1" exec="$2" when="$3"
   shift 3
   service::validate_cron "$when"
-  service::_install "$label" "$exec" calendar "$when" "$@"
+  service::_on_os install "$label" "$exec" calendar "$when" "$@"
 }
 
-# --- install core + OS dispatch ---
+# --- public: find and remove services ---
 
-service::_install() {
-  local label="$1" exec="$2" kind="$3" value="$4"
-  shift 4
-  local family
+# Stop LABEL's service and delete its unit files. A service that isn't installed
+# is no error, so removing one twice is harmless.
+service::uninstall() {
+  service::_on_os uninstall "$1"
+}
+
+# The bare label of every machinekit service installed on this machine, found by
+# the namespace prefix on its unit file, one per line.
+service::installed_labels() {
+  service::_on_os installed_labels
+}
+
+# --- OS dispatch ---
+
+# Run OPERATION's per-OS form, service::_OPERATION_darwin or _linux, with ARGS.
+service::_on_os() {
+  local operation="$1" family
+  shift
   family=${ context::get os.family; }
   case "$family" in
-    darwin) service::_install_darwin "$label" "$exec" "$kind" "$value" "$@" ;;
-    linux)  service::_install_linux "$label" "$exec" "$kind" "$value" "$@" ;;
+    darwin|linux) "service::_${operation}_${family}" "$@" ;;
     *) lifecycle::fail "service: unsupported os.family '$family' for a scheduled service" ;;
   esac
 }
@@ -63,7 +76,7 @@ service::_install_darwin() {
   shift 4
   local launchd_label plist stanza env_dict user
   launchd_label=$(service::_launchd_label "$label")
-  plist="/Library/LaunchDaemons/$launchd_label.plist"
+  plist="${ service::_launchd_daemons_dir; }/$launchd_label.plist"
   stanza=${ service::_launchd_schedule_stanza "$kind" "$value"; }
   env_dict=$(service::_launchd_env_dict "$@")
   user=$(service::_run_as_user)
@@ -80,7 +93,7 @@ service::_install_linux() {
   shift 4
   local unit_name unit_dir description env_lines schedule_lines
   unit_name=$(service::_systemd_unit_name "$label")
-  unit_dir="$HOME/.config/systemd/user"
+  unit_dir=${ service::_systemd_user_unit_dir; }
   description="machinekit $label"
   mkdir -p "$unit_dir"
   env_lines=$(service::_systemd_env_lines "$@")
@@ -92,6 +105,50 @@ service::_install_linux() {
   sudo loginctl enable-linger "$(id -un)"
   systemctl --user daemon-reload
   systemctl --user enable --now "$unit_name.timer"
+}
+
+# A daemon that was never loaded makes bootout fail, which is no reason to keep
+# its plist.
+service::_uninstall_darwin() {
+  local plist
+  plist="${ service::_launchd_daemons_dir; }/$(service::_launchd_label "$1").plist"
+  sudo launchctl bootout system "$plist" 2>/dev/null || true
+  sudo rm -f -- "$plist"
+}
+
+# Disabling the timer stops future runs; stopping the service ends one already in
+# progress. Either fails harmlessly when the unit is already gone.
+service::_uninstall_linux() {
+  local unit_name unit_dir
+  unit_name=$(service::_systemd_unit_name "$1")
+  unit_dir=${ service::_systemd_user_unit_dir; }
+  systemctl --user disable --now "$unit_name.timer" 2>/dev/null || true
+  systemctl --user stop "$unit_name.service" 2>/dev/null || true
+  rm -f -- "$unit_dir/$unit_name.service" "$unit_dir/$unit_name.timer"
+  systemctl --user daemon-reload
+}
+
+service::_installed_labels_darwin() {
+  local prefix plist name
+  prefix=$(service::_launchd_label "")
+  for plist in "${ service::_launchd_daemons_dir; }/$prefix"*.plist; do
+    [ -f "$plist" ] || continue
+    name=${plist##*/}
+    name=${name#"$prefix"}
+    printf '%s\n' "${name%.plist}"
+  done
+}
+
+# The timer is the unit that schedules the service, so it is the one listed.
+service::_installed_labels_linux() {
+  local prefix timer name
+  prefix=$(service::_systemd_unit_name "")
+  for timer in "${ service::_systemd_user_unit_dir; }/$prefix"*.timer; do
+    [ -f "$timer" ] || continue
+    name=${timer##*/}
+    name=${name#"$prefix"}
+    printf '%s\n' "${name%.timer}"
+  done
 }
 
 # --- unit content generators (pure) ---
@@ -349,6 +406,14 @@ service::_launchd_label() {
 
 service::_systemd_unit_name() {
   printf 'machinekit-%s\n' "$1"
+}
+
+service::_launchd_daemons_dir() {
+  printf '%s\n' /Library/LaunchDaemons
+}
+
+service::_systemd_user_unit_dir() {
+  printf '%s\n' "$HOME/.config/systemd/user"
 }
 
 # The user the macOS LaunchDaemon runs as: loaded into the system domain (starts
