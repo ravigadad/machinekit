@@ -154,11 +154,6 @@ setup() {
 
 # Keys are unique, but an explicit name can repeat another entry's, and two
 # entries for one database would dump to the same files.
-@test "_database_shape_error reports a database name that appears twice" {
-  run postgres_dump::_database_shape_error '[{"name":"somedb"},{"name":"somedb"}]' "/fake/dumps" "7"
-  [[ "$output" == *"more than once"* ]]
-}
-
 @test "_database_shape_error reports a non-numeric retain_count" {
   run postgres_dump::_database_shape_error '[{"name":"somedb","retain_count":"lots"}]' "/fake/dumps" "7"
   [[ "$output" == *"retain_count"* ]]

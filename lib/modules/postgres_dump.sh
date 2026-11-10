@@ -96,8 +96,6 @@ postgres_dump::_database_shape_error() {
     --arg retain_count "$default_retain_count" '
     if   any(.[]; (.name // "") == "") then
       "every [module.postgres_dump.databases.<key>] entry needs a name (the name defaults to the key)"
-    elif ([.[].name] | length) != ([.[].name] | unique | length) then
-      "a database name appears more than once"
     elif any(.[]; ((.directory // $directory) == "")) then
       "every database needs a directory: set [module.postgres_dump].directory, or one on the entry"
     elif any(.[]; ((.retain_count // $retain_count) | tostring | test("^[0-9]+$") | not)) then

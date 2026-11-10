@@ -48,7 +48,8 @@ config::get_json() {
 # empty-string check still means "no entries"). An entry is off when it sets
 # `enabled = false`; `enabled` is stripped from what's emitted.
 # With KEY_FIELD, each entry's key fills that field unless the entry sets it itself,
-# so `[module.x.databases.hindsight]` alone means a database named hindsight.
+# so `[module.x.databases.hindsight]` alone means a database named hindsight; two
+# enabled entries that end up with the same value there are an error.
 # Shape errors are fatal, so call it as a plain `var=$(…)` assignment at least once
 # (in preflight): inside `< <(…)` or `local var=$(…)` the failure would not stop
 # the run.
@@ -62,10 +63,15 @@ config::entries() {
 # collection already in hand, such as one nested inside another entry. LABEL names
 # the collection in errors.
 config::entries_from_json() {
-  local collection="$1" label="$2" key_field="${3:-}" shape_error
+  local collection="$1" label="$2" key_field="${3:-}" shape_error entries
   shape_error=$(config::_collection_shape_error "$collection")
-  [ -z "$shape_error" ] || lifecycle::fail "config: $label: $shape_error"
-  config::_enabled_entries "$collection" "$key_field"
+  config::_fail_on_shape_error "$label" "$shape_error"
+  entries=$(config::_enabled_entries "$collection" "$key_field")
+  if [ -n "$key_field" ]; then
+    shape_error=$(config::_duplicate_field_error "$entries" "$key_field")
+    config::_fail_on_shape_error "$label" "$shape_error"
+  fi
+  [ -z "$entries" ] || printf '%s\n' "$entries"
 }
 
 # config::enabled_table KEY — the keyed collection at KEY as a table of its enabled
@@ -76,7 +82,7 @@ config::enabled_table() {
   local key="$1" collection shape_error
   collection=$(config::get_json "$key" "{}")
   shape_error=$(config::_collection_shape_error "$collection")
-  [ -z "$shape_error" ] || lifecycle::fail "config: $key: $shape_error"
+  config::_fail_on_shape_error "$key" "$shape_error"
   config::_enabled_table "$collection"
 }
 
@@ -90,8 +96,13 @@ config::enabled_table() {
 config::extended_list() {
   local entry="$1" list_name="$2" position="$3" label="$4" shape_error
   shape_error=$(config::_list_shape_error "$entry" "$list_name")
-  [ -z "$shape_error" ] || lifecycle::fail "config: $label: $shape_error"
+  config::_fail_on_shape_error "$label" "$shape_error"
   config::_combined_list "$entry" "$list_name" "$position"
+}
+
+config::_fail_on_shape_error() {
+  local label="$1" shape_error="$2"
+  [ -z "$shape_error" ] || lifecycle::fail "config: $label: $shape_error"
 }
 
 config::_list_shape_error() {
@@ -135,6 +146,15 @@ config::_enabled_entries() {
     [to_entries[]
       | (if $key_field == "" then {} else {($key_field): .key} end) + .value]
     | if length == 0 then empty else . end'
+}
+
+# An empty or missing value is left to the module's own check, which can say what
+# the field is for.
+config::_duplicate_field_error() {
+  printf '%s' "$1" | jq -r --arg field "$2" '
+    [.[][$field] | select(. != null and . != "")]
+    | group_by(.) | map(select(length > 1)) | first // empty
+    | "two entries set \($field) to \(.[0] | tojson)"'
 }
 
 config::_enabled_table() {

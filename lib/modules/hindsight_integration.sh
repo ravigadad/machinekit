@@ -387,12 +387,11 @@ hindsight_integration::_has_bank_configs() {
   [ -n "$(hindsight_integration::_configured_bank_names)" ]
 }
 
-# Called unconditionally by preflight: validate_shape treats no-banks ({}) as
-# valid, so there's no guard to branch on — preflight keeps a single flow.
+# Reading the bank table is the check: the collection reader stops the run on a
+# malformed one, and doing it here makes that happen in preflight rather than
+# after the installs. No banks is a valid table, so preflight keeps a single flow.
 hindsight_integration::_validate_bank_configs() {
-  local bank_configs
-  bank_configs=$(hindsight_integration::_bank_configs_json)
-  hindsight::banks::validate_shape "$bank_configs"
+  hindsight_integration::_bank_configs_json >/dev/null
 }
 
 # Also unconditional: every retention value is optional, and each validator

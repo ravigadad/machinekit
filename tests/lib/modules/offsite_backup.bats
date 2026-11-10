@@ -280,12 +280,6 @@ offsite_backup/second_repo/credentials\tfalse\tfalse' ]
   [[ "$output" == *"lowercase"* ]]
 }
 
-@test "_repositories_shape_error reports a duplicated name" {
-  run offsite_backup::_repositories_shape_error \
-    '[{"name":"same","repository":"fake:one","paths":[{"path":"/fake/a"}]},{"name":"same","repository":"fake:two","paths":[{"path":"/fake/b"}]}]'
-  [[ "$output" == *"more than once"* ]]
-}
-
 @test "_repositories_shape_error reports an entry with no repository string" {
   run offsite_backup::_repositories_shape_error \
     '[{"name":"fake_repo","paths":[{"path":"/fake/dumps"}]}]'

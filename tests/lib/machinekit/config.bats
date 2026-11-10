@@ -103,19 +103,42 @@ setup() {
 
 @test "entries_from_json returns the enabled entries when the collection is well-formed" {
   mktest::stub_function config::_collection_shape_error '{"fake":{}}'
+  mktest::stub_function config::_fail_on_shape_error "module.fake.entries" ""
   STUB_OUTPUT="the-entries" mktest::stub_function config::_enabled_entries '{"fake":{}}' "name"
+  mktest::stub_function config::_duplicate_field_error "the-entries" "name"
   run config::entries_from_json '{"fake":{}}' "module.fake.entries" "name"
   [ "$output" = "the-entries" ]
 }
 
 @test "entries_from_json fails naming the collection when its shape is wrong" {
   STUB_OUTPUT="the-shape-error" mktest::stub_function config::_collection_shape_error '{"fake":1}'
+  STUB_EXIT=1 mktest::stub_function config::_fail_on_shape_error "module.fake.entries" "the-shape-error"
   mktest::stub_function config::_enabled_entries
-  STUB_EXIT=1 mktest::stub_function lifecycle::fail
   run config::entries_from_json '{"fake":1}' "module.fake.entries" ""
   [ "$status" -eq 1 ]
-  MATCH="module\.fake\.entries.*the-shape-error" mktest::assert_stub_called lifecycle::fail
+  mktest::assert_stub_called config::_fail_on_shape_error "module.fake.entries" "the-shape-error"
   mktest::assert_stub_not_called config::_enabled_entries
+}
+
+@test "entries_from_json fails naming the collection when two entries fill the key field with one value" {
+  mktest::stub_function config::_collection_shape_error '{"fake":{}}'
+  mktest::stub_function config::_fail_on_shape_error "module.fake.entries" ""
+  STUB_OUTPUT="the-entries" mktest::stub_function config::_enabled_entries '{"fake":{}}' "name"
+  STUB_OUTPUT="the-duplicate-error" mktest::stub_function config::_duplicate_field_error "the-entries" "name"
+  STUB_EXIT=1 mktest::stub_function config::_fail_on_shape_error "module.fake.entries" "the-duplicate-error"
+  run config::entries_from_json '{"fake":{}}' "module.fake.entries" "name"
+  [ "$status" -eq 1 ]
+  mktest::assert_stub_called config::_fail_on_shape_error "module.fake.entries" "the-duplicate-error"
+}
+
+@test "entries_from_json skips the duplicate check when no key field is named" {
+  mktest::stub_function config::_collection_shape_error '{"fake":{}}'
+  mktest::stub_function config::_fail_on_shape_error "module.fake.entries" ""
+  STUB_OUTPUT="the-entries" mktest::stub_function config::_enabled_entries '{"fake":{}}' ""
+  mktest::stub_function config::_duplicate_field_error
+  run config::entries_from_json '{"fake":{}}' "module.fake.entries" ""
+  [ "$output" = "the-entries" ]
+  mktest::assert_stub_not_called config::_duplicate_field_error
 }
 
 # --- config::enabled_table ---
@@ -123,6 +146,7 @@ setup() {
 @test "enabled_table returns the collection's enabled entries as a table when it is well-formed" {
   STUB_OUTPUT='{"fake":{}}' mktest::stub_function config::get_json "module.fake.entries" "{}"
   mktest::stub_function config::_collection_shape_error '{"fake":{}}'
+  mktest::stub_function config::_fail_on_shape_error "module.fake.entries" ""
   STUB_OUTPUT="the-table" mktest::stub_function config::_enabled_table '{"fake":{}}'
   run config::enabled_table "module.fake.entries"
   [ "$output" = "the-table" ]
@@ -131,11 +155,11 @@ setup() {
 @test "enabled_table fails naming the collection when its shape is wrong" {
   STUB_OUTPUT='{"fake":1}' mktest::stub_function config::get_json "module.fake.entries" "{}"
   STUB_OUTPUT="the-shape-error" mktest::stub_function config::_collection_shape_error '{"fake":1}'
+  STUB_EXIT=1 mktest::stub_function config::_fail_on_shape_error "module.fake.entries" "the-shape-error"
   mktest::stub_function config::_enabled_table
-  STUB_EXIT=1 mktest::stub_function lifecycle::fail
   run config::enabled_table "module.fake.entries"
   [ "$status" -eq 1 ]
-  MATCH="module\.fake\.entries.*the-shape-error" mktest::assert_stub_called lifecycle::fail
+  mktest::assert_stub_called config::_fail_on_shape_error "module.fake.entries" "the-shape-error"
   mktest::assert_stub_not_called config::_enabled_table
 }
 
@@ -143,6 +167,7 @@ setup() {
 
 @test "extended_list returns the combined list when both lists are well-formed" {
   mktest::stub_function config::_list_shape_error '{"fake":1}' "fake_list"
+  mktest::stub_function config::_fail_on_shape_error "module.fake.entries.one" ""
   STUB_OUTPUT="the-list" mktest::stub_function config::_combined_list '{"fake":1}' "fake_list" "before"
   run config::extended_list '{"fake":1}' "fake_list" "before" "module.fake.entries.one"
   [ "$output" = "the-list" ]
@@ -150,12 +175,28 @@ setup() {
 
 @test "extended_list fails naming the entry when a list is malformed" {
   STUB_OUTPUT="the-shape-error" mktest::stub_function config::_list_shape_error '{"fake":1}' "fake_list"
+  STUB_EXIT=1 mktest::stub_function config::_fail_on_shape_error "module.fake.entries.one" "the-shape-error"
   mktest::stub_function config::_combined_list
-  STUB_EXIT=1 mktest::stub_function lifecycle::fail
   run config::extended_list '{"fake":1}' "fake_list" "before" "module.fake.entries.one"
   [ "$status" -eq 1 ]
-  MATCH="module\.fake\.entries\.one.*the-shape-error" mktest::assert_stub_called lifecycle::fail
+  mktest::assert_stub_called config::_fail_on_shape_error "module.fake.entries.one" "the-shape-error"
   mktest::assert_stub_not_called config::_combined_list
+}
+
+# --- config::_fail_on_shape_error ---
+
+@test "_fail_on_shape_error fails with the label and the error" {
+  STUB_EXIT=1 mktest::stub_function lifecycle::fail "config: module.fake.entries: the-shape-error"
+  run config::_fail_on_shape_error "module.fake.entries" "the-shape-error"
+  [ "$status" -eq 1 ]
+  mktest::assert_stub_called lifecycle::fail "config: module.fake.entries: the-shape-error"
+}
+
+@test "_fail_on_shape_error does nothing when there is no error" {
+  mktest::stub_function lifecycle::fail
+  run config::_fail_on_shape_error "module.fake.entries" ""
+  [ "$status" -eq 0 ]
+  mktest::assert_stub_not_called lifecycle::fail
 }
 
 # --- config::_list_shape_error ---
@@ -251,6 +292,28 @@ setup() {
 @test "_enabled_entries emits nothing when no entry is enabled" {
   STUB_OUTPUT='{}' mktest::stub_function config::_enabled_table '{"fake":"collection"}'
   run config::_enabled_entries '{"fake":"collection"}' "name"
+  [ -z "$output" ]
+}
+
+# --- config::_duplicate_field_error ---
+
+@test "_duplicate_field_error reports nothing when every entry has its own value" {
+  run config::_duplicate_field_error '[{"name":"one"},{"name":"two"}]' "name"
+  [ -z "$output" ]
+}
+
+@test "_duplicate_field_error reports a value two entries share, naming the field" {
+  run config::_duplicate_field_error '[{"name":"one"},{"name":"two"},{"name":"one"}]' "name"
+  [ "$output" = 'two entries set name to "one"' ]
+}
+
+@test "_duplicate_field_error leaves empty and absent values to the module's own check" {
+  run config::_duplicate_field_error '[{"name":""},{"name":""},{},{}]' "name"
+  [ -z "$output" ]
+}
+
+@test "_duplicate_field_error reports nothing for no entries" {
+  run config::_duplicate_field_error "" "name"
   [ -z "$output" ]
 }
 

@@ -478,24 +478,16 @@ setup() {
 
 # --- _validate_bank_configs ---
 
-@test "_validate_bank_configs hands the configured banks to validate_shape" {
-  STUB_OUTPUT='{"music":{"retain_mission":"m"}}' \
-    mktest::stub_function hindsight_integration::_bank_configs_json
-  mktest::stub_function hindsight::banks::validate_shape
+@test "_validate_bank_configs reads the bank table, which stops the run when it is malformed" {
+  mktest::stub_function hindsight_integration::_bank_configs_json
   hindsight_integration::_validate_bank_configs
-  mktest::assert_stub_called hindsight::banks::validate_shape '{"music":{"retain_mission":"m"}}'
+  mktest::assert_stub_called hindsight_integration::_bank_configs_json
 }
 
-# Reading the banks can itself fail (a malformed collection); in argument position
-# that failure would be swallowed and validation would run on nothing.
 @test "_validate_bank_configs stops when reading the banks fails" {
-  STUB_EXIT=1 mktest::stub_function hindsight_integration::_bank_configs_json
-  mktest::stub_function hindsight::banks::validate_shape
-  # bats' run turns errexit off; machinekit runs under set -e, which is what stops it.
-  with_errexit() { set -e; "$@"; }
-  run with_errexit hindsight_integration::_validate_bank_configs
-  [ "$status" -ne 0 ]
-  mktest::assert_stub_not_called hindsight::banks::validate_shape
+  STUB_EXIT=97 mktest::stub_function hindsight_integration::_bank_configs_json
+  run hindsight_integration::_validate_bank_configs
+  [ "$status" -eq 97 ]
 }
 
 # --- _configure_banks ---

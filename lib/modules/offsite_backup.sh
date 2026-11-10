@@ -211,8 +211,6 @@ offsite_backup::_repositories_shape_error() {
       "every [module.offsite_backup.repositories.<key>] entry needs a name (the name defaults to the key)"
     elif any(.[]; ((.name | tostring) | test("^[a-z0-9_]+$") | not)) then
       "a repository name must be lowercase letters, digits, and underscores (it names secrets, files, and service units)"
-    elif ([.[].name] | length) != ([.[].name] | unique | length) then
-      "a repository name appears more than once"
     elif any(.[]; (.repository // "") == "") then
       "every repository entry needs a repository string (e.g. s3:…)"
     else empty end'
