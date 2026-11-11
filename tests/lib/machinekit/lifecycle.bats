@@ -139,6 +139,8 @@ setup() {
 
 @test "exec runs the cleanup chain, then replaces the process with the command" {
   # In a bash process of its own, because exec would otherwise replace the test.
+  # The script is single-quoted so its variables expand in that process.
+  # shellcheck disable=SC2016
   run "$BASH" -c '
     source "$1/lib/machinekit/lifecycle.sh"
     cleanup_marker="$2"

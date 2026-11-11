@@ -177,11 +177,15 @@ setup() {
 
 @test "_export_line is a POSIX export by default" {
   run path::_export_line zsh
+  # The rc line carries literal $HOME and $PATH for the shell to expand.
+  # shellcheck disable=SC2016
   [ "$output" = 'export PATH="$HOME/.local/bin:$PATH"' ]
 }
 
 @test "_export_line uses fish syntax for fish" {
   run path::_export_line fish
+  # The rc line carries literal $HOME and $PATH for the shell to expand.
+  # shellcheck disable=SC2016
   [ "$output" = 'set -gx PATH $HOME/.local/bin $PATH' ]
 }
 

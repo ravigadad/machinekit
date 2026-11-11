@@ -230,6 +230,8 @@ setup() {
 }
 
 @test "dir expands a leading tilde in the configured value" {
+  # A literal ~, as a blueprint writes it, for the code under test to expand.
+  # shellcheck disable=SC2088
   STUB_OUTPUT="~/custom/agents" mktest::stub_function config::get "module.agents_config_setup.dir" "--default" "$HOME/.agents"
   run agents_config_setup::dir
   [ "$output" = "$HOME/custom/agents" ]
