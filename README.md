@@ -167,7 +167,7 @@ blueprints.source = "https://github.com/me/blueprints"
 key_generate = true
 ```
 
-machinekit honors the [XDG base-directory](https://specification.freedesktop.org/basedir-spec/latest/) variables throughout: its config lives under `${XDG_CONFIG_HOME:-~/.config}/machinekit/`, its own data (the cached blueprint source, the install clone) under `${XDG_DATA_HOME:-~/.local/share}/machinekit/`, and its record of what the last apply installed under `${XDG_STATE_HOME:-~/.local/state}/machinekit/`. It also respects them when placing config for tools that read them — e.g. the `git` and `mise` module dotfiles land under `$XDG_CONFIG_HOME` when you've set it. The `~/.config`, `~/.local/share` and `~/.local/state` paths shown elsewhere in this README are the defaults when those variables aren't set.
+machinekit honors the [XDG base-directory](https://specification.freedesktop.org/basedir-spec/latest/) variables throughout: its config lives under `${XDG_CONFIG_HOME:-~/.config}/machinekit/`, its own data (the cached blueprint source, the install clone) under `${XDG_DATA_HOME:-~/.local/share}/machinekit/`, and its records (what the last apply installed, and whether the installer may edit your shell rc) under `${XDG_STATE_HOME:-~/.local/state}/machinekit/`. It also respects them when placing config for tools that read them — e.g. the `git` and `mise` module dotfiles land under `$XDG_CONFIG_HOME` when you've set it. The `~/.config`, `~/.local/share` and `~/.local/state` paths shown elsewhere in this README are the defaults when those variables aren't set.
 
 ## Developing machinekit
 

@@ -27,16 +27,25 @@ setup() {
 
 # --- main (sourced) ---
 
-@test "main links machinekit on PATH (modify_path=1) by default" {
+@test "main links machinekit on PATH with the recorded choice when no flag is given" {
+  STUB_OUTPUT="fake-choice" mktest::stub_function path::modify_path_choice ""
   mktest::stub_function path::ensure_on_path
   main
-  mktest::assert_stub_called path::ensure_on_path 1
+  mktest::assert_stub_called path::ensure_on_path fake-choice
 }
 
-@test "main passes modify_path=0 for --no-modify-path" {
+@test "main asks for no PATH edit with --no-modify-path" {
+  STUB_OUTPUT="fake-choice" mktest::stub_function path::modify_path_choice 0
   mktest::stub_function path::ensure_on_path
   main --no-modify-path
-  mktest::assert_stub_called path::ensure_on_path 0
+  mktest::assert_stub_called path::ensure_on_path fake-choice
+}
+
+@test "main asks for the PATH edit with --modify-path" {
+  STUB_OUTPUT="fake-choice" mktest::stub_function path::modify_path_choice 1
+  mktest::stub_function path::ensure_on_path
+  main --modify-path
+  mktest::assert_stub_called path::ensure_on_path fake-choice
 }
 
 # --- bash-floor guard (subprocess; the one collaborator we can't stub) ---

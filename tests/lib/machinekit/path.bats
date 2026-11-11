@@ -56,6 +56,44 @@ setup() {
   mktest::assert_stub_not_called path::_write_path_block
 }
 
+# --- path::modify_path_choice ---
+
+@test "modify_path_choice records an explicit choice and prints it" {
+  mktest::stub_function path::_record_modify_path 0
+  run path::modify_path_choice 0
+  [ "$output" = "0" ]
+  mktest::assert_stub_called path::_record_modify_path 0
+}
+
+@test "modify_path_choice falls back to the recorded choice when none is given" {
+  STUB_OUTPUT="0" mktest::stub_function path::_recorded_modify_path
+  mktest::stub_function path::_record_modify_path
+  run path::modify_path_choice ""
+  [ "$output" = "0" ]
+  mktest::assert_stub_not_called path::_record_modify_path
+}
+
+@test "modify_path_choice modifies PATH when nothing was ever recorded" {
+  STUB_RETURN=1 mktest::stub_function path::_recorded_modify_path
+  run path::modify_path_choice ""
+  [ "$output" = "1" ]
+}
+
+# --- path::_record_modify_path / path::_recorded_modify_path ---
+
+@test "_record_modify_path writes the choice under the XDG state dir, where _recorded_modify_path reads it" {
+  export XDG_STATE_HOME="$BATS_TEST_TMPDIR/state"
+  path::_record_modify_path 0
+  [ "$(cat "$XDG_STATE_HOME/machinekit/modify_path")" = "0" ]
+  run path::_recorded_modify_path
+  [ "$output" = "0" ]
+}
+
+@test "_recorded_modify_path fails when nothing was recorded" {
+  export XDG_STATE_HOME="$BATS_TEST_TMPDIR/state"
+  run ! path::_recorded_modify_path
+}
+
 # --- path::_link ---
 
 @test "_link symlinks the public entry into the local bin dir" {

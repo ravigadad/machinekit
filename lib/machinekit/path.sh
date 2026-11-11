@@ -33,6 +33,20 @@ path::ensure_on_path() {
   logging::info "Restart your shell (or source $rc_file) to run 'machinekit'."
 }
 
+# path::modify_path_choice REQUESTED — whether to edit the shell rc (1) or not (0).
+# An explicit REQUESTED (0 or 1) is recorded and used. Without one, the recorded
+# choice applies, so a later update keeps an install's --no-modify-path; with no
+# record, the rc is edited.
+path::modify_path_choice() {
+  local requested="$1"
+  if [ -n "$requested" ]; then
+    path::_record_modify_path "$requested"
+    printf '%s\n' "$requested"
+  else
+    path::_recorded_modify_path || printf '1\n'
+  fi
+}
+
 # Symlink the public entry into ~/.local/bin, re-pointing (-f) to heal a framework
 # that has since moved.
 path::_link() {
@@ -46,6 +60,24 @@ path::_link() {
 # Absolute ~/.local/bin, resolved at call time (tests point HOME at a tmpdir).
 path::_local_bin_dir() {
   printf '%s\n' "$HOME/.local/bin"
+}
+
+path::_record_modify_path() {
+  local record_file
+  record_file="$(path::_modify_path_record_file)"
+  mkdir -p "$(dirname "$record_file")"
+  printf '%s\n' "$1" > "$record_file"
+}
+
+path::_recorded_modify_path() {
+  local record_file
+  record_file="$(path::_modify_path_record_file)"
+  [ -f "$record_file" ] || return 1
+  cat "$record_file"
+}
+
+path::_modify_path_record_file() {
+  printf '%s\n' "${XDG_STATE_HOME:-$HOME/.local/state}/machinekit/modify_path"
 }
 
 # The shell the user runs, by name (zsh, bash, fish, …); empty if $SHELL is unset.
