@@ -183,6 +183,10 @@ Shipped: a machine type can change, add to, or turn off one entry of something `
 
 Shipped: turning off or deleting an entry, or dropping a module, makes the next apply offer to remove the services, files and Syncthing folders installed for it, behind the same consent as any other outward act. Data is never removed. Modules declare what they install through a `<name>::installed_artifacts` hook, and each apply records the declared set so the next one can tell what dropped out. See [architecture.md § Removing what is no longer configured](./architecture.md#removing-what-is-no-longer-configured).
 
+### Updating machinekit itself
+
+Shipped: `machinekit update` moves machinekit's clone to its newest release, or to the tip of `main` with `update.track = "main"`, and refuses when the clone has local changes unless given `--reset`. `machinekit apply` warns when machinekit isn't on its target, and with `--auto-update` updates first. See [architecture.md § Updating machinekit](./architecture.md#updating-machinekit).
+
 The roadmap stops being prescriptive here. The architecture supports incremental addition; what gets added is a function of what the framework actually needs in use.
 
 ---

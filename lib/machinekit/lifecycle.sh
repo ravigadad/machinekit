@@ -58,7 +58,7 @@ lifecycle::acquire_lock() {
     return 0
   fi
 
-  local msg="Another machinekit apply is already running"
+  local msg="Another machinekit apply or update is already running"
   [ -n "$holder_pid" ] && msg="$msg (PID $holder_pid)"
   lifecycle::fail "$msg. If it's not running, remove: $_MK_LOCK_DIR"
 }

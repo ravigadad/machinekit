@@ -35,9 +35,19 @@ The starter blueprint (`machinekit generate`) ships a `~/.ssh/config` (mode 600;
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/ravigadad/machinekit/main/install.sh)"
 ```
 
-This clones machinekit to `~/.local/share/machinekit/framework` (override with `MACHINEKIT_FRAMEWORK_DIR=/your/path`), installs a modern bash if the system one is too old, and links the `machinekit` command into `~/.local/bin` on your `PATH` — so you can run `machinekit` by name. Pass `--no-modify-path` to link the command but leave your shell rc untouched (it then prints how to add `~/.local/bin` to your `PATH` yourself). Re-running updates the existing clone in place.
+This clones machinekit to `~/.local/share/machinekit/framework` (override with `MACHINEKIT_FRAMEWORK_DIR=/your/path`) and moves it to the newest release. It installs a modern bash if the system one is too old, plus Homebrew and machinekit's prerequisites, and links the `machinekit` command into `~/.local/bin` on your `PATH`, so you can run `machinekit` by name. Pass `--no-modify-path` to link the command but leave your shell rc untouched (it then prints how to add `~/.local/bin` to your `PATH` yourself); later updates remember that choice, and `--modify-path` undoes it. Re-running the one-liner on an installed machine updates it, the same as `machinekit update`.
 
 Installing the tool does **not** apply a blueprint — that's a separate step (see [Quick start](#quick-start)).
+
+## Updating
+
+```bash
+machinekit update
+```
+
+This moves machinekit to its newest release, the highest `X.Y.Z` tag. To follow the tip of `main` instead, set `update.track = "main"` in your [defaults file](#per-user-defaults--xdg-directories) or `MACHINEKIT_UPDATE_TRACK=main`; `update.track = "release"` (the default) goes back to releases. The update refuses when machinekit's own clone has local changes or commits, and lists them; `machinekit update --reset` discards them and updates anyway, keeping untracked files and local branches.
+
+`machinekit apply` checks for an update first and warns when machinekit isn't on its target, then carries on. With `--auto-update` (or `MACHINEKIT_AUTO_UPDATE=1`, or `auto_update = true` in the defaults file), it updates first and then applies under the new version. A dry run only warns. If the check can't reach GitHub, apply warns and carries on.
 
 ## CLI structure
 
@@ -49,6 +59,7 @@ machinekit ships a single user-facing command, `machinekit`, that dispatches to 
 | `machinekit generate <path>`   | Scaffold a fresh blueprint repo from the template |
 | `machinekit secrets list`      | List each secret the active modules need with its resolved source (pool, secrets manager, or missing); applies nothing, but readies an active secrets manager (which may authenticate) |
 | `machinekit secrets put [<name>]` | Age-encrypt a value and place it as a pool secret, or file an already-encrypted `.age` as-is (value via stdin/file/prompt, never an argument); writes to a working tree, never git |
+| `machinekit update [--reset]` | Update machinekit itself to its newest release (or the tip of `main`; see [Updating](#updating)) |
 
 Run any subcommand with `--help` for its full flag list.
 
@@ -162,6 +173,7 @@ Inputs you'd otherwise re-pass on every apply can live in a per-user defaults fi
 ```toml
 machine_type = "dev"
 blueprints.source = "https://github.com/me/blueprints"
+auto_update = true
 
 [ssh]
 key_generate = true
@@ -191,6 +203,7 @@ machinekit/
 │   ├── machinekit-apply          # apply a blueprint
 │   ├── machinekit-generate       # scaffold a fresh blueprint
 │   ├── machinekit-secrets        # inspect the secrets pool (read-only)
+│   ├── machinekit-update         # update machinekit's own clone to its newest release
 │   └── machinekit-ensure-on-path # installer helper: link the command into ~/.local/bin + onto PATH
 ├── lib/                          # execution code (bin/ is a thin dispatcher)
 │   ├── machinekit.sh             # aggregator: sources all of lib/machinekit/* eagerly

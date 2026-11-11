@@ -1,31 +1,40 @@
 #!/bin/bash
-# Install machinekit on a fresh machine: fetch the framework, ensure its
-# prerequisites, and put the `machinekit` command on your PATH — leaving the tool
-# ready to run. It does NOT apply a blueprint; installing machinekit and applying
-# a blueprint are separate steps, and a first-time installer usually has no
-# blueprint yet.
+# Install machinekit, or update an existing install: fetch the framework, move it
+# to its newest release (via `machinekit update`), ensure its prerequisites, and
+# put the `machinekit` command on your PATH — leaving the tool ready to run. It
+# does NOT apply a blueprint; installing machinekit and applying a blueprint are
+# separate steps, and a first-time installer usually has no blueprint yet.
 #
 # Usage (brew-style one-liner):
 #   /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/ravigadad/machinekit/main/install.sh)" -- [--no-modify-path]
 #
 # --no-modify-path links the command into ~/.local/bin but leaves your shell rc
-# alone. Override the framework location: MACHINEKIT_FRAMEWORK_DIR=/your/path
+# alone, and later updates remember it. Override the framework location:
+# MACHINEKIT_FRAMEWORK_DIR=/your/path
 #
 # Runs under stock /bin/bash, so keep this file 3.2-safe (part of the bootstrap
 # island — see lib/common/bash_floor.sh).
 
 set -euo pipefail
 
-MACHINEKIT_REPO="https://github.com/ravigadad/machinekit.git"
+MACHINEKIT_REPO="${MACHINEKIT_REPO:-https://github.com/ravigadad/machinekit.git}"
 MACHINEKIT_DIR="${MACHINEKIT_FRAMEWORK_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/machinekit/framework}"
 
-if [ -d "$MACHINEKIT_DIR/.git" ]; then
-  printf 'machinekit: updating %s\n' "$MACHINEKIT_DIR" >&2
-  git -C "$MACHINEKIT_DIR" pull --ff-only
-else
-  printf 'machinekit: cloning to %s\n' "$MACHINEKIT_DIR" >&2
-  mkdir -p "$(dirname "$MACHINEKIT_DIR")"
-  git clone "$MACHINEKIT_REPO" "$MACHINEKIT_DIR"
+# `machinekit update` moves the clone to its target, then runs this script again
+# from the new code with _MK_FRAMEWORK_UPDATED set, and that run does the install
+# steps below.
+if [ -z "${_MK_FRAMEWORK_UPDATED:-}" ]; then
+  if [ ! -d "$MACHINEKIT_DIR/.git" ]; then
+    printf 'machinekit: cloning to %s\n' "$MACHINEKIT_DIR" >&2
+    mkdir -p "$(dirname "$MACHINEKIT_DIR")"
+    git clone "$MACHINEKIT_REPO" "$MACHINEKIT_DIR"
+  elif [ ! -f "$MACHINEKIT_DIR/libexec/machinekit-update" ]; then
+    # A clone from before machinekit could update itself: pulling main once gives
+    # it the update command.
+    printf 'machinekit: updating %s\n' "$MACHINEKIT_DIR" >&2
+    git -C "$MACHINEKIT_DIR" pull --ff-only
+  fi
+  exec "$MACHINEKIT_DIR/bin/machinekit" update "$@"
 fi
 
 # Ensure a bash that meets the version floor exists, installing Homebrew's bash if
@@ -39,5 +48,5 @@ modern_bash="$(bootstrap::bash::ensure_modern_bash)"
 # Pass through flags like --no-modify-path from the install one-liner.
 "$modern_bash" "$MACHINEKIT_DIR/libexec/machinekit-ensure-on-path" "$@"
 
-printf 'machinekit: installed to %s\n' "$MACHINEKIT_DIR" >&2
-printf 'machinekit: run "machinekit apply --help" to get started.\n' >&2
+printf 'machinekit: ready in %s\n' "$MACHINEKIT_DIR" >&2
+printf 'machinekit: run "machinekit --help" to see what it does.\n' >&2
