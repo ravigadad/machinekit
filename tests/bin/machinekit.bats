@@ -72,3 +72,15 @@ require_modern_bash() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"Usage: machinekit generate"* ]]
 }
+
+@test "update --help dispatches to machinekit-update and exits 0" {
+  require_modern_bash
+  MACHINEKIT_BASH="$BASH" run "$MACHINEKIT_DIR/bin/machinekit" update --help
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Usage: machinekit update"* ]]
+}
+
+@test "usage lists the update subcommand" {
+  run "$MACHINEKIT_DIR/bin/machinekit" --help
+  [[ "$output" == *"update "* ]]
+}

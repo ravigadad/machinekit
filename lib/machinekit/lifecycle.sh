@@ -25,6 +25,14 @@ lifecycle::run_cleanup() {
   done
 }
 
+# Replace this process with COMMAND. exec keeps the PID and skips the EXIT trap, so
+# without running the cleanup chain first the new process would find this run's
+# lock (holding its own PID) and its context store still in place.
+lifecycle::exec() {
+  lifecycle::run_cleanup
+  exec "$@"
+}
+
 # Module-level state shared between acquire and release across the cleanup trap boundary.
 _MK_LOCK_DIR=""
 
@@ -50,7 +58,7 @@ lifecycle::acquire_lock() {
     return 0
   fi
 
-  local msg="Another machinekit apply is already running"
+  local msg="Another machinekit apply or update is already running"
   [ -n "$holder_pid" ] && msg="$msg (PID $holder_pid)"
   lifecycle::fail "$msg. If it's not running, remove: $_MK_LOCK_DIR"
 }

@@ -26,6 +26,8 @@ source "$_mk_core_dir/managed_block.sh"
 source "$_mk_core_dir/service.sh"
 # shellcheck source=machinekit/path.sh
 source "$_mk_core_dir/path.sh"
+# shellcheck source=machinekit/framework.sh
+source "$_mk_core_dir/framework.sh"
 # shellcheck source=machinekit/blueprints.sh
 source "$_mk_core_dir/blueprints.sh"
 # shellcheck source=machinekit/config.sh

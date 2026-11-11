@@ -23,7 +23,7 @@ source "$MACHINEKIT_DIR/lib/machinekit/path.sh"
 
 usage() {
   cat <<'EOF'
-Usage: machinekit-ensure-on-path [--no-modify-path]
+Usage: machinekit-ensure-on-path [--no-modify-path | --modify-path]
 
 Link the machinekit command into ~/.local/bin and add that directory to your
 shell's PATH, so machinekit is callable by name. Run by the installer; safe to
@@ -31,22 +31,26 @@ re-run.
 
 Options:
   --no-modify-path   Link the command but don't edit your shell rc; print how to
-                     add ~/.local/bin to PATH yourself.
+                     add ~/.local/bin to PATH yourself. Remembered for later runs.
+  --modify-path      Edit your shell rc, undoing an earlier --no-modify-path.
+                     Without either flag, the last choice applies.
   -h, --help         Show this message and exit.
 EOF
 }
 
 main() {
-  local modify_path=1
+  local requested_modify_path="" modify_path
   while [ $# -gt 0 ]; do
     case "$1" in
-      --no-modify-path) modify_path=0; shift ;;
+      --no-modify-path) requested_modify_path=0; shift ;;
+      --modify-path)    requested_modify_path=1; shift ;;
       -h|--help)        usage; exit 0 ;;
       --)               shift; break ;;
       -*)               lifecycle::fail "Unknown flag: $1 (try --help)" ;;
       *)                lifecycle::fail "Unexpected argument: $1" ;;
     esac
   done
+  modify_path=${ path::modify_path_choice "$requested_modify_path"; }
   path::ensure_on_path "$modify_path"
 }
 

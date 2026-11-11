@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# machinekit update (impl) — move machinekit's clone to its update target, then
+# rerun the installer's steps from the new code. Invoked by `machinekit update`
+# under a bash that meets the version floor (bin/machinekit resolves one); not a
+# public entry point. The guard below makes a direct invocation under an old bash
+# fail cleanly instead of throwing a syntax error.
+
+MACHINEKIT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=../lib/common/bash_floor.sh
+source "$MACHINEKIT_DIR/lib/common/bash_floor.sh"
+bash_floor::guard
+
+set -euo pipefail
+
+# shellcheck source=../lib/machinekit.sh
+source "$MACHINEKIT_DIR/lib/machinekit.sh"
+
+usage() {
+  cat <<'EOF'
+Usage: machinekit update [flags]
+
+Update machinekit to its newest release, or to the tip of main when
+update.track = "main" (in ~/.config/machinekit/defaults.toml, or
+MACHINEKIT_UPDATE_TRACK=main). Refuses when machinekit's own clone has local
+changes or commits.
+
+Flags:
+      --reset              Discard local changes to machinekit's clone and update
+                           anyway. Untracked files and local branches are kept.
+      --no-modify-path     Don't add ~/.local/bin to your shell's PATH. Remembered
+                           for later updates.
+      --modify-path        Add it, undoing an earlier --no-modify-path.
+  -h, --help               Show this message and exit.
+EOF
+}
+
+main() {
+  local reset=0 install_args=()
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --reset)                         reset=1; shift ;;
+      --no-modify-path|--modify-path)  install_args+=("$1"); shift ;;
+      -h|--help)                       usage; exit 0 ;;
+      -*)                              lifecycle::fail "Unknown flag: $1 (try --help)" ;;
+      *)                               lifecycle::fail "Unexpected argument: $1 (try --help)" ;;
+    esac
+  done
+
+  context::init_storage
+  lifecycle::acquire_lock
+  brew::bootstrap
+  prerequisites::install
+  context::seed_from_flags
+  context::load_user_config
+  framework::update "$reset"
+  # The update replaced this script's files. main is already parsed, and exec
+  # leaves nothing more to read from them.
+  lifecycle::exec env _MK_FRAMEWORK_UPDATED=1 MACHINEKIT_FRAMEWORK_DIR="$MACHINEKIT_DIR" /bin/bash "$MACHINEKIT_DIR/install.sh" "${install_args[@]}"
+}
+
+[ "${BASH_SOURCE[0]}" != "$0" ] || main "$@"

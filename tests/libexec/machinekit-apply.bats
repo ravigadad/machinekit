@@ -17,6 +17,7 @@ setup() {
   mktest::stub_function context::seed_from_flags
   mktest::stub_function context::load_user_config
   mktest::stub_function input::detect_mode
+  mktest::stub_function framework::check_for_update
   mktest::stub_function sudo::ensure
   mktest::stub_function preflight::run
   mktest::stub_function modules::run_installs
@@ -48,6 +49,7 @@ setup() {
   mktest::assert_stub_called_in_order context::seed_from_flags
   mktest::assert_stub_called_in_order context::load_user_config
   mktest::assert_stub_called_in_order input::detect_mode
+  mktest::assert_stub_called_in_order framework::check_for_update
   mktest::assert_stub_called_in_order sudo::ensure
   mktest::assert_stub_called_in_order preflight::run
   mktest::assert_stub_called_in_order modules::run_installs
@@ -81,6 +83,17 @@ setup() {
 @test "--help lists the removal consent flag with its env var" {
   run "$MACHINEKIT_DIR/libexec/machinekit-apply" --help
   [[ "$output" == *"--remove-unconfigured"*"MACHINEKIT_REMOVE_UNCONFIGURED=1"* ]]
+}
+
+@test "--help lists the auto-update flag with its env var" {
+  run "$MACHINEKIT_DIR/libexec/machinekit-apply" --help
+  [[ "$output" == *"--auto-update"*"MACHINEKIT_AUTO_UPDATE=1"* ]]
+}
+
+@test "--auto-update sets MACHINEKIT_AUTO_UPDATE for the run" {
+  set -- --auto-update
+  source "$MACHINEKIT_DIR/libexec/machinekit-apply"
+  [ "$MACHINEKIT_AUTO_UPDATE" = "1" ]
 }
 
 @test "--version prints the version and exits 0" {
