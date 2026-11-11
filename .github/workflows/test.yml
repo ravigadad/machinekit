@@ -13,7 +13,13 @@ env:
 
 jobs:
   bats:
-    runs-on: ubuntu-latest
+    # macOS's /bin/bash is 3.2, the old bash the bash-floor tests need; Ubuntu's
+    # meets the floor, so those tests skip there.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -25,6 +31,7 @@ jobs:
       # This step automatically happens when run in github, but local
       # simulation via `act` needs it explicitly set.
       - name: Add Homebrew to PATH
+        if: runner.os == 'Linux'
         run: echo "/home/linuxbrew/.linuxbrew/bin" >> $GITHUB_PATH
       - name: Install dependency formulas
         run: brew install bats-core jq toml2json bash

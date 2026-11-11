@@ -198,7 +198,7 @@ Env var convention: `MACHINEKIT_` prefix, full descriptive name, no abbreviation
 
 ## Cross-platform posture
 
-machinekit is designed to support macOS and Linux, and will continue to be. Primary development happens on macOS (Apple Silicon and Intel), and the CI suite includes end-to-end tests on Ubuntu VMs. Choices that would lock the framework to a single OS are explicitly avoided; per-OS branch points are flagged from day one. Broadening Linux support is incremental work, not a redesign.
+machinekit is designed to support macOS and Linux, and will continue to be. Primary development happens on macOS (Apple Silicon and Intel), CI runs the test suite on both Ubuntu and macOS, and the end-to-end tests on Ubuntu and macOS VMs run locally. Choices that would lock the framework to a single OS are explicitly avoided; per-OS branch points are flagged from day one. Broadening Linux support is incremental work, not a redesign.
 
 ### Already cross-platform
 

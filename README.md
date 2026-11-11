@@ -217,7 +217,7 @@ Your blueprints repo lives separately (anywhere you like), scaffolded by `machin
 
 ## Platform support
 
-macOS (Apple Silicon and Intel) and Linux (Ubuntu and compatible). machinekit is designed to support both and will continue to be — the CI suite includes end-to-end tests on Ubuntu VMs. Primary development happens on macOS, so Linux incompatibilities may be caught less quickly, but cross-platform compatibility is a project goal. See [docs/architecture.md#cross-platform-posture](./docs/architecture.md#cross-platform-posture) for the approach.
+macOS (Apple Silicon and Intel) and Linux (Ubuntu and compatible). machinekit is designed to support both and will continue to be — CI runs the test suite on both Ubuntu and macOS, and the end-to-end tests on Ubuntu and macOS VMs run locally. Primary development happens on macOS, so Linux incompatibilities may be caught less quickly, but cross-platform compatibility is a project goal. See [docs/architecture.md#cross-platform-posture](./docs/architecture.md#cross-platform-posture) for the approach.
 
 ## Acknowledgements
 

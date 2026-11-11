@@ -95,6 +95,7 @@ setup() {
 }
 
 @test "run directly under a bash below the floor fails cleanly" {
+  mktest::skip_unless_system_bash_below_floor
   run /bin/bash "$MACHINEKIT_DIR/libexec/machinekit-apply" --help
   [ "$status" -eq 1 ]
   [[ "$output" == *"bash >= 5.3 required"* ]]
