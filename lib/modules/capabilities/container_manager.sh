@@ -40,7 +40,7 @@ container_manager::host_alias() {
 # (the get.docker.com script doesn't add them), so docker needs sudo; on
 # macOS/OrbStack the socket is user-owned.
 container_manager::_docker() {
-  case "$(context::get os.family)" in
+  case "${ context::get os.family; }" in
     linux) sudo docker "$@" ;;
     *)     docker "$@" ;;
   esac
@@ -48,7 +48,7 @@ container_manager::_docker() {
 
 container_manager::default_satisfier() {
   local family
-  family=$(context::get "os.family")
+  family=${ context::get "os.family"; }
   case "$family" in
     darwin) printf 'orbstack\n' ;;
     linux)  printf 'docker_ce\n' ;;

@@ -58,6 +58,19 @@ setup() {
   run ! syncthing::preflight
 }
 
+@test "preflight stops when reading the folders fails" {
+  STUB_EXIT=97 mktest::stub_function syncthing::_folders
+  run syncthing::preflight
+  [ "$status" -eq 97 ]
+}
+
+@test "preflight stops when reading the peers fails" {
+  STUB_OUTPUT="" mktest::stub_function syncthing::_folders
+  STUB_EXIT=97 mktest::stub_function syncthing::_peers
+  run syncthing::preflight
+  [ "$status" -eq 97 ]
+}
+
 # --- install (orchestration) ---
 
 @test "install installs the formula then stops in dry-run" {
@@ -127,6 +140,102 @@ setup() {
   mktest::assert_stub_called context::set syncthing.joined false
 }
 
+@test "install stops when joining the mesh fails" {
+  mktest::stub_function brew::install_formula syncthing
+  STUB_RETURN=1 mktest::stub_function input::is_dry_run
+  mktest::stub_function syncthing::_ensure_identity
+  mktest::stub_function syncthing::_start
+  mktest::stub_function syncthing::_wait_ready
+  mktest::stub_function syncthing::_apply_discovery
+  mktest::stub_function syncthing::_join_consented
+  mktest::stub_function context::set
+  STUB_EXIT=97 mktest::stub_function syncthing::_join
+  mktest::stub_function syncthing::_ensure_folders
+  mktest::stub_function syncthing::_install_conflict_notifier
+  run syncthing::install
+  [ "$status" -eq 97 ]
+  mktest::assert_stub_not_called syncthing::_ensure_folders
+}
+
+# --- installed_file_patterns ---
+
+@test "installed_file_patterns names the conflict manifest and scan script" {
+  run syncthing::installed_file_patterns
+  [ "$status" -eq 0 ]
+  [ "$output" = $'data\tconflict_manifest.txt\ndata\tconflict_scan.sh' ]
+}
+
+# --- installed_artifacts ---
+
+@test "installed_artifacts declares the conflict service, its manifest and scan script, and each folder in the daemon" {
+  STUB_OUTPUT='[{"id":"folder-one","path":"/fake/one"},{"id":"folder-two","path":"/fake/two"}]' \
+    mktest::stub_function syncthing::_folders
+  STUB_OUTPUT="/fake/conflict_manifest.txt" mktest::stub_function syncthing::_conflict_manifest_path
+  STUB_OUTPUT="/fake/conflict_scan.sh" mktest::stub_function syncthing::_conflict_scan_script_path
+  run syncthing::installed_artifacts
+  [ "$status" -eq 0 ]
+  [ "$output" = $'service\tsyncthing-conflicts\nfile\t/fake/conflict_manifest.txt\nfile\t/fake/conflict_scan.sh\nfolder\tfolder-one\nfolder\tfolder-two' ]
+}
+
+@test "installed_artifacts declares nothing when no folders are configured" {
+  STUB_OUTPUT="" mktest::stub_function syncthing::_folders
+  run syncthing::installed_artifacts
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "installed_artifacts stops when reading the folders fails" {
+  STUB_EXIT=97 mktest::stub_function syncthing::_folders
+  run syncthing::installed_artifacts
+  [ "$status" -eq 97 ]
+}
+
+# --- remove_artifact ---
+
+@test "remove_artifact removes a folder from the daemon" {
+  mktest::stub_function syncthing::_remove_folder "the-folder"
+  syncthing::remove_artifact folder "the-folder"
+  mktest::assert_stub_called syncthing::_remove_folder "the-folder"
+}
+
+@test "remove_artifact passes on a failed folder removal" {
+  STUB_RETURN=1 mktest::stub_function syncthing::_remove_folder "the-folder"
+  run syncthing::remove_artifact folder "the-folder"
+  [ "$status" -eq 1 ]
+}
+
+@test "remove_artifact fails for a kind syncthing does not install" {
+  mktest::stub_function syncthing::_remove_folder
+  run syncthing::remove_artifact device "the-device"
+  [ "$status" -eq 1 ]
+  mktest::assert_stub_not_called syncthing::_remove_folder
+  MATCH="device" mktest::assert_stub_called logging::warn
+}
+
+# --- _remove_folder ---
+
+@test "_remove_folder deletes a folder the daemon has" {
+  STUB_OUTPUT=$'other\nthe-folder' mktest::stub_function syncthing::_cli_folder_ids
+  mktest::stub_function syncthing::_cli_delete_folder "the-folder"
+  syncthing::_remove_folder "the-folder"
+  mktest::assert_stub_called syncthing::_cli_delete_folder "the-folder"
+}
+
+@test "_remove_folder succeeds without deleting when the daemon no longer has the folder" {
+  STUB_OUTPUT=$'other' mktest::stub_function syncthing::_cli_folder_ids
+  mktest::stub_function syncthing::_cli_delete_folder
+  syncthing::_remove_folder "the-folder"
+  mktest::assert_stub_not_called syncthing::_cli_delete_folder
+}
+
+@test "_remove_folder fails when the daemon cannot list its folders" {
+  STUB_RETURN=1 mktest::stub_function syncthing::_cli_folder_ids
+  mktest::stub_function syncthing::_cli_delete_folder
+  run syncthing::_remove_folder "the-folder"
+  [ "$status" -eq 1 ]
+  mktest::assert_stub_not_called syncthing::_cli_delete_folder
+}
+
 # --- _validate_folders / _validate_peers (real jq) ---
 
 @test "_validate_folders passes a well-formed list" {
@@ -181,6 +290,7 @@ setup() {
 # --- _validate_ignores (real jq) ---
 
 @test "_validate_ignores passes the common defaults-on, no-patterns folder" {
+  STUB_OUTPUT='[]' mktest::stub_function syncthing::_ignore_patterns '{"id":"agents","path":"/p"}'
   STUB_EXIT=1 mktest::stub_function lifecycle::fail
   syncthing::_validate_ignores '[{"id":"agents","path":"/p"}]'
   mktest::assert_stub_not_called lifecycle::fail
@@ -188,22 +298,31 @@ setup() {
 }
 
 @test "_validate_ignores passes an opt-out folder with no patterns" {
+  STUB_OUTPUT='[]' mktest::stub_function syncthing::_ignore_patterns '{"id":"agents","path":"/p","manage_stignore":false}'
   STUB_EXIT=1 mktest::stub_function lifecycle::fail
   syncthing::_validate_ignores '[{"id":"agents","path":"/p","manage_stignore":false}]'
   mktest::assert_stub_not_called lifecycle::fail
 }
 
-@test "_validate_ignores fails an opt-out folder that still lists ignore_patterns" {
+@test "_validate_ignores fails an opt-out folder that still has patterns" {
+  STUB_OUTPUT='["x"]' mktest::stub_function syncthing::_ignore_patterns '{"id":"agents","path":"/p","manage_stignore":false}'
   STUB_EXIT=1 mktest::stub_function lifecycle::fail
-  run ! syncthing::_validate_ignores '[{"id":"agents","path":"/p","manage_stignore":false,"ignore_patterns":["x"]}]'
+  run ! syncthing::_validate_ignores '[{"id":"agents","path":"/p","manage_stignore":false}]'
   MATCH="manage_stignore = false" mktest::assert_stub_called lifecycle::fail
 }
 
 @test "_validate_ignores warns on the all-empty no-op folder" {
+  STUB_OUTPUT='[]' mktest::stub_function syncthing::_ignore_patterns '{"id":"agents","path":"/p","add_default_ignores":false}'
   STUB_EXIT=1 mktest::stub_function lifecycle::fail
   syncthing::_validate_ignores '[{"id":"agents","path":"/p","add_default_ignores":false}]'
   mktest::assert_stub_not_called lifecycle::fail
   MATCH="empty managed block" mktest::assert_stub_called logging::warn
+}
+
+@test "_validate_ignores stops when reading a folder's ignore patterns fails" {
+  STUB_EXIT=97 mktest::stub_function syncthing::_ignore_patterns
+  run syncthing::_validate_ignores '[{"id":"fake","path":"/fake"}]'
+  [ "$status" -eq 97 ]
 }
 
 # --- _ensure_identity ---
@@ -245,6 +364,13 @@ setup() {
   [ -z "$output" ]
 }
 
+@test "postflight_info stops when reading the join outcome fails" {
+  STUB_RETURN=1 mktest::stub_function syncthing::_is_hub
+  STUB_EXIT=97 mktest::stub_function syncthing::_joined
+  run syncthing::postflight_info
+  [ "$status" -eq 97 ]
+}
+
 # --- postflight_instructions ---
 
 @test "postflight_instructions tells the hub operator to wire its id into clients" {
@@ -266,6 +392,13 @@ setup() {
   STUB_OUTPUT="false" mktest::stub_function syncthing::_joined
   run syncthing::postflight_instructions
   [[ "$output" == *"MACHINEKIT_SYNCTHING_JOIN=1"* ]]
+}
+
+@test "postflight_instructions stops when reading the join outcome fails" {
+  STUB_RETURN=1 mktest::stub_function syncthing::_is_hub
+  STUB_EXIT=97 mktest::stub_function syncthing::_joined
+  run syncthing::postflight_instructions
+  [ "$status" -eq 97 ]
 }
 
 # --- _joined ---
@@ -291,6 +424,12 @@ setup() {
   mktest::stub_function syncthing::_ensure_folder
   syncthing::_ensure_folders ""
   mktest::assert_stub_not_called syncthing::_ensure_folder
+}
+
+@test "_ensure_folders stops when reading the folders fails" {
+  STUB_EXIT=97 mktest::stub_function syncthing::_folders
+  run syncthing::_ensure_folders "fake-device"
+  [ "$status" -eq 97 ]
 }
 
 # --- _ensure_folder (member: per-folder logic; real mkdir, stubbed collaborators) ---
@@ -342,31 +481,49 @@ setup() {
   mktest::assert_stub_not_called managed_block::ensure
 }
 
-@test "_stignore_patterns emits user patterns before defaults" {
-  run syncthing::_stignore_patterns '{"ignore_patterns":["custom1","custom2"]}'
-  [ "${lines[0]}" = "custom1" ]
-  [ "${lines[1]}" = "custom2" ]
-  [ "${lines[2]}" = "(?d).DS_Store" ]
-  [ "${lines[3]}" = "(?d)._*" ]
+@test "_apply_stignore stops when building the patterns fails" {
+  mktest::stub_function managed_block::ensure
+  STUB_EXIT=97 mktest::stub_function syncthing::_stignore_patterns
+  run syncthing::_apply_stignore '{"id":"fake"}' "$BATS_TEST_TMPDIR"
+  [ "$status" -eq 97 ]
+}
+
+# A type's additional_ignore_patterns go before the inherited patterns, which go
+# before the defaults: .stignore applies the first match, so the most specific
+# layer's negation has to come first to win.
+@test "_stignore_patterns emits the folder's patterns, additions first, before the defaults" {
+  STUB_OUTPUT='["custom1","custom2"]' mktest::stub_function syncthing::_ignore_patterns '{"id":"agents"}'
+  STUB_OUTPUT=$'default1\ndefault2' mktest::stub_function syncthing::_default_ignores
+  run syncthing::_stignore_patterns '{"id":"agents"}'
+  [ "$output" = "$(printf 'custom1\ncustom2\ndefault1\ndefault2')" ]
 }
 
 @test "_stignore_patterns omits defaults when add_default_ignores is false" {
-  run syncthing::_stignore_patterns '{"ignore_patterns":["custom1"],"add_default_ignores":false}'
+  STUB_OUTPUT='["custom1"]' mktest::stub_function syncthing::_ignore_patterns '{"id":"agents","add_default_ignores":false}'
+  mktest::stub_function syncthing::_default_ignores
+  run syncthing::_stignore_patterns '{"id":"agents","add_default_ignores":false}'
   [ "$output" = "custom1" ]
+  mktest::assert_stub_not_called syncthing::_default_ignores
 }
 
-@test "_stignore_patterns de-duplicates, keeping the user's occurrence" {
-  run syncthing::_stignore_patterns '{"ignore_patterns":["(?d).DS_Store"]}'
-  [ "${lines[0]}" = "(?d).DS_Store" ]
-  [ "${lines[1]}" = "(?d)._*" ]
-  [ "${lines[2]}" = ".git" ]
-  [ "${#lines[@]}" -eq 3 ]
+@test "_stignore_patterns de-duplicates, keeping the first occurrence" {
+  STUB_OUTPUT='["shared","custom1"]' mktest::stub_function syncthing::_ignore_patterns '{"id":"agents"}'
+  STUB_OUTPUT=$'shared\ndefault1' mktest::stub_function syncthing::_default_ignores
+  run syncthing::_stignore_patterns '{"id":"agents"}'
+  [ "$output" = "$(printf 'shared\ncustom1\ndefault1')" ]
 }
 
-@test "_stignore_patterns emits only defaults when the folder has no patterns" {
-  run syncthing::_stignore_patterns '{}'
-  [ "${lines[0]}" = "(?d).DS_Store" ]
-  [ "${lines[1]}" = "(?d)._*" ]
+@test "_stignore_patterns stops when reading the ignore patterns fails" {
+  STUB_EXIT=97 mktest::stub_function syncthing::_ignore_patterns
+  run syncthing::_stignore_patterns '{"id":"fake"}'
+  [ "$status" -eq 97 ]
+}
+
+@test "_ignore_patterns combines the folder's patterns with its additions first, naming the folder" {
+  STUB_OUTPUT='the-pattern-list' mktest::stub_function config::extended_list \
+    '{"id":"agents"}' "ignore_patterns" "before" "syncthing folder 'agents'"
+  run syncthing::_ignore_patterns '{"id":"agents"}'
+  [ "$output" = "the-pattern-list" ]
 }
 
 @test "_default_ignores lists the default ignore patterns, including a non-deletable .git" {
@@ -437,6 +594,12 @@ setup() {
   mktest::assert_stub_not_called syncthing::_ensure_peer
 }
 
+@test "_ensure_peers stops when reading the peers fails" {
+  STUB_EXIT=97 mktest::stub_function syncthing::_peers
+  run syncthing::_ensure_peers
+  [ "$status" -eq 97 ]
+}
+
 # --- _ensure_peer (member: per-peer logic; stubbed CLI) ---
 
 @test "_ensure_peer adds the peer and echoes its device id" {
@@ -471,6 +634,13 @@ setup() {
   mktest::assert_stub_not_called syncthing::_cli_set_option
 }
 
+@test "_apply_discovery stops when building the discovery options fails" {
+  STUB_EXIT=97 mktest::stub_function syncthing::_discovery_options
+  mktest::stub_function syncthing::_cli_set_option
+  run syncthing::_apply_discovery
+  [ "$status" -eq 97 ]
+}
+
 # --- _join_consented ---
 
 @test "_join_consented is true when consent is given" {
@@ -481,6 +651,12 @@ setup() {
 @test "_join_consented is false when consent is withheld" {
   STUB_OUTPUT="false" mktest::stub_function context::get "syncthing.join" "--default" "false" "--coerce" "boolean" "--prompt" "Join the Syncthing mesh now (add peers and share folders)? (y/n)"
   run ! syncthing::_join_consented
+}
+
+@test "_join_consented stops when reading the consent signal fails" {
+  STUB_EXIT=97 mktest::stub_function context::get
+  run syncthing::_join_consented
+  [ "$status" -eq 97 ]
 }
 
 # --- _install_conflict_notifier (orchestrator) ---
@@ -505,6 +681,12 @@ setup() {
   mktest::assert_stub_not_called syncthing::_write_conflict_manifest
   mktest::assert_stub_not_called syncthing::_install_conflict_scan_script
   mktest::assert_stub_not_called syncthing::_install_conflict_service
+}
+
+@test "_install_conflict_notifier stops when reading the folders fails" {
+  STUB_EXIT=97 mktest::stub_function syncthing::_folders
+  run syncthing::_install_conflict_notifier
+  [ "$status" -eq 97 ]
 }
 
 # --- _write_conflict_manifest ---
@@ -553,32 +735,40 @@ setup() {
     "MK_SYNCTHING_CONFLICT_NOTIFY=/n/notify"
 }
 
-# --- config accessors ---
-
-@test "_folders returns the configured folders" {
-  STUB_OUTPUT='[{"id":"agents","path":"/p"}]' mktest::stub_function config::get "module.syncthing.folders"
-  run syncthing::_folders
-  [ "$output" = '[{"id":"agents","path":"/p"}]' ]
+@test "_install_conflict_service stops when reading the interval fails" {
+  STUB_OUTPUT="/s/conflict_scan.sh" mktest::stub_function syncthing::_conflict_scan_script_path
+  STUB_OUTPUT="/m/manifest.txt" mktest::stub_function syncthing::_conflict_manifest_path
+  STUB_OUTPUT="/n/notify" mktest::stub_function syncthing::_conflict_notify
+  STUB_EXIT=97 mktest::stub_function syncthing::_conflict_interval
+  mktest::stub_function service::install_interval
+  run syncthing::_install_conflict_service
+  [ "$status" -eq 97 ]
+  mktest::assert_stub_not_called service::install_interval
 }
 
-@test "_folders is empty (success) when the key is unset" {
-  STUB_RETURN=1 mktest::stub_function config::get "module.syncthing.folders"
+@test "_install_conflict_service stops when reading the notify command fails" {
+  STUB_OUTPUT="/s/conflict_scan.sh" mktest::stub_function syncthing::_conflict_scan_script_path
+  STUB_OUTPUT="/m/manifest.txt" mktest::stub_function syncthing::_conflict_manifest_path
+  STUB_EXIT=97 mktest::stub_function syncthing::_conflict_notify
+  STUB_OUTPUT="300" mktest::stub_function syncthing::_conflict_interval
+  mktest::stub_function service::install_interval
+  run syncthing::_install_conflict_service
+  [ "$status" -eq 97 ]
+  mktest::assert_stub_not_called service::install_interval
+}
+
+# --- config accessors ---
+
+@test "_folders returns the configured folders, each key filling the folder id" {
+  STUB_OUTPUT="the-folders" mktest::stub_function config::entries "module.syncthing.folders" "id"
   run syncthing::_folders
-  [ "$status" -eq 0 ]
-  [ -z "$output" ]
+  [ "$output" = "the-folders" ]
 }
 
 @test "_peers returns the configured peers" {
-  STUB_OUTPUT='[{"device_id":"DEV"}]' mktest::stub_function config::get "module.syncthing.peers"
+  STUB_OUTPUT="the-peers" mktest::stub_function config::entries "module.syncthing.peers"
   run syncthing::_peers
-  [ "$output" = '[{"device_id":"DEV"}]' ]
-}
-
-@test "_peers is empty (success) when the key is unset" {
-  STUB_RETURN=1 mktest::stub_function config::get "module.syncthing.peers"
-  run syncthing::_peers
-  [ "$status" -eq 0 ]
-  [ -z "$output" ]
+  [ "$output" = "the-peers" ]
 }
 
 @test "_folder_type defaults to send-receive when the folder declares none" {
@@ -599,6 +789,12 @@ setup() {
 @test "_is_hub is false by default" {
   STUB_OUTPUT="false" mktest::stub_function config::get "module.syncthing.hub" "--default" "false" "--coerce" "boolean"
   run ! syncthing::_is_hub
+}
+
+@test "_is_hub stops when reading the hub flag fails" {
+  STUB_EXIT=97 mktest::stub_function config::get
+  run syncthing::_is_hub
+  [ "$status" -eq 97 ]
 }
 
 @test "_discovery_preset returns configured value, defaulting to tailnet" {
@@ -630,6 +826,13 @@ setup() {
   MATCH="unknown discovery" mktest::assert_stub_called lifecycle::fail
 }
 
+@test "_discovery_options stops when reading the preset fails" {
+  STUB_EXIT=97 mktest::stub_function syncthing::_discovery_preset
+  STUB_EXIT=1 mktest::stub_function lifecycle::fail
+  run syncthing::_discovery_options
+  [ "$status" -eq 97 ]
+}
+
 @test "_conflict_notify defaults to empty" {
   STUB_OUTPUT="" mktest::stub_function config::get "module.syncthing.notify" "--default" ""
   run syncthing::_conflict_notify
@@ -644,32 +847,16 @@ setup() {
 
 # --- conflict notifier paths ---
 
-@test "_conflict_manifest_path locates the manifest under the default data dir" {
-  HOME=/fake/home
-  unset XDG_DATA_HOME
+@test "_conflict_manifest_path places the manifest in the module's own data dir" {
+  STUB_OUTPUT="/fake/data/syncthing" mktest::stub_function artifacts::module_data_dir syncthing
   run syncthing::_conflict_manifest_path
-  [ "$output" = "/fake/home/.local/share/machinekit/syncthing/conflict_manifest.txt" ]
+  [ "$output" = "/fake/data/syncthing/conflict_manifest.txt" ]
 }
 
-@test "_conflict_manifest_path honors XDG_DATA_HOME" {
-  HOME=/fake/home
-  XDG_DATA_HOME=/fake/home/.xdg-data
-  run syncthing::_conflict_manifest_path
-  [ "$output" = "/fake/home/.xdg-data/machinekit/syncthing/conflict_manifest.txt" ]
-}
-
-@test "_conflict_scan_script_path locates the installed scan script under the default data dir" {
-  HOME=/fake/home
-  unset XDG_DATA_HOME
+@test "_conflict_scan_script_path places the installed scan script in the module's own data dir" {
+  STUB_OUTPUT="/fake/data/syncthing" mktest::stub_function artifacts::module_data_dir syncthing
   run syncthing::_conflict_scan_script_path
-  [ "$output" = "/fake/home/.local/share/machinekit/syncthing/conflict_scan.sh" ]
-}
-
-@test "_conflict_scan_script_path honors XDG_DATA_HOME" {
-  HOME=/fake/home
-  XDG_DATA_HOME=/fake/home/.xdg-data
-  run syncthing::_conflict_scan_script_path
-  [ "$output" = "/fake/home/.xdg-data/machinekit/syncthing/conflict_scan.sh" ]
+  [ "$output" = "/fake/data/syncthing/conflict_scan.sh" ]
 }
 
 # --- external command seam (real `syncthing`/`brew` stubbed; asserts our
@@ -695,6 +882,19 @@ setup() {
   STUB_OUTPUT="DEVICE-ABC" mktest::stub_function syncthing "device-id"
   run syncthing::_own_device_id
   [ "$output" = "DEVICE-ABC" ]
+}
+
+@test "_cli_folder_ids lists the daemon's folder ids" {
+  STUB_OUTPUT=$'folder-one\nfolder-two' mktest::stub_function syncthing "cli" "config" "folders" "list"
+  run syncthing::_cli_folder_ids
+  [ "$status" -eq 0 ]
+  [ "$output" = $'folder-one\nfolder-two' ]
+}
+
+@test "_cli_delete_folder deletes the folder from the daemon's config" {
+  mktest::stub_function syncthing "cli" "config" "folders" "the-folder" "delete"
+  syncthing::_cli_delete_folder "the-folder"
+  mktest::assert_stub_called syncthing "cli" "config" "folders" "the-folder" "delete"
 }
 
 @test "_cli_pending_devices lists the device ids awaiting approval" {

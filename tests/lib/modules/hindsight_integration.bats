@@ -43,6 +43,23 @@ setup() {
   [ "${#lines[@]}" -eq 1 ]
 }
 
+@test "requires stops when declaring its secrets fails" {
+  STUB_EXIT=97 mktest::stub_function hindsight_integration::declared_secrets
+  mktest::stub_function secrets::declared_backend_requirements
+  mktest::stub_function hindsight_integration::_integrations
+  run hindsight_integration::requires
+  [ "$status" -eq 97 ]
+  mktest::assert_stub_not_called secrets::declared_backend_requirements
+}
+
+@test "requires stops when reading the integrations fails" {
+  STUB_OUTPUT=$'hindsight/tenant_api_key\ttrue\ttrue' mktest::stub_function hindsight_integration::declared_secrets
+  secrets::declared_backend_requirements() { cat > /dev/null; }
+  STUB_EXIT=97 mktest::stub_function hindsight_integration::_integrations
+  run hindsight_integration::requires
+  [ "$status" -eq 97 ]
+}
+
 # --- after ---
 
 @test "after orders integration behind hindsight_server" {
@@ -122,6 +139,32 @@ setup() {
   MATCH="unknown integration.*bar" mktest::assert_stub_called lifecycle::fail
 }
 
+@test "preflight stops when reading server_url fails" {
+  STUB_EXIT=97 mktest::stub_function hindsight_integration::_server_url
+  STUB_OUTPUT="" mktest::stub_function hindsight_integration::_server_host
+  STUB_EXIT=1 mktest::stub_function lifecycle::fail
+  run hindsight_integration::preflight
+  [ "$status" -eq 97 ]
+}
+
+@test "preflight stops when reading server_host fails" {
+  STUB_OUTPUT="" mktest::stub_function hindsight_integration::_server_url
+  STUB_EXIT=97 mktest::stub_function hindsight_integration::_server_host
+  STUB_EXIT=1 mktest::stub_function lifecycle::fail
+  run hindsight_integration::preflight
+  [ "$status" -eq 97 ]
+}
+
+@test "preflight stops when reading the integrations fails" {
+  STUB_OUTPUT="" mktest::stub_function hindsight_integration::_server_url
+  STUB_OUTPUT="memory-server" mktest::stub_function hindsight_integration::_server_host
+  mktest::stub_function hindsight_integration::_validate_bank_configs
+  mktest::stub_function hindsight_integration::_validate_retain_settings
+  STUB_EXIT=97 mktest::stub_function hindsight_integration::_integrations
+  run hindsight_integration::preflight
+  [ "$status" -eq 97 ]
+}
+
 # --- declared_secrets ---
 
 @test "declared_secrets declares the fleet tenant key required and generatable" {
@@ -142,6 +185,14 @@ setup() {
   mktest::assert_stub_called_in_order hindsight_integration::foo::install
   mktest::assert_stub_called_in_order hindsight_integration::bar::install
   mktest::assert_stub_called_in_order hindsight_integration::_ensure_configs
+}
+
+@test "install stops when reading the integrations fails" {
+  STUB_EXIT=97 mktest::stub_function hindsight_integration::_integrations
+  mktest::stub_function hindsight_integration::_ensure_configs
+  run hindsight_integration::install
+  [ "$status" -eq 97 ]
+  mktest::assert_stub_not_called hindsight_integration::_ensure_configs
 }
 
 # --- _ensure_configs ---
@@ -204,6 +255,82 @@ setup() {
   mktest::assert_stub_called hindsight_integration::bar::write_config "http://memory-server:8888" "TOK" "coding" $'coding\npersonal' $'coding\nmusic' '{"retain_mode":"chunked"}'
 }
 
+@test "_ensure_configs stops when building the api url fails" {
+  STUB_OUTPUT="foo" mktest::stub_function hindsight_integration::_integrations
+  STUB_RETURN=1 mktest::stub_function hindsight_integration::foo::config_present
+  STUB_RETURN=1 mktest::stub_function input::is_dry_run
+  STUB_EXIT=97 mktest::stub_function hindsight_integration::_api_url
+  run hindsight_integration::_ensure_configs
+  [ "$status" -eq 97 ]
+}
+
+@test "_ensure_configs stops when resolving the tenant key fails" {
+  STUB_OUTPUT="foo" mktest::stub_function hindsight_integration::_integrations
+  STUB_RETURN=1 mktest::stub_function hindsight_integration::foo::config_present
+  STUB_RETURN=1 mktest::stub_function input::is_dry_run
+  STUB_OUTPUT="http://fake" mktest::stub_function hindsight_integration::_api_url
+  STUB_EXIT=97 mktest::stub_function hindsight::secrets::resolve "tenant_api_key"
+  run hindsight_integration::_ensure_configs
+  [ "$status" -eq 97 ]
+}
+
+@test "_ensure_configs stops when reading the bank id prefix fails" {
+  STUB_OUTPUT="foo" mktest::stub_function hindsight_integration::_integrations
+  STUB_RETURN=1 mktest::stub_function hindsight_integration::foo::config_present
+  STUB_RETURN=1 mktest::stub_function input::is_dry_run
+  STUB_OUTPUT="http://fake" mktest::stub_function hindsight_integration::_api_url
+  STUB_OUTPUT="fake-token" mktest::stub_function hindsight::secrets::resolve "tenant_api_key"
+  STUB_EXIT=97 mktest::stub_function hindsight_integration::_bank_id_prefix
+  run hindsight_integration::_ensure_configs
+  [ "$status" -eq 97 ]
+}
+
+@test "_ensure_configs stops when reading the auto-recall banks fails" {
+  STUB_OUTPUT="foo" mktest::stub_function hindsight_integration::_integrations
+  STUB_RETURN=1 mktest::stub_function hindsight_integration::foo::config_present
+  STUB_RETURN=1 mktest::stub_function input::is_dry_run
+  STUB_OUTPUT="http://fake" mktest::stub_function hindsight_integration::_api_url
+  STUB_OUTPUT="fake-token" mktest::stub_function hindsight::secrets::resolve "tenant_api_key"
+  STUB_OUTPUT="fake-prefix" mktest::stub_function hindsight_integration::_bank_id_prefix
+  STUB_EXIT=97 mktest::stub_function hindsight_integration::_auto_recall_banks
+  run hindsight_integration::_ensure_configs
+  [ "$status" -eq 97 ]
+}
+
+@test "_ensure_configs stops when reading the tool-use banks fails" {
+  STUB_OUTPUT="foo" mktest::stub_function hindsight_integration::_integrations
+  STUB_RETURN=1 mktest::stub_function hindsight_integration::foo::config_present
+  STUB_RETURN=1 mktest::stub_function input::is_dry_run
+  STUB_OUTPUT="http://fake" mktest::stub_function hindsight_integration::_api_url
+  STUB_OUTPUT="fake-token" mktest::stub_function hindsight::secrets::resolve "tenant_api_key"
+  STUB_OUTPUT="fake-prefix" mktest::stub_function hindsight_integration::_bank_id_prefix
+  STUB_OUTPUT="fake_bank" mktest::stub_function hindsight_integration::_auto_recall_banks
+  STUB_EXIT=97 mktest::stub_function hindsight_integration::_tool_use_banks
+  run hindsight_integration::_ensure_configs
+  [ "$status" -eq 97 ]
+}
+
+@test "_ensure_configs stops when building the retain settings fails" {
+  STUB_OUTPUT="foo" mktest::stub_function hindsight_integration::_integrations
+  STUB_RETURN=1 mktest::stub_function hindsight_integration::foo::config_present
+  STUB_RETURN=1 mktest::stub_function input::is_dry_run
+  STUB_OUTPUT="http://fake" mktest::stub_function hindsight_integration::_api_url
+  STUB_OUTPUT="fake-token" mktest::stub_function hindsight::secrets::resolve "tenant_api_key"
+  STUB_OUTPUT="fake-prefix" mktest::stub_function hindsight_integration::_bank_id_prefix
+  STUB_OUTPUT="fake_bank" mktest::stub_function hindsight_integration::_auto_recall_banks
+  STUB_OUTPUT="fake_bank" mktest::stub_function hindsight_integration::_tool_use_banks
+  STUB_EXIT=97 mktest::stub_function hindsight_integration::_retain_settings_json
+  run hindsight_integration::_ensure_configs
+  [ "$status" -eq 97 ]
+}
+
+@test "_ensure_configs stops when reading the integrations fails" {
+  STUB_EXIT=97 mktest::stub_function hindsight_integration::_integrations
+  mktest::stub_function input::is_dry_run
+  run hindsight_integration::_ensure_configs
+  [ "$status" -eq 97 ]
+}
+
 # --- _is_available / _available ---
 
 @test "_is_available is true for a sourced integration" {
@@ -243,6 +370,30 @@ setup() {
   [ "$output" = "https://hindsight.example/api" ]
 }
 
+@test "_api_url stops when reading server_url fails" {
+  STUB_EXIT=97 mktest::stub_function hindsight_integration::_server_url
+  STUB_OUTPUT="fake-host" mktest::stub_function hindsight_integration::_server_host
+  STUB_OUTPUT="1234" mktest::stub_function hindsight_integration::_api_port
+  run hindsight_integration::_api_url
+  [ "$status" -eq 97 ]
+}
+
+@test "_api_url stops when reading server_host fails" {
+  STUB_OUTPUT="" mktest::stub_function hindsight_integration::_server_url
+  STUB_EXIT=97 mktest::stub_function hindsight_integration::_server_host
+  STUB_OUTPUT="1234" mktest::stub_function hindsight_integration::_api_port
+  run hindsight_integration::_api_url
+  [ "$status" -eq 97 ]
+}
+
+@test "_api_url stops when reading the api port fails" {
+  STUB_OUTPUT="" mktest::stub_function hindsight_integration::_server_url
+  STUB_OUTPUT="fake-host" mktest::stub_function hindsight_integration::_server_host
+  STUB_EXIT=97 mktest::stub_function hindsight_integration::_api_port
+  run hindsight_integration::_api_url
+  [ "$status" -eq 97 ]
+}
+
 # --- config readers ---
 
 @test "_integrations reads the module.hindsight_integration.integrations array" {
@@ -251,6 +402,13 @@ setup() {
   run hindsight_integration::_integrations
   [ "${lines[0]}" = "claude_code" ]
   [ "${lines[1]}" = "codex" ]
+}
+
+@test "_integrations is empty (success) when the key is unset" {
+  STUB_RETURN=1 mktest::stub_function config::get_array "module.hindsight_integration.integrations"
+  run hindsight_integration::_integrations
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
 }
 
 @test "_server_host reads module.hindsight_integration.server_host with no default" {
@@ -364,6 +522,30 @@ setup() {
   [ "$(jq -c '.' <<< "$output")" = '{}' ]
 }
 
+@test "_retain_settings_json stops when reading the retain mode fails" {
+  STUB_EXIT=97 mktest::stub_function hindsight_integration::_retain_mode
+  STUB_OUTPUT="null" mktest::stub_function hindsight_integration::_retain_every_n_turns
+  STUB_OUTPUT="null" mktest::stub_function hindsight_integration::_retain_overlap_turns
+  run hindsight_integration::_retain_settings_json
+  [ "$status" -eq 97 ]
+}
+
+@test "_retain_settings_json stops when reading the every-n-turns count fails" {
+  STUB_OUTPUT="chunked" mktest::stub_function hindsight_integration::_retain_mode
+  STUB_EXIT=97 mktest::stub_function hindsight_integration::_retain_every_n_turns
+  STUB_OUTPUT="null" mktest::stub_function hindsight_integration::_retain_overlap_turns
+  run hindsight_integration::_retain_settings_json
+  [ "$status" -eq 97 ]
+}
+
+@test "_retain_settings_json stops when reading the overlap count fails" {
+  STUB_OUTPUT="chunked" mktest::stub_function hindsight_integration::_retain_mode
+  STUB_OUTPUT="null" mktest::stub_function hindsight_integration::_retain_every_n_turns
+  STUB_EXIT=97 mktest::stub_function hindsight_integration::_retain_overlap_turns
+  run hindsight_integration::_retain_settings_json
+  [ "$status" -eq 97 ]
+}
+
 # --- _validate_retain_settings / _validate_retain_mode / _validate_turn_count ---
 
 @test "_validate_retain_settings checks the mode and both turn counts" {
@@ -376,6 +558,25 @@ setup() {
   mktest::assert_stub_called hindsight_integration::_validate_retain_mode
   mktest::assert_stub_called hindsight_integration::_validate_turn_count "retain_every_n_turns" "10" "1"
   mktest::assert_stub_called hindsight_integration::_validate_turn_count "retain_overlap_turns" "2" "0"
+}
+
+@test "_validate_retain_settings stops when reading the every-n-turns count fails" {
+  STUB_EXIT=97 mktest::stub_function hindsight_integration::_retain_every_n_turns
+  STUB_OUTPUT="2" mktest::stub_function hindsight_integration::_retain_overlap_turns
+  mktest::stub_function hindsight_integration::_validate_retain_mode
+  mktest::stub_function hindsight_integration::_validate_turn_count
+  run hindsight_integration::_validate_retain_settings
+  [ "$status" -eq 97 ]
+  mktest::assert_stub_not_called hindsight_integration::_validate_turn_count
+}
+
+@test "_validate_retain_settings stops when reading the overlap count fails" {
+  STUB_OUTPUT="10" mktest::stub_function hindsight_integration::_retain_every_n_turns
+  STUB_EXIT=97 mktest::stub_function hindsight_integration::_retain_overlap_turns
+  mktest::stub_function hindsight_integration::_validate_retain_mode
+  mktest::stub_function hindsight_integration::_validate_turn_count
+  run hindsight_integration::_validate_retain_settings
+  [ "$status" -eq 97 ]
 }
 
 @test "_validate_retain_mode accepts each documented mode" {
@@ -399,6 +600,13 @@ setup() {
   STUB_OUTPUT="full_session" mktest::stub_function hindsight_integration::_retain_mode
   run ! hindsight_integration::_validate_retain_mode
   MATCH="retain_mode.*full_session" mktest::assert_stub_called lifecycle::fail
+}
+
+@test "_validate_retain_mode stops when reading the retain mode fails" {
+  STUB_EXIT=1 mktest::stub_function lifecycle::fail
+  STUB_EXIT=97 mktest::stub_function hindsight_integration::_retain_mode
+  run hindsight_integration::_validate_retain_mode
+  [ "$status" -eq 97 ]
 }
 
 @test "_validate_turn_count accepts a whole number at the minimum" {
@@ -476,14 +684,27 @@ setup() {
   mktest::assert_stub_called hindsight_integration::_configure_banks
 }
 
+@test "post_apply stops when reading the bank names for a dry run fails" {
+  mktest::stub_function hindsight_integration::_has_bank_configs
+  mktest::stub_function input::is_dry_run
+  mktest::stub_function logging::dry_run
+  STUB_EXIT=97 mktest::stub_function hindsight_integration::_configured_bank_names
+  run hindsight_integration::post_apply
+  [ "$status" -eq 97 ]
+}
+
 # --- _validate_bank_configs ---
 
-@test "_validate_bank_configs hands the configured banks to validate_shape" {
-  STUB_OUTPUT='{"music":{"retain_mission":"m"}}' \
-    mktest::stub_function hindsight_integration::_bank_configs_json
-  mktest::stub_function hindsight::banks::validate_shape
+@test "_validate_bank_configs reads the bank table, which stops the run when it is malformed" {
+  mktest::stub_function hindsight_integration::_bank_configs_json
   hindsight_integration::_validate_bank_configs
-  mktest::assert_stub_called hindsight::banks::validate_shape '{"music":{"retain_mission":"m"}}'
+  mktest::assert_stub_called hindsight_integration::_bank_configs_json
+}
+
+@test "_validate_bank_configs stops when reading the banks fails" {
+  STUB_EXIT=97 mktest::stub_function hindsight_integration::_bank_configs_json
+  run hindsight_integration::_validate_bank_configs
+  [ "$status" -eq 97 ]
 }
 
 # --- _configure_banks ---
@@ -559,6 +780,60 @@ setup() {
   MATCH="isn't shared yet" mktest::assert_stub_not_called logging::warn
 }
 
+@test "_configure_banks stops when reading the bank names fails" {
+  mktest::stub_function hindsight::secrets::provided tenant_api_key
+  STUB_OUTPUT="http://fake" mktest::stub_function hindsight_integration::_api_url
+  mktest::stub_function hindsight::banks::server_reachable "http://fake"
+  STUB_OUTPUT="fake-token" mktest::stub_function hindsight::secrets::resolve tenant_api_key
+  STUB_OUTPUT="fake-tenant" mktest::stub_function hindsight_integration::_bank_config_tenant
+  STUB_EXIT=97 mktest::stub_function hindsight_integration::_configured_bank_names
+  run hindsight_integration::_configure_banks
+  [ "$status" -eq 97 ]
+}
+
+@test "_configure_banks stops when reading a bank's config fails" {
+  mktest::stub_function hindsight::secrets::provided tenant_api_key
+  STUB_OUTPUT="http://fake" mktest::stub_function hindsight_integration::_api_url
+  mktest::stub_function hindsight::banks::server_reachable "http://fake"
+  STUB_OUTPUT="fake-token" mktest::stub_function hindsight::secrets::resolve tenant_api_key
+  STUB_OUTPUT="fake-tenant" mktest::stub_function hindsight_integration::_bank_config_tenant
+  STUB_OUTPUT="fake_bank" mktest::stub_function hindsight_integration::_configured_bank_names
+  mktest::stub_function hindsight::banks::configure
+  STUB_EXIT=97 mktest::stub_function hindsight_integration::_bank_config_json
+  run hindsight_integration::_configure_banks
+  [ "$status" -eq 97 ]
+}
+
+@test "_configure_banks stops when resolving the tenant key fails" {
+  mktest::stub_function hindsight::secrets::provided tenant_api_key
+  STUB_OUTPUT="http://fake" mktest::stub_function hindsight_integration::_api_url
+  mktest::stub_function hindsight::banks::server_reachable "http://fake"
+  STUB_EXIT=97 mktest::stub_function hindsight::secrets::resolve tenant_api_key
+  run hindsight_integration::_configure_banks
+  [ "$status" -eq 97 ]
+}
+
+@test "_configure_banks stops when building the api url fails" {
+  mktest::stub_function hindsight::secrets::provided tenant_api_key
+  STUB_EXIT=97 mktest::stub_function hindsight_integration::_api_url
+  mktest::stub_function hindsight::banks::server_reachable
+  mktest::stub_function context::set
+  run hindsight_integration::_configure_banks
+  [ "$status" -eq 97 ]
+}
+
+@test "_configure_banks stops when reading the tenant fails" {
+  mktest::stub_function hindsight::secrets::provided tenant_api_key
+  STUB_OUTPUT="http://fake" mktest::stub_function hindsight_integration::_api_url
+  mktest::stub_function hindsight::banks::server_reachable "http://fake"
+  STUB_OUTPUT="fake-token" mktest::stub_function hindsight::secrets::resolve tenant_api_key
+  STUB_EXIT=97 mktest::stub_function hindsight_integration::_bank_config_tenant
+  STUB_OUTPUT="" mktest::stub_function hindsight_integration::_configured_bank_names
+  mktest::stub_function context::set
+  run hindsight_integration::_configure_banks
+  [ "$status" -eq 97 ]
+}
+
 # --- postflight_info ---
 
 @test "postflight_info reports the wired integrations and the server url" {
@@ -573,6 +848,20 @@ setup() {
   STUB_OUTPUT="" mktest::stub_function hindsight_integration::_integrations
   run hindsight_integration::postflight_info
   [ -z "$output" ]
+}
+
+@test "postflight_info stops when building the api url fails" {
+  STUB_OUTPUT="fake_integration" mktest::stub_function hindsight_integration::_integrations
+  STUB_EXIT=97 mktest::stub_function hindsight_integration::_api_url
+  run hindsight_integration::postflight_info
+  [ "$status" -eq 97 ]
+}
+
+@test "postflight_info stops when reading the integrations fails" {
+  STUB_EXIT=97 mktest::stub_function hindsight_integration::_integrations
+  STUB_OUTPUT="http://fake" mktest::stub_function hindsight_integration::_api_url
+  run hindsight_integration::postflight_info
+  [ "$status" -eq 97 ]
 }
 
 # --- postflight_instructions ---
@@ -616,6 +905,13 @@ setup() {
   [ -z "$output" ]
 }
 
+@test "postflight_instructions stops when reading the bank config outcome fails" {
+  mktest::stub_function hindsight::secrets::provided "tenant_api_key"
+  STUB_EXIT=97 mktest::stub_function hindsight_integration::_bank_config_outcome
+  run hindsight_integration::postflight_instructions
+  [ "$status" -eq 97 ]
+}
+
 # --- _bank_config_outcome / _hindsight_server_active ---
 
 @test "_bank_config_outcome reads the recorded outcome, defaulting to empty" {
@@ -638,16 +934,15 @@ setup() {
 
 # --- bank config readers ---
 
-@test "_bank_configs_json reads the additional_banks subtree via config::get_json, defaulting to {}" {
-  STUB_OUTPUT='{"music":{"retain_mission":"m"}}' mktest::stub_function config::get_json \
-    "module.hindsight_integration.additional_banks" "{}"
+@test "_bank_configs_json reads the enabled banks of the bank_configs collection" {
+  STUB_OUTPUT='{"music":{"retain_mission":"m"}}' mktest::stub_function config::enabled_table \
+    "module.hindsight_integration.bank_configs"
   run hindsight_integration::_bank_configs_json
   [ "$output" = '{"music":{"retain_mission":"m"}}' ]
 }
 
-@test "_configured_bank_names lists banks in blueprint order, not sorted" {
-  # Keys deliberately non-alphabetical so the test distinguishes keys_unsorted
-  # (blueprint order) from keys (sorted would be coding, music, personal).
+@test "_configured_bank_names lists the bank names in the order the bank configs give them" {
+  # Out of alphabetical order, so the test fails if the function sorts the names.
   STUB_OUTPUT='{"personal":{},"music":{},"coding":{}}' mktest::stub_function hindsight_integration::_bank_configs_json
   run hindsight_integration::_configured_bank_names
   [ "${lines[0]}" = "personal" ]
@@ -655,11 +950,23 @@ setup() {
   [ "${lines[2]}" = "coding" ]
 }
 
+@test "_configured_bank_names stops when reading the bank configs fails" {
+  STUB_EXIT=97 mktest::stub_function hindsight_integration::_bank_configs_json
+  run hindsight_integration::_configured_bank_names
+  [ "$status" -eq 97 ]
+}
+
 @test "_bank_config_json returns one bank's table verbatim" {
   STUB_OUTPUT='{"music":{"retain_mission":"m"},"personal":{"disposition_empathy":4}}' \
     mktest::stub_function hindsight_integration::_bank_configs_json
   run hindsight_integration::_bank_config_json personal
   [ "$output" = '{"disposition_empathy":4}' ]
+}
+
+@test "_bank_config_json stops when reading the bank configs fails" {
+  STUB_EXIT=97 mktest::stub_function hindsight_integration::_bank_configs_json
+  run hindsight_integration::_bank_config_json "fake_bank"
+  [ "$status" -eq 97 ]
 }
 
 @test "_has_bank_configs is true when a config exists" {
@@ -671,6 +978,12 @@ setup() {
   STUB_OUTPUT="" mktest::stub_function hindsight_integration::_configured_bank_names
   run hindsight_integration::_has_bank_configs
   [ "$status" -ne 0 ]
+}
+
+@test "_has_bank_configs stops when reading the bank names fails" {
+  STUB_EXIT=97 mktest::stub_function hindsight_integration::_configured_bank_names
+  run hindsight_integration::_has_bank_configs
+  [ "$status" -eq 97 ]
 }
 
 # --- _bank_config_tenant ---
@@ -702,4 +1015,12 @@ setup() {
     --prompt "$_HINDSIGHT_INTEGRATION_CONSENT_PROMPT"
   run hindsight_integration::_configure_banks_consented
   [ "$status" -ne 0 ]
+}
+
+@test "_configure_banks_consented stops when reading consent fails" {
+  STUB_EXIT=97 mktest::stub_function context::get \
+    "hindsight_integration.configure_banks" --default false --coerce boolean \
+    --prompt "$_HINDSIGHT_INTEGRATION_CONSENT_PROMPT"
+  run hindsight_integration::_configure_banks_consented
+  [ "$status" -eq 97 ]
 }

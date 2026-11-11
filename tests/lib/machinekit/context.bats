@@ -84,6 +84,13 @@ setup() {
   [ "$(jq -r '.a' "$MACHINEKIT_CONTEXT_FILE")" = "scalar" ]
 }
 
+@test "set stops when looking up the store fails" {
+  mktest::stub_function context::init_storage
+  STUB_EXIT=97 mktest::stub_function context::_internal_storage_file
+  run context::set "test.key" "fake-value"
+  [ "$status" -eq 97 ]
+}
+
 # --- context::get (orchestration: cascade + short-circuit) ---
 
 @test "get returns the store value and does not consult env" {
@@ -257,6 +264,36 @@ setup() {
   MATCH="--bogus" mktest::assert_stub_called lifecycle::fail
 }
 
+@test "get stops when reading the store fails" {
+  STUB_EXIT=97 mktest::stub_function context::_from_store "test.key"
+  run context::get "test.key"
+  [ "$status" -eq 97 ]
+}
+
+@test "get stops when reading the env var fails" {
+  STUB_RETURN=1 mktest::stub_function context::_from_store "test.key"
+  STUB_EXIT=97 mktest::stub_function context::_from_env "test.key"
+  run context::get "test.key"
+  [ "$status" -eq 97 ]
+}
+
+@test "get stops when reading the per-user defaults fails" {
+  STUB_RETURN=1 mktest::stub_function context::_from_store "test.key"
+  STUB_RETURN=1 mktest::stub_function context::_from_env "test.key"
+  STUB_EXIT=97 mktest::stub_function context::_from_user_config "test.key"
+  run context::get "test.key"
+  [ "$status" -eq 97 ]
+}
+
+@test "get stops when prompting fails" {
+  STUB_RETURN=1 mktest::stub_function context::_from_store "test.key"
+  STUB_RETURN=1 mktest::stub_function context::_from_env "test.key"
+  STUB_RETURN=1 mktest::stub_function context::_from_user_config "test.key"
+  STUB_EXIT=97 mktest::stub_function context::_prompt "test.key" "--label" "Ask me"
+  run context::get "test.key" --prompt "Ask me"
+  [ "$status" -eq 97 ]
+}
+
 # --- context::set_array / context::get_array ---
 
 @test "set_array delegates to set --json with a JSON array" {
@@ -291,6 +328,12 @@ setup() {
   [ -z "$output" ]
 }
 
+@test "get_array stops when reading the store fails" {
+  STUB_EXIT=97 mktest::stub_function context::_from_store "test.key"
+  run context::get_array "test.key"
+  [ "$status" -eq 97 ]
+}
+
 # --- context::get_json ---
 
 @test "get_json returns an object subtree as compact JSON" {
@@ -319,6 +362,13 @@ setup() {
 @test "fresh context starts as an empty object" {
   result=$(context::json)
   [ "$result" = "{}" ]
+}
+
+@test "json stops when looking up the store fails" {
+  mktest::stub_function context::init_storage
+  STUB_EXIT=97 mktest::stub_function context::_internal_storage_file
+  run context::json
+  [ "$status" -eq 97 ]
 }
 
 # --- context::seed_from_flags ---
@@ -460,6 +510,15 @@ setup() {
 
 @test "_from_store returns 1 for an unset key" {
   run ! context::_from_store "test.key"
+}
+
+# --- context::_read_path ---
+
+@test "_read_path stops when looking up the store fails" {
+  mktest::stub_function context::init_storage
+  STUB_EXIT=97 mktest::stub_function context::_internal_storage_file
+  run context::_read_path -r "test.key"
+  [ "$status" -eq 97 ]
 }
 
 # --- context::_from_env ---

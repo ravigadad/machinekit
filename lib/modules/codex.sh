@@ -27,7 +27,7 @@ codex::install() {
 # so a fresh install stands in for "not set up yet"; an already-present CLI stays
 # quiet.
 codex::postflight_instructions() {
-  [ "$(context::get "codex.installed" --default false)" = "true" ] || return 0
+  [ "${ context::get "codex.installed" --default false; }" = "true" ] || return 0
   printf "Run 'codex' and sign in to finish setup — machinekit does not handle auth.\n"
 }
 

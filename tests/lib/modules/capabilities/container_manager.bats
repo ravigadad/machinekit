@@ -38,6 +38,12 @@ setup() {
   [ "$status" -ne 0 ]
 }
 
+@test "default_satisfier stops when reading the os family fails" {
+  STUB_EXIT=97 mktest::stub_function context::get "os.family"
+  run container_manager::default_satisfier
+  [ "$status" -eq 97 ]
+}
+
 # --- container_manager::requires ---
 
 @test "requires outputs the default_satisfier" {
@@ -102,4 +108,12 @@ setup() {
   mktest::stub_function docker "network" "ls"
   container_manager::_docker network ls
   mktest::assert_stub_called docker "network" "ls"
+}
+
+@test "_docker stops when reading the os family fails" {
+  STUB_EXIT=97 mktest::stub_function context::get "os.family"
+  mktest::stub_function sudo
+  mktest::stub_function docker
+  run container_manager::_docker network ls
+  [ "$status" -eq 97 ]
 }

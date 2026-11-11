@@ -20,7 +20,6 @@ setup() {
   mktest::stub_function logging::dry_run
   mktest::stub_function logging::warn
 
-  STUB_OUTPUT="$BATS_TEST_TMPDIR/blueprints" mktest::stub_function blueprints::dir
   STUB_OUTPUT="$BATS_TEST_TMPDIR/mods" mktest::stub_function modules::dir
   mkdir -p "$BATS_TEST_TMPDIR/blueprints" "$BATS_TEST_TMPDIR/mods"
 }
@@ -51,6 +50,7 @@ setup() {
 # --- home::staging::build ---
 
 @test "build prepares the staging dir then layers module templates and blueprint home" {
+  STUB_OUTPUT="$BATS_TEST_TMPDIR/blueprints" mktest::stub_function blueprints::dir
   mktest::stub_function home::staging::_prepare_dir
   STUB_OUTPUT=$'foo\nbar' mktest::stub_function context::get_array "modules.active"
   STUB_RETURN=1 mktest::stub_function context::get "machine_type"
@@ -64,6 +64,7 @@ setup() {
 }
 
 @test "build layers only the blueprint home when no modules are active" {
+  STUB_OUTPUT="$BATS_TEST_TMPDIR/blueprints" mktest::stub_function blueprints::dir
   mktest::stub_function home::staging::_prepare_dir
   STUB_RETURN=1 mktest::stub_function context::get_array "modules.active"
   STUB_RETURN=1 mktest::stub_function context::get "machine_type"
@@ -75,6 +76,7 @@ setup() {
 }
 
 @test "build layers machine_type home after blueprint common/home when machine_type is set" {
+  STUB_OUTPUT="$BATS_TEST_TMPDIR/blueprints" mktest::stub_function blueprints::dir
   mktest::stub_function home::staging::_prepare_dir
   STUB_RETURN=1 mktest::stub_function context::get_array "modules.active"
   STUB_OUTPUT="laptop" mktest::stub_function context::get "machine_type"
@@ -87,6 +89,7 @@ setup() {
 }
 
 @test "build skips machine_type home layer when machine_type is not set" {
+  STUB_OUTPUT="$BATS_TEST_TMPDIR/blueprints" mktest::stub_function blueprints::dir
   mktest::stub_function home::staging::_prepare_dir
   STUB_OUTPUT="foo" mktest::stub_function context::get_array "modules.active"
   STUB_RETURN=1 mktest::stub_function context::get "machine_type"
@@ -96,6 +99,34 @@ setup() {
   mktest::assert_stub_called_in_order home::staging::_prepare_dir
   mktest::assert_stub_called_in_order home::staging::_layer_dir "$BATS_TEST_TMPDIR/mods/foo/templates" "foo templates"
   mktest::assert_stub_called_in_order home::staging::_layer_dir "$BATS_TEST_TMPDIR/blueprints/common/home" "blueprint common/home"
+}
+
+@test "build stops when resolving the blueprints dir fails" {
+  mktest::stub_function home::staging::_prepare_dir
+  mktest::stub_function logging::step
+  STUB_EXIT=97 mktest::stub_function blueprints::dir
+  run home::staging::build
+  [ "$status" -eq 97 ]
+}
+
+@test "build stops when reading the active modules fails" {
+  STUB_OUTPUT="$BATS_TEST_TMPDIR/blueprints" mktest::stub_function blueprints::dir
+  mktest::stub_function home::staging::_prepare_dir
+  STUB_EXIT=97 mktest::stub_function context::get_array "modules.active"
+  STUB_RETURN=1 mktest::stub_function context::get "machine_type"
+  mktest::stub_function home::staging::_layer_dir
+  run home::staging::build
+  [ "$status" -eq 97 ]
+}
+
+@test "build stops when reading the machine type fails" {
+  STUB_OUTPUT="$BATS_TEST_TMPDIR/blueprints" mktest::stub_function blueprints::dir
+  mktest::stub_function home::staging::_prepare_dir
+  STUB_RETURN=1 mktest::stub_function context::get_array "modules.active"
+  STUB_EXIT=97 mktest::stub_function context::get "machine_type"
+  mktest::stub_function home::staging::_layer_dir
+  run home::staging::build
+  [ "$status" -eq 97 ]
 }
 
 # --- home::staging::cleanup ---

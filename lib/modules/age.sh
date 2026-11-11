@@ -35,8 +35,8 @@ age::declared_secrets() {
 
 age::preflight() {
   local key_path existing_key_file generate
-  key_path=$(config::get "module.age.key_path" --default "$AGE_KEY_PATH" --store-default)
-  existing_key_file=$(context::get "existing_age_key_file" || true)
+  key_path=${ config::get "module.age.key_path" --default "$AGE_KEY_PATH" --store-default; }
+  existing_key_file=${ context::get "existing_age_key_file" || true; }
 
   if [ -n "$existing_key_file" ]; then
     [ -f "$existing_key_file" ] || lifecycle::fail "age key not found at: $existing_key_file"
@@ -46,14 +46,14 @@ age::preflight() {
     fi
     logging::info "age key: will install from $existing_key_file"
   elif [ -f "$key_path" ]; then
-    generate=$(context::get "age.key_generate" --coerce boolean --default false --store-default)
+    generate=${ context::get "age.key_generate" --coerce boolean --default false --store-default; }
     if [ "$generate" = "true" ]; then
       age::_confirm_overwrite "$key_path" "--generate-age-key"
       logging::info "age key: will generate a new one (overwriting existing)"
     else
       logging::info "age key: using existing $key_path"
     fi
-  elif [ "$(context::get "age.key_generate" --coerce boolean --default false)" = "true" ]; then
+  elif [ "${ context::get "age.key_generate" --coerce boolean --default false; }" = "true" ]; then
     # Match age::install's precedence: an explicit generate request wins over the
     # manager, so the announced plan matches the action that install will take.
     logging::info "age key: will generate a new one"
@@ -65,7 +65,7 @@ age::preflight() {
     local generate_prompt
     # shellcheck disable=SC2059
     printf -v generate_prompt "$_AGE_GENERATE_PROMPT" "$key_path"
-    generate=$(context::get "age.key_generate" --required --coerce boolean --prompt "$generate_prompt")
+    generate=${ context::get "age.key_generate" --required --coerce boolean --prompt "$generate_prompt"; }
     [ "$generate" = "true" ] || lifecycle::fail "No age key available and no instructions were provided for generating or copying one. See --help for options."
     logging::info "age key: will generate a new one"
   fi
@@ -74,10 +74,10 @@ age::preflight() {
 # Prompts the user to confirm overwriting an existing key, failing if they decline.
 # Only called when a conflict is detected.
 age::_confirm_overwrite() {
-  local key_path="$1" problem_flag="$2" overwrite
+  local key_path="$1" problem_flag="$2" overwrite overwrite_prompt
   # shellcheck disable=SC2059
-  printf -v "overwrite_prompt" "$_AGE_OVERWRITE_PROMPT" "$key_path"
-  overwrite=$(context::get "age.key_overwrite" --required --coerce boolean --prompt "$overwrite_prompt")
+  printf -v overwrite_prompt "$_AGE_OVERWRITE_PROMPT" "$key_path"
+  overwrite=${ context::get "age.key_overwrite" --required --coerce boolean --prompt "$overwrite_prompt"; }
   [ "$overwrite" = "true" ] || lifecycle::fail "age key not overwritten. Remove $key_path first, or omit $problem_flag to use the existing key."
 }
 
@@ -86,9 +86,9 @@ age::install() {
   brew::install_formula age
 
   local key_path existing_key_file generate
-  key_path=$(config::get "module.age.key_path")
-  existing_key_file=$(context::get "existing_age_key_file" || true)
-  generate=$(context::get "age.key_generate" --coerce boolean --default false)
+  key_path=${ config::get "module.age.key_path"; }
+  existing_key_file=${ context::get "existing_age_key_file" || true; }
+  generate=${ context::get "age.key_generate" --coerce boolean --default false; }
   age::_warn_source_override "$existing_key_file" "$generate"
 
   if input::is_dry_run; then
@@ -154,7 +154,7 @@ age::_install_use_existing() {
 
 age::_install_from_manager() {
   local key_path="$1" reference
-  reference="$(age::_reference_for_key)"
+  reference=${ age::_reference_for_key; }
   secrets::install_secret_file "$key_path" secrets_manager::fetch "$reference" \
     || lifecycle::fail "age key: the configured secrets manager returned no value for '$reference'."
   logging::success "Installed age key from the configured secrets manager"
@@ -170,7 +170,7 @@ age::file_transforms() {
 # The decryption primitive; stdout output lets callers keep plaintext off disk.
 age::decrypt() {
   local file="$1" key_path
-  key_path=$(config::get "module.age.key_path" --default "$AGE_KEY_PATH")
+  key_path=${ config::get "module.age.key_path" --default "$AGE_KEY_PATH"; }
   [ -f "$key_path" ] || lifecycle::fail "age::decrypt: no age key at $key_path"
   [ -f "$file" ] || lifecycle::fail "age::decrypt: file not found: $file"
   age --decrypt --identity "$key_path" "$file"
@@ -182,7 +182,7 @@ age::decrypt() {
 # handling the public half itself.
 age::recipient() {
   local key_path
-  key_path=$(config::get "module.age.key_path" --default "$AGE_KEY_PATH")
+  key_path=${ config::get "module.age.key_path" --default "$AGE_KEY_PATH"; }
   [ -f "$key_path" ] || lifecycle::fail "age::recipient: no age key at $key_path"
   age-keygen -y "$key_path"
 }
@@ -216,18 +216,21 @@ age::is_encrypted_file() {
 # False covers both "wrong recipient" and "no local key" — the caller phrases why.
 age::can_decrypt() {
   local file="$1" key_path
-  key_path=$(config::get "module.age.key_path" --default "$AGE_KEY_PATH")
+  key_path=${ config::get "module.age.key_path" --default "$AGE_KEY_PATH"; }
   age --decrypt --identity "$key_path" "$file" >/dev/null 2>&1
 }
 
-# age::_key_source_type — the raw configured key source: "file" (copied or
-# generated locally, the default) or "secrets_manager" (fetched from the active
-# satisfier). A pure getter — an unrecognized value is rejected separately by
-# age::assert_key_source_type, run in the main shell at the entry points, so this
-# getter stays side-effect-free and safe to read from anywhere, including the
-# inventory and dependency-graph subshells.
+# age::_key_source_type — the configured key source: "file" (copied or generated
+# locally, the default) or "secrets_manager" (fetched from the active satisfier).
+# An unrecognized value stops the run; the resolver reads it first, through
+# age::requires.
 age::_key_source_type() {
-  config::get "module.age.key_source_type" --default "file"
+  local key_source_type
+  key_source_type=${ config::get "module.age.key_source_type" --default "file"; }
+  case "$key_source_type" in
+    file|secrets_manager) printf '%s\n' "$key_source_type" ;;
+    *) lifecycle::fail "age: invalid module.age.key_source_type '$key_source_type' — expected 'file' or 'secrets_manager'." ;;
+  esac
 }
 
 # age::_reference_for_key — the reference to hand secrets_manager::fetch for the
@@ -239,28 +242,12 @@ age::_reference_for_key() {
 }
 
 # age::_manager_sources_key — true when the age key is configured to come from the
-# secrets manager (key_source_type = secrets_manager), false otherwise. A pure
-# directive: whether the manager actually HOLDS the key is a separate, truthful
-# question, answered by secrets::present in preflight and by the inventory — never
-# assumed here. The value's validity is enforced separately by
-# age::assert_key_source_type at the main-shell entry points, so this predicate
-# stays side-effect-free and safe to call from the subshells that build the
-# inventory (declared_secrets) and the dependency graph (requires), where an
-# aborting exit would be swallowed anyway.
+# secrets manager (key_source_type = secrets_manager), false otherwise. A
+# directive: whether the manager actually HOLDS the key is a separate question,
+# answered by secrets::present in preflight and by the inventory — never assumed
+# here.
 age::_manager_sources_key() {
-  [ "$(age::_key_source_type)" = "secrets_manager" ]
-}
-
-# age::assert_key_source_type — abort on an unrecognized module.age.key_source_type.
-# Run bare at the main-shell entry points so the abort actually halts; the
-# predicate above stays pure precisely so it can run in the inventory and
-# dependency-graph subshells, where an exit would be swallowed. This is the one
-# place the value is validated where lifecycle::fail can stop the run.
-age::assert_key_source_type() {
-  case "$(age::_key_source_type)" in
-    file|secrets_manager) ;;
-    *) lifecycle::fail "age: invalid module.age.key_source_type '$(age::_key_source_type)' — expected 'file' or 'secrets_manager'." ;;
-  esac
+  [ "${ age::_key_source_type; }" = "secrets_manager" ]
 }
 
 # age::_warn_source_override EXISTING_KEY_FILE GENERATE — warn when a runtime flag

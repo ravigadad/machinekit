@@ -22,6 +22,7 @@ _POSTGRES_DUMP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 _POSTGRES_DUMP_DEFAULT_SCHEDULE="0 3 * * *"
 _POSTGRES_DUMP_DEFAULT_RETAIN_COUNT="7"
+_POSTGRES_DUMP_SERVICE_LABEL="postgres-dump"
 
 postgres_dump::requires() {
   printf 'postgres\n'
@@ -31,12 +32,30 @@ postgres_dump::requires() {
 # partway through install (or, worse, silently at 3am). No databases configured =
 # nothing to validate.
 postgres_dump::preflight() {
-  local databases
-  databases=$(postgres_dump::_databases)
+  local databases default_directory
+  databases=${ postgres_dump::_databases; }
   [ -n "$databases" ] || return 0
-  postgres_dump::_validate_databases "$databases" \
-    "$(postgres_dump::_directory)" "$(postgres_dump::_retain_count)"
-  service::validate_cron "$(postgres_dump::_schedule)"
+  default_directory=${ postgres_dump::_directory; }
+  postgres_dump::_validate_databases "$databases" "$default_directory" "${ postgres_dump::_retain_count; }"
+  service::validate_cron "${ postgres_dump::_schedule; }"
+}
+
+# The names of every file install may put in this module's own dirs, whatever the
+# config, so an apply with no record of past installs can find them.
+postgres_dump::installed_file_patterns() {
+  printf '%s\n' \
+    $'data\tmanifest.tsv' \
+    $'data\tdump.sh'
+}
+
+# What install puts on this machine for the current config, so an apply can remove
+# it once the last database or the module is dropped. No databases = nothing.
+postgres_dump::installed_artifacts() {
+  local databases
+  databases=${ postgres_dump::_databases; }
+  [ -n "$databases" ] || return 0
+  printf 'service\t%s\n' "$_POSTGRES_DUMP_SERVICE_LABEL"
+  printf 'file\t%s\n' "$(postgres_dump::_manifest_path)" "$(postgres_dump::_dump_script_path)"
 }
 
 # Write the manifest, lay down the dump script, and schedule the one service that
@@ -44,13 +63,13 @@ postgres_dump::preflight() {
 postgres_dump::install() {
   logging::step "postgres_dump install"
   local databases
-  databases=$(postgres_dump::_databases)
+  databases=${ postgres_dump::_databases; }
   if [ -z "$databases" ]; then
     logging::debug "postgres_dump: no databases configured; nothing to dump"
     return 0
   fi
   if input::is_dry_run; then
-    logging::dry_run "would install the postgres-dump service (manifest, dump script, schedule '$(postgres_dump::_schedule)')"
+    logging::dry_run "would install the postgres-dump service (manifest, dump script, schedule '${ postgres_dump::_schedule; }')"
     return 0
   fi
   postgres_dump::_write_manifest
@@ -64,10 +83,10 @@ postgres_dump::install() {
 # dump surfaces later through the notify hook, not at apply time).
 postgres_dump::postflight_info() {
   local databases database name directory default_directory schedule
-  databases=$(postgres_dump::_databases)
+  databases=${ postgres_dump::_databases; }
   [ -n "$databases" ] || return 0
-  default_directory=$(postgres_dump::_directory)
-  schedule=$(postgres_dump::_schedule)
+  default_directory=${ postgres_dump::_directory; }
+  schedule=${ postgres_dump::_schedule; }
   while IFS= read -r database; do
     [ -n "$database" ] || continue
     name=$(printf '%s' "$database" | jq -r '.name')
@@ -95,7 +114,7 @@ postgres_dump::_database_shape_error() {
     --arg directory "$default_directory" \
     --arg retain_count "$default_retain_count" '
     if   any(.[]; (.name // "") == "") then
-      "every [[module.postgres_dump.databases]] entry needs a name"
+      "every [module.postgres_dump.databases.<key>] entry needs a name (the name defaults to the key)"
     elif any(.[]; ((.directory // $directory) == "")) then
       "every database needs a directory: set [module.postgres_dump].directory, or one on the entry"
     elif any(.[]; ((.retain_count // $retain_count) | tostring | test("^[0-9]+$") | not)) then
@@ -109,10 +128,10 @@ postgres_dump::_write_manifest() {
   manifest=$(postgres_dump::_manifest_path)
   mkdir -p "$(dirname "$manifest")"
   : > "$manifest"
-  databases=$(postgres_dump::_databases)
+  databases=${ postgres_dump::_databases; }
   [ -n "$databases" ] || return 0
-  default_directory=$(postgres_dump::_directory)
-  default_retain_count=$(postgres_dump::_retain_count)
+  default_directory=${ postgres_dump::_directory; }
+  default_retain_count=${ postgres_dump::_retain_count; }
   while IFS= read -r database; do
     [ -n "$database" ] || continue
     postgres_dump::_manifest_row "$database" "$default_directory" "$default_retain_count" >> "$manifest"
@@ -148,23 +167,24 @@ postgres_dump::_install_dump_script() {
 # the launchd/systemd split is service.sh's job.
 postgres_dump::_install_service() {
   service::install_calendar \
-    postgres-dump \
+    "$_POSTGRES_DUMP_SERVICE_LABEL" \
     "$(postgres_dump::_dump_script_path)" \
-    "$(postgres_dump::_schedule)" \
+    "${ postgres_dump::_schedule; }" \
     "MK_POSTGRES_DUMP_MANIFEST=$(postgres_dump::_manifest_path)" \
-    "MK_POSTGRES_DUMP_NOTIFY=$(postgres_dump::_notify)" \
-    "MK_POSTGRES_DUMP_PG_DUMP=$(postgres::pg_dump_path)" \
-    "MK_POSTGRES_DUMP_PG_RESTORE=$(postgres::pg_restore_path)" \
+    "MK_POSTGRES_DUMP_NOTIFY=${ postgres_dump::_notify; }" \
+    "MK_POSTGRES_DUMP_PG_DUMP=${ postgres::pg_dump_path; }" \
+    "MK_POSTGRES_DUMP_PG_RESTORE=${ postgres::pg_restore_path; }" \
     "MK_POSTGRES_DUMP_USER=$(postgres::superuser)" \
     "MK_POSTGRES_DUMP_PORT=$(postgres::port)"
 }
 
 # --- config accessors + paths ---
 
-# Array-of-tables; `|| true` so an unset key is an empty result (no databases is a
-# valid no-op config), not a set -e failure.
+# Each entry's key is the database name unless it sets `name`, so
+# `[module.postgres_dump.databases.hindsight]` alone dumps the hindsight database.
+# Empty when none are configured (no databases is a valid no-op config).
 postgres_dump::_databases() {
-  config::get "module.postgres_dump.databases" || true
+  config::entries "module.postgres_dump.databases" name
 }
 
 postgres_dump::_schedule() {
@@ -188,9 +208,9 @@ postgres_dump::_notify() {
 }
 
 postgres_dump::_manifest_path() {
-  printf '%s\n' "${XDG_DATA_HOME:-$HOME/.local/share}/machinekit/postgres_dump/manifest.tsv"
+  printf '%s\n' "${ artifacts::module_data_dir postgres_dump; }/manifest.tsv"
 }
 
 postgres_dump::_dump_script_path() {
-  printf '%s\n' "${XDG_DATA_HOME:-$HOME/.local/share}/machinekit/postgres_dump/dump.sh"
+  printf '%s\n' "${ artifacts::module_data_dir postgres_dump; }/dump.sh"
 }

@@ -37,6 +37,12 @@ setup() {
   [ -z "$output" ]
 }
 
+@test "requires stops when reading the harnesses list fails" {
+  STUB_EXIT=97 mktest::stub_function agents_config_harnesses::_harnesses
+  run agents_config_harnesses::requires
+  [ "$status" -eq 97 ]
+}
+
 # --- after ---
 
 @test "after declares a soft ordering behind agents_config_setup" {
@@ -84,6 +90,12 @@ setup() {
   mktest::stub_function agents_config_harnesses::_is_available "bar"
   run agents_config_harnesses::preflight
   [ "$status" -eq 0 ]
+}
+
+@test "preflight stops when reading the harnesses list fails" {
+  STUB_EXIT=97 mktest::stub_function agents_config_harnesses::_harnesses
+  run agents_config_harnesses::preflight
+  [ "$status" -eq 97 ]
 }
 
 # --- install ---
@@ -134,6 +146,22 @@ setup() {
   STUB_RETURN=1 mktest::stub_function input::is_dry_run
   run agents_config_harnesses::install
   [ "$status" -eq 0 ]
+}
+
+@test "install stops when resolving the agents config dir fails" {
+  STUB_EXIT=97 mktest::stub_function agents_config_setup::dir
+  mktest::stub_function agents_config_harnesses::_harnesses
+  STUB_RETURN=1 mktest::stub_function input::is_dry_run
+  run agents_config_harnesses::install
+  [ "$status" -eq 97 ]
+}
+
+@test "install stops when reading the harnesses list fails" {
+  STUB_OUTPUT="/agents" mktest::stub_function agents_config_setup::dir
+  STUB_EXIT=97 mktest::stub_function agents_config_harnesses::_harnesses
+  STUB_RETURN=1 mktest::stub_function input::is_dry_run
+  run agents_config_harnesses::install
+  [ "$status" -eq 97 ]
 }
 
 # --- _available / _is_available (these legitimately inspect the real sourced submodule) ---

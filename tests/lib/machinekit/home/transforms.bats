@@ -71,13 +71,12 @@ setup() {
 
 @test "register_from_modules registers each active module's declared transforms" {
   mktest::stub_function home::transforms::register
-  STUB_OUTPUT=$'mod_a\nmod_b\nmod_c' mktest::stub_function context::get_array "modules.active"
+  STUB_OUTPUT=$'mod_a\nmod_b' mktest::stub_function modules::active_defining file_transforms
   mod_a::file_transforms() {
     printf '%s\n' "gz   decode zip::decompress"
     printf '%s\n' "tmpl content gomplate::render"
   }
   mod_b::file_transforms() { printf '%s\n' "age decode age::decrypt"; }
-  # mod_c declares no file_transforms hook — must be skipped.
 
   home::transforms::register_from_modules
 
@@ -90,10 +89,17 @@ setup() {
 @test "register_from_modules hard-fails on a malformed file_transforms line" {
   mktest::stub_function home::transforms::register
   STUB_EXIT=1 mktest::stub_function lifecycle::fail
-  STUB_OUTPUT="mod_a" mktest::stub_function context::get_array "modules.active"
+  STUB_OUTPUT="mod_a" mktest::stub_function modules::active_defining file_transforms
   mod_a::file_transforms() { printf '%s\n' "gz decode zip::decompress extra"; }
   run ! home::transforms::register_from_modules
   MATCH="malformed" mktest::assert_stub_called lifecycle::fail
+}
+
+@test "register_from_modules stops when listing the modules that declare transforms fails" {
+  mktest::stub_function home::transforms::register
+  STUB_EXIT=97 mktest::stub_function modules::active_defining file_transforms
+  run home::transforms::register_from_modules
+  [ "$status" -eq 97 ]
 }
 
 # --- home::transforms::lookup ---

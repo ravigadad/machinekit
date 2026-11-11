@@ -29,6 +29,14 @@ setup() {
   [ "$(cat "$BATS_TEST_TMPDIR/br.stdin")" = $'hindsight/llm_api_key\ttrue\tfalse\nhindsight/tenant_api_key\ttrue\ttrue' ]
 }
 
+@test "requires stops when declaring its secrets fails" {
+  STUB_EXIT=97 mktest::stub_function hindsight_server::declared_secrets
+  mktest::stub_function secrets::declared_backend_requirements
+  run hindsight_server::requires
+  [ "$status" -eq 97 ]
+  mktest::assert_stub_not_called secrets::declared_backend_requirements
+}
+
 # --- hindsight_server::preflight ---
 
 @test "preflight passes when the provider is set and the llm key is available" {
@@ -54,6 +62,14 @@ setup() {
   STUB_EXIT=1 mktest::stub_function lifecycle::fail
   run ! hindsight_server::preflight
   MATCH="llm_api_key" mktest::assert_stub_called lifecycle::fail
+}
+
+@test "preflight stops when reading the llm provider fails" {
+  STUB_EXIT=97 mktest::stub_function hindsight_server::_llm_provider
+  mktest::stub_function hindsight_server::_llm_key_available
+  STUB_EXIT=1 mktest::stub_function lifecycle::fail
+  run hindsight_server::preflight
+  [ "$status" -eq 97 ]
 }
 
 # --- hindsight_server::_llm_key_available ---
@@ -142,6 +158,14 @@ setup() {
   mktest::assert_stub_called_in_order postgres::ensure_extension "hsdb" "vector"
 }
 
+@test "_provision_database stops when reading the database name fails" {
+  STUB_EXIT=97 mktest::stub_function hindsight_server::_db_name
+  mktest::stub_function postgres::ensure_database
+  mktest::stub_function postgres::ensure_extension
+  run hindsight_server::_provision_database
+  [ "$status" -eq 97 ]
+}
+
 # --- hindsight_server::_provision_role ---
 
 @test "_provision_role creates the role, then makes it own the database" {
@@ -155,6 +179,29 @@ setup() {
   # _provision_database already created under the superuser during install).
   mktest::assert_stub_called_in_order postgres::ensure_role "hsuser" "hspass"
   mktest::assert_stub_called_in_order postgres::ensure_database "hsdb" "hsuser"
+}
+
+@test "_provision_role stops when resolving the role name fails" {
+  STUB_EXIT=97 mktest::stub_function hindsight_server::_db_user
+  run hindsight_server::_provision_role
+  [ "$status" -eq 97 ]
+}
+
+@test "_provision_role stops when resolving the role password fails" {
+  STUB_OUTPUT="fake-user" mktest::stub_function hindsight_server::_db_user
+  STUB_EXIT=97 mktest::stub_function hindsight_server::_db_password
+  run hindsight_server::_provision_role
+  [ "$status" -eq 97 ]
+}
+
+@test "_provision_role stops when reading the database name fails" {
+  STUB_OUTPUT="fake-user" mktest::stub_function hindsight_server::_db_user
+  STUB_OUTPUT="fake-password" mktest::stub_function hindsight_server::_db_password
+  mktest::stub_function postgres::ensure_role "fake-user" "fake-password"
+  STUB_EXIT=97 mktest::stub_function hindsight_server::_db_name
+  mktest::stub_function postgres::ensure_database
+  run hindsight_server::_provision_role
+  [ "$status" -eq 97 ]
 }
 
 # --- hindsight_server::_ensure_env_file ---
@@ -195,6 +242,36 @@ setup() {
   mktest::stub_function hindsight_server::_write_env_file "/path/env" "llm-key" "tenant-key" "db-pass" "ui-pass"
   hindsight_server::_assemble_env_file "/path/env"
   mktest::assert_stub_called hindsight_server::_write_env_file "/path/env" "llm-key" "tenant-key" "db-pass" "ui-pass"
+}
+
+@test "_assemble_env_file stops when resolving the LLM key fails" {
+  STUB_EXIT=97 mktest::stub_function hindsight_server::_resolve_llm_key
+  run hindsight_server::_assemble_env_file "/fake/env"
+  [ "$status" -eq 97 ]
+}
+
+@test "_assemble_env_file stops when resolving the tenant key fails" {
+  STUB_OUTPUT="fake-llm" mktest::stub_function hindsight_server::_resolve_llm_key
+  STUB_EXIT=97 mktest::stub_function hindsight::secrets::resolve tenant_api_key
+  run hindsight_server::_assemble_env_file "/fake/env"
+  [ "$status" -eq 97 ]
+}
+
+@test "_assemble_env_file stops when resolving the database password fails" {
+  STUB_OUTPUT="fake-llm" mktest::stub_function hindsight_server::_resolve_llm_key
+  STUB_OUTPUT="fake-tenant" mktest::stub_function hindsight::secrets::resolve tenant_api_key
+  STUB_EXIT=97 mktest::stub_function hindsight::secrets::resolve db_password
+  run hindsight_server::_assemble_env_file "/fake/env"
+  [ "$status" -eq 97 ]
+}
+
+@test "_assemble_env_file stops when resolving the control-plane key fails" {
+  STUB_OUTPUT="fake-llm" mktest::stub_function hindsight_server::_resolve_llm_key
+  STUB_OUTPUT="fake-tenant" mktest::stub_function hindsight::secrets::resolve tenant_api_key
+  STUB_OUTPUT="fake-db" mktest::stub_function hindsight::secrets::resolve db_password
+  STUB_EXIT=97 mktest::stub_function hindsight_server::_resolve_cp_access_key
+  run hindsight_server::_assemble_env_file "/fake/env"
+  [ "$status" -eq 97 ]
 }
 
 # --- hindsight_server::_resolve_llm_key ---
@@ -243,6 +320,14 @@ setup() {
   [ "$output" = "gen-pw" ]
 }
 
+@test "_resolve_cp_access_key stops when reading an entered password fails" {
+  STUB_RETURN=1 mktest::stub_function hindsight::secrets::provided "cp_access_key"
+  STUB_EXIT=97 mktest::stub_function context::get
+  STUB_OUTPUT="fake-generated" mktest::stub_function hindsight::secrets::resolve "cp_access_key"
+  run hindsight_server::_resolve_cp_access_key
+  [ "$status" -eq 97 ]
+}
+
 # --- hindsight_server::postflight_info ---
 
 @test "postflight_info reports the API and web-UI URLs and the env-file location" {
@@ -253,6 +338,22 @@ setup() {
   [[ "$output" == *"http://localhost:8888"* ]]
   [[ "$output" == *"http://localhost:9999"* ]]
   [[ "$output" == *".config/hindsight/hindsight.env"* ]]
+}
+
+@test "postflight_info stops when reading the api port fails" {
+  STUB_EXIT=97 mktest::stub_function hindsight_server::_api_port
+  STUB_OUTPUT="1234" mktest::stub_function hindsight_server::_ui_port
+  STUB_OUTPUT="fake/env" mktest::stub_function hindsight_server::_env_rel
+  run hindsight_server::postflight_info
+  [ "$status" -eq 97 ]
+}
+
+@test "postflight_info stops when reading the web-UI port fails" {
+  STUB_OUTPUT="1234" mktest::stub_function hindsight_server::_api_port
+  STUB_EXIT=97 mktest::stub_function hindsight_server::_ui_port
+  STUB_OUTPUT="fake/env" mktest::stub_function hindsight_server::_env_rel
+  run hindsight_server::postflight_info
+  [ "$status" -eq 97 ]
 }
 
 # --- hindsight_server::postflight_instructions ---
@@ -379,6 +480,68 @@ setup() {
   [[ "$output" == *'HINDSIGHT_API_LLM_BASE_URL: "https://azure.example/openai"'* ]]
 }
 
+# Each stop test registers its exit stub first; the first matching rule wins, so
+# these fallbacks only answer the collaborators the test isn't failing.
+stub_render_compose_collaborators() {
+  STUB_OUTPUT="fake/database-url" mktest::stub_function hindsight_server::_database_url
+  STUB_OUTPUT="" mktest::stub_function hindsight_server::_llm_model
+  STUB_OUTPUT="" mktest::stub_function hindsight_server::_llm_base_url
+  STUB_OUTPUT="fake/image" mktest::stub_function hindsight_server::_image
+  STUB_OUTPUT="1234" mktest::stub_function hindsight_server::_api_port
+  STUB_OUTPUT="5678" mktest::stub_function hindsight_server::_ui_port
+  STUB_OUTPUT="/fake/hindsight.env" mktest::stub_function hindsight_server::_env_path
+  STUB_OUTPUT="fake-provider" mktest::stub_function hindsight_server::_llm_provider
+}
+
+@test "_render_compose stops when building the database url fails" {
+  STUB_EXIT=97 mktest::stub_function hindsight_server::_database_url
+  stub_render_compose_collaborators
+  run hindsight_server::_render_compose
+  [ "$status" -eq 97 ]
+}
+
+@test "_render_compose stops when reading the llm model fails" {
+  STUB_EXIT=97 mktest::stub_function hindsight_server::_llm_model
+  stub_render_compose_collaborators
+  run hindsight_server::_render_compose
+  [ "$status" -eq 97 ]
+}
+
+@test "_render_compose stops when reading the llm base url fails" {
+  STUB_EXIT=97 mktest::stub_function hindsight_server::_llm_base_url
+  stub_render_compose_collaborators
+  run hindsight_server::_render_compose
+  [ "$status" -eq 97 ]
+}
+
+@test "_render_compose stops when reading the image fails" {
+  STUB_EXIT=97 mktest::stub_function hindsight_server::_image
+  stub_render_compose_collaborators
+  run hindsight_server::_render_compose
+  [ "$status" -eq 97 ]
+}
+
+@test "_render_compose stops when reading the api port fails" {
+  STUB_EXIT=97 mktest::stub_function hindsight_server::_api_port
+  stub_render_compose_collaborators
+  run hindsight_server::_render_compose
+  [ "$status" -eq 97 ]
+}
+
+@test "_render_compose stops when reading the web-UI port fails" {
+  STUB_EXIT=97 mktest::stub_function hindsight_server::_ui_port
+  stub_render_compose_collaborators
+  run hindsight_server::_render_compose
+  [ "$status" -eq 97 ]
+}
+
+@test "_render_compose stops when reading the llm provider fails" {
+  STUB_EXIT=97 mktest::stub_function hindsight_server::_llm_provider
+  stub_render_compose_collaborators
+  run hindsight_server::_render_compose
+  [ "$status" -eq 97 ]
+}
+
 # --- hindsight_server::_database_url ---
 
 @test "_database_url splices the password placeholder into the container url" {
@@ -389,6 +552,30 @@ setup() {
   run hindsight_server::_database_url
   # shellcheck disable=SC2016  # the placeholder is meant to stay literal
   [ "$output" = 'postgresql://hsuser:${MACHINEKIT_HINDSIGHT_DB_PASSWORD}@host.docker.internal:5432/hsdb' ]
+}
+
+@test "_database_url stops when reading the database name fails" {
+  STUB_EXIT=97 mktest::stub_function hindsight_server::_db_name
+  STUB_OUTPUT="fake-user" mktest::stub_function hindsight_server::_db_user
+  STUB_OUTPUT="postgresql://fake-user@fake-host:5432/fake-db" mktest::stub_function postgres::connection_string
+  run hindsight_server::_database_url
+  [ "$status" -eq 97 ]
+}
+
+@test "_database_url stops when reading the database user fails" {
+  STUB_OUTPUT="fake-db" mktest::stub_function hindsight_server::_db_name
+  STUB_EXIT=97 mktest::stub_function hindsight_server::_db_user
+  STUB_OUTPUT="postgresql://fake-user@fake-host:5432/fake-db" mktest::stub_function postgres::connection_string
+  run hindsight_server::_database_url
+  [ "$status" -eq 97 ]
+}
+
+@test "_database_url stops when building the connection string fails" {
+  STUB_OUTPUT="fake-db" mktest::stub_function hindsight_server::_db_name
+  STUB_OUTPUT="fake-user" mktest::stub_function hindsight_server::_db_user
+  STUB_EXIT=97 mktest::stub_function postgres::connection_string "fake-db" "fake-user" "container"
+  run hindsight_server::_database_url
+  [ "$status" -eq 97 ]
 }
 
 # --- hindsight_server::_compose_up ---
@@ -417,6 +604,13 @@ setup() {
   mktest::stub_function sleep   # don't actually wait out the poll budget
   hindsight_server::_health_check
   mktest::assert_stub_called logging::warn
+}
+
+@test "_health_check stops when reading the api port fails" {
+  STUB_EXIT=97 mktest::stub_function hindsight_server::_api_port
+  mktest::stub_function curl
+  run hindsight_server::_health_check
+  [ "$status" -eq 97 ]
 }
 
 # --- hindsight_server::_db_password ---

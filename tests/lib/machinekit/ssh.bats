@@ -76,6 +76,33 @@ setup() {
   mktest::assert_stub_called ssh::_generate "$SSH_KEY_PATH"
 }
 
+@test "setup_key stops when reading the key path fails" {
+  STUB_EXIT=97 mktest::stub_function context::get "ssh.key_path" "--default" "$SSH_KEY_PATH" "--store-default"
+  STUB_RETURN=1 mktest::stub_function context::get "existing_ssh_key_file"
+  STUB_OUTPUT="false" mktest::stub_function context::get "ssh.key_generate" "--coerce" "boolean" "--default" "false"
+  STUB_RETURN=1 mktest::stub_function input::is_interactive
+  run ssh::setup_key
+  [ "$status" -eq 97 ]
+}
+
+@test "setup_key stops when reading the existing key file fails" {
+  STUB_OUTPUT="$SSH_KEY_PATH" mktest::stub_function context::get "ssh.key_path" "--default" "$SSH_KEY_PATH" "--store-default"
+  STUB_EXIT=97 mktest::stub_function context::get "existing_ssh_key_file"
+  STUB_OUTPUT="false" mktest::stub_function context::get "ssh.key_generate" "--coerce" "boolean" "--default" "false"
+  STUB_RETURN=1 mktest::stub_function input::is_interactive
+  run ssh::setup_key
+  [ "$status" -eq 97 ]
+}
+
+@test "setup_key stops when reading the generate flag fails" {
+  STUB_OUTPUT="$SSH_KEY_PATH" mktest::stub_function context::get "ssh.key_path" "--default" "$SSH_KEY_PATH" "--store-default"
+  STUB_RETURN=1 mktest::stub_function context::get "existing_ssh_key_file"
+  STUB_EXIT=97 mktest::stub_function context::get "ssh.key_generate" "--coerce" "boolean" "--default" "false"
+  STUB_RETURN=1 mktest::stub_function input::is_interactive
+  run ssh::setup_key
+  [ "$status" -eq 97 ]
+}
+
 # --- ssh::_interactive_discover ---
 
 @test "_interactive_discover with a provided path installs the key" {
@@ -141,6 +168,16 @@ setup() {
   STUB_EXIT=1 mktest::stub_function lifecycle::fail
   run ! ssh::_confirm_overwrite "$SSH_KEY_PATH"
   MATCH="not overwritten" mktest::assert_stub_called lifecycle::fail
+}
+
+@test "_confirm_overwrite stops when reading the confirmation fails" {
+  local overwrite_prompt
+  # shellcheck disable=SC2059
+  printf -v overwrite_prompt "$_SSH_OVERWRITE_PROMPT" "$SSH_KEY_PATH"
+  STUB_EXIT=97 mktest::stub_function context::get "ssh.key_overwrite" "--required" "--coerce" "boolean" "--prompt" "$overwrite_prompt"
+  STUB_EXIT=1 mktest::stub_function lifecycle::fail
+  run ssh::_confirm_overwrite "$SSH_KEY_PATH"
+  [ "$status" -eq 97 ]
 }
 
 # --- ssh::_install_copy ---

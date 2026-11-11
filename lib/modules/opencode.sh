@@ -28,7 +28,7 @@ opencode::install() {
 # no reliable configured probe, so a fresh install stands in for "not set up
 # yet"; an already-present CLI stays quiet.
 opencode::postflight_instructions() {
-  [ "$(context::get "opencode.installed" --default false)" = "true" ] || return 0
+  [ "${ context::get "opencode.installed" --default false; }" = "true" ] || return 0
   printf "Run 'opencode' to finish setup — machinekit does not handle provider config or auth.\n"
 }
 

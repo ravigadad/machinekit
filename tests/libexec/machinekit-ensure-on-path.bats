@@ -42,6 +42,7 @@ setup() {
 # --- bash-floor guard (subprocess; the one collaborator we can't stub) ---
 
 @test "rejects a direct call under a bash below the floor" {
+  mktest::skip_unless_system_bash_below_floor
   run /bin/bash "$MACHINEKIT_DIR/libexec/machinekit-ensure-on-path"
   [ "$status" -eq 1 ]
   [[ "$output" == *"bash >= 5.3 required"* ]]

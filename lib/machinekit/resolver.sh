@@ -74,24 +74,25 @@ resolver::_visit() {
   fi
 
   if [ "$skip_requires" -eq 0 ] && declare -f "${mod}::requires" > /dev/null 2>&1; then
-    local dep
-
+    local dep dependencies
+    dependencies=${ "${mod}::requires"; }
     while IFS= read -r dep; do
       [ -n "$dep" ] || continue
       resolver::_visit "$dep"
-    done < <("${mod}::requires")
+    done <<< "$dependencies"
   fi
 
   # after edges, pass 2 only. Gating on the active set is what makes after
   # ordering-only: an inactive target is skipped, never pulled in.
   if [ "$_resolver_apply_after" -eq 1 ] && declare -f "${mod}::after" > /dev/null 2>&1; then
-    local after_target
+    local after_target after_targets
+    after_targets=${ "${mod}::after"; }
     while IFS= read -r after_target; do
       [ -n "$after_target" ] || continue
       case " $_resolver_active " in
         *" $after_target "*) resolver::_visit "$after_target" ;;
       esac
-    done < <("${mod}::after")
+    done <<< "$after_targets"
   fi
 
   _resolver_in_progress="${_resolver_in_progress/ $mod/}"
@@ -146,7 +147,7 @@ resolver::_check_conflicts() {
     done
 
     if [ "$count" -ge 2 ]; then
-      allow=$(config::get "capability.${cap}.allow_multiple_satisfiers" 2>/dev/null || true)
+      allow=${ config::get "capability.${cap}.allow_multiple_satisfiers" 2>/dev/null || true; }
       [ "$allow" = "true" ] && continue
       lifecycle::fail "resolver: conflict —$(printf '%s' "$satisfier_names") both satisfy '${cap}'. Remove one or set [capability.${cap}] allow_multiple_satisfiers = true."
     fi

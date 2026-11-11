@@ -20,9 +20,9 @@ _MK_BLUEPRINTS_DIR=""
 
 blueprints::fetch() {
   local source override protocol
-  source=$(context::get "blueprints.source" --required)
-  override=$(context::get "blueprints.source_protocol") || true
-  protocol=$(fetch::resolve_protocol "$source" "$override")
+  source=${ context::get "blueprints.source" --required; }
+  override=${ context::get "blueprints.source_protocol"; } || true
+  protocol=${ fetch::resolve_protocol "$source" "$override"; }
   # Cache the sniffed protocol so the rest of the run sees a concrete value.
   [ -n "$override" ] || context::set "blueprints.source_protocol" "$protocol"
 

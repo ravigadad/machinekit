@@ -17,10 +17,15 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/postgres_brew/access.sh"
 
 postgres_brew::provides() { printf 'postgres\n'; }
 
+postgres_brew::preflight() {
+  postgres::_validate_requested_versions
+}
+
 postgres_brew::install() {
   logging::step "postgres install"
   local requested
-  if requested="$(postgres::_requested_versions)"; then
+  requested=${ postgres::_requested_versions; }
+  if [ -n "$requested" ]; then
     postgres_brew::_install_requested "$requested"
   else
     postgres_brew::_install_default
@@ -47,14 +52,14 @@ postgres_brew::instance_major_version() {
 # The bin directory for the resolved instance's client tools. Versioned formulae
 # are keg-only, so this resolves through the keg prefix, not PATH.
 postgres_brew::bin_dir() {
-  postgres_brew::introspect::bin_dir "$(postgres_brew::introspect::instance_version)"
+  postgres_brew::introspect::bin_dir "${ postgres_brew::introspect::instance_version; }"
 }
 
 # Makes an extension available by installing its brew formula. Extensions ship as
 # their own formulae (the `vector` extension is the `pgvector` formula), so map the
 # extension name to its formula and install it.
 postgres_brew::ensure_extension_available() {
-  brew::install_formula "$(postgres_brew::_extension_formula "$1")"
+  brew::install_formula "${ postgres_brew::_extension_formula "$1"; }"
 }
 
 postgres_brew::_extension_formula() {
@@ -79,7 +84,7 @@ postgres_brew::_install_requested() {
 # we refuse to touch.
 postgres_brew::_install_default() {
   local version target
-  if version="$(postgres_brew::introspect::instance_version)"; then
+  if version=${ postgres_brew::introspect::instance_version; }; then
     postgres_brew::_ensure_running "$version"
     return 0
   fi
@@ -97,7 +102,8 @@ postgres_brew::_install_default() {
 # existing cluster, so each installed major must appear in the request, be
 # initialized, and keep its current port.
 postgres_brew::_assert_compatible_with_installed() {
-  local requested="$1" v requested_port actual_port
+  local requested="$1" installed_versions v requested_port actual_port
+  installed_versions=${ postgres_brew::introspect::installed_versions; }
   while IFS= read -r v; do
     [ -n "$v" ] || continue
     requested_port="$(printf '%s' "$requested" | jq -r --arg v "$v" \
@@ -106,10 +112,10 @@ postgres_brew::_assert_compatible_with_installed() {
       "postgres: postgresql@$v is installed but not in the requested versions; add it to the request (machinekit will not remove it)."
     postgres_brew::introspect::is_initialized "$v" || lifecycle::fail \
       "postgres: postgresql@$v is installed but its cluster was never initialized. machinekit does not initialize hand-rolled installs."
-    actual_port="$(postgres_brew::introspect::configured_port "$v")"
+    actual_port=${ postgres_brew::introspect::configured_port "$v"; }
     [ "$requested_port" = "$actual_port" ] || lifecycle::fail \
       "postgres: postgresql@$v is on port $actual_port; machinekit will not change an installed cluster's port to the requested $requested_port."
-  done < <(postgres_brew::introspect::installed_versions)
+  done <<< "$installed_versions"
 }
 
 postgres_brew::_ensure_requested() {
@@ -129,7 +135,7 @@ postgres_brew::_ensure_requested() {
 postgres_brew::_install_on_port() {
   local version="$1" port="$2"
   postgres_brew::_assert_port_not_foreign "$port"
-  brew::install_formula "$(postgres_brew::introspect::formula "$version")"
+  brew::install_formula "${ postgres_brew::introspect::formula "$version"; }"
   [ "$port" = "5432" ] || postgres_brew::_set_port "$version" "$port"
   postgres_brew::_start "$version"
 }
@@ -149,11 +155,13 @@ postgres_brew::_assert_port_not_foreign() {
 # True when one of our installed brew clusters is the server currently on PORT —
 # its data dir's postmaster.pid reports that port.
 postgres_brew::_port_is_my_cluster() {
-  local port="$1" major
+  local port="$1" installed_versions major data_dir
+  installed_versions=${ postgres_brew::introspect::installed_versions; }
   while IFS= read -r major; do
     [ -n "$major" ] || continue
-    [ "$(postgres::_datadir_port "$(postgres_brew::introspect::data_dir "$major")")" = "$port" ] && return 0
-  done < <(postgres_brew::introspect::installed_versions)
+    data_dir=${ postgres_brew::introspect::data_dir "$major"; }
+    [ "${ postgres::_datadir_port "$data_dir"; }" = "$port" ] && return 0
+  done <<< "$installed_versions"
   return 1
 }
 
@@ -166,7 +174,7 @@ postgres_brew::_set_port() {
     logging::dry_run "would set postgresql@$version to port $port"
     return 0
   fi
-  conf="$(postgres_brew::introspect::data_dir "$version")/postgresql.conf"
+  conf="${ postgres_brew::introspect::data_dir "$version"; }/postgresql.conf"
   tmp="$(mktemp "${conf}.XXXXXX")"
   { grep -vE '^[[:space:]]*port[[:space:]]*=' "$conf" || true; printf 'port = %s\n' "$port"; } > "$tmp"
   mv "$tmp" "$conf"
@@ -189,12 +197,12 @@ postgres_brew::_start() {
     logging::dry_run "would start postgresql@$version"
     return 0
   fi
-  brew::start_service "$(postgres_brew::introspect::formula "$version")"
+  brew::start_service "${ postgres_brew::introspect::formula "$version"; }"
 }
 
 # A full restart, not a reload: listen_addresses only takes effect on restart (a
 # reload won't repoint the listener); a pg_hba change would reload, but the
 # restart covers both.
 postgres_brew::_restart() {
-  brew::restart_service "$(postgres_brew::introspect::formula "$1")"
+  brew::restart_service "${ postgres_brew::introspect::formula "$1"; }"
 }

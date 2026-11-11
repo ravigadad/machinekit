@@ -35,16 +35,16 @@ secrets::pool_path() {
 # needs to know age or a secrets manager is involved.
 secrets::resolve() {
   local name="$1"
-  case "$(secrets::backend_for "$name")" in
-    manager) secrets_manager::fetch "$(secrets::_reference_for "$name")" ;;
-    pool)    age::decrypt "$(secrets::_pool_file_path "$name")" ;;
+  case "${ secrets::backend_for "$name"; }" in
+    manager) secrets_manager::fetch "${ secrets::_reference_for "$name"; }" ;;
+    pool)    age::decrypt "${ secrets::_pool_file_path "$name"; }" ;;
     *)       return 1 ;;
   esac
 }
 
 # secrets::present NAME — true when some backend currently resolves NAME.
 secrets::present() {
-  [ "$(secrets::backend_for "$1")" != "none" ]
+  [ "${ secrets::backend_for "$1"; }" != "none" ]
 }
 
 # secrets::_local_signal NAME — the local, no-network backend signal for NAME:
@@ -57,9 +57,9 @@ secrets::present() {
 # disagree on which backend a name is bound to.
 secrets::_local_signal() {
   local name="$1"
-  if [ -n "$(secrets::_manager_ref "$name")" ]; then
+  if [ -n "${ secrets::_manager_ref "$name"; }" ]; then
     printf 'ref\n'
-  elif [ -f "$(secrets::_pool_file_path "$name")" ]; then
+  elif [ -f "${ secrets::_pool_file_path "$name"; }" ]; then
     printf 'pool\n'
   fi
 }
@@ -75,10 +75,10 @@ secrets::_local_signal() {
 # file would hide the miss.
 secrets::backend_for() {
   local name="$1"
-  case "$(secrets::_local_signal "$name")" in
+  case "${ secrets::_local_signal "$name"; }" in
     ref)
       if modules::capability_active secrets_manager \
-        && secrets_manager::has_reference "$(secrets::_manager_ref "$name")"; then
+        && secrets_manager::has_reference "${ secrets::_manager_ref "$name"; }"; then
         printf 'manager\n'
       else
         printf 'none\n'
@@ -107,7 +107,7 @@ secrets::backend_requirements() {
   local name needs_age=0 needs_manager=0
   while IFS= read -r name; do
     [ -n "$name" ] || continue
-    case "$(secrets::_local_signal "$name")" in
+    case "${ secrets::_local_signal "$name"; }" in
       ref)  needs_manager=1 ;;
       pool) needs_age=1 ;;
     esac
@@ -119,13 +119,10 @@ secrets::backend_requirements() {
 
 # secrets::assert_age_key_not_pooled — enforce the invariant that the age key is
 # never an age-pool secret (it can't decrypt itself). Fails loudly on a stray
-# secrets/age_key.age. This lives outside backend_for and MUST be called from a
-# main-shell context, because backend_for is always invoked inside a command
-# substitution — a lifecycle::fail there would exit only the subshell and the run
-# would march on. Called at each secret-inspecting entry point (preflight, secrets
-# list, secrets put) after the blueprint is resolved.
+# secrets/age_key.age. Called at each secret-inspecting entry point (preflight,
+# secrets list, secrets put) after the blueprint is resolved.
 secrets::assert_age_key_not_pooled() {
-  [ -f "$(secrets::_pool_file_path "$_MK_SECRETS_AGE_KEY_NAME")" ] || return 0
+  [ -f "${ secrets::_pool_file_path "$_MK_SECRETS_AGE_KEY_NAME"; }" ] || return 0
   lifecycle::fail "secrets: found a pool file for '$_MK_SECRETS_AGE_KEY_NAME' — the age key can't live in the age pool (it would need itself to decrypt). Remove it; source the age key from a file or a secrets manager."
 }
 
@@ -135,12 +132,16 @@ secrets::assert_age_key_not_pooled() {
 # is the secret name" coupling, shared by every secret-bearing module's ::requires
 # so the row layout lives in one place, not re-decoded per module.
 secrets::declared_backend_requirements() {
-  cut -f1 | secrets::backend_requirements
+  local names
+  names=${ cut -f1; }
+  secrets::backend_requirements <<< "$names"
 }
 
 # secrets::_pool_file_path NAME — the absolute age-pool file path for NAME.
 secrets::_pool_file_path() {
-  printf '%s/%s\n' "$(blueprints::dir)" "$(secrets::pool_path "$1.age")"
+  local blueprint_dir
+  blueprint_dir=${ blueprints::dir; }
+  printf '%s/%s\n' "$blueprint_dir" "$(secrets::pool_path "$1.age")"
 }
 
 # secrets::_manager_ref NAME — the explicit manager reference configured for
@@ -150,7 +151,7 @@ secrets::_pool_file_path() {
 # that itself contains a dot.
 secrets::_manager_ref() {
   local refs_json
-  refs_json="$(config::get "secrets.manager_refs" 2>/dev/null || true)"
+  refs_json=${ config::get "secrets.manager_refs" 2>/dev/null || true; }
   [ -n "$refs_json" ] || return 0
   printf '%s' "$refs_json" | jq -r --arg name "$1" '.[$name] // empty'
 }
@@ -160,7 +161,7 @@ secrets::_manager_ref() {
 # manager's own convention-derived lookup.
 secrets::_reference_for() {
   local configured_ref
-  configured_ref="$(secrets::_manager_ref "$1")"
+  configured_ref=${ secrets::_manager_ref "$1"; }
   if [ -n "$configured_ref" ]; then
     printf '%s\n' "$configured_ref"
   else
@@ -172,7 +173,7 @@ secrets::_reference_for() {
 # in the pool, one per line, sorted. Empty when the pool dir is absent.
 secrets::in_pool() {
   local blueprint_dir pool_dir file
-  blueprint_dir="$(blueprints::dir)"
+  blueprint_dir=${ blueprints::dir; }
   pool_dir="$blueprint_dir/$_MK_SECRETS_POOL_REL"
   [ -d "$pool_dir" ] || return 0
   while IFS= read -r file; do
@@ -198,20 +199,22 @@ secrets::needed() {
 # secrets::orphans.
 secrets::inventory() {
   local -A required=() can_be_generated=()
-  local name req gen state
+  local name req gen state needed sorted_names
+  needed=${ secrets::needed; }
 
   while IFS=$'\t' read -r name req gen; do
     [ -n "$name" ] || continue
     required["$name"]="$req"
     can_be_generated["$name"]="$gen"
-  done < <(secrets::needed)
+  done <<< "$needed"
 
-  for name in "${!required[@]}"; do printf '%s\n' "$name"; done \
-    | sort | while IFS= read -r name; do
-    state=$(secrets::backend_for "$name")
+  sorted_names=${ printf '%s\n' "${!required[@]}" | sort; }
+  while IFS= read -r name; do
+    [ -n "$name" ] || continue
+    state=${ secrets::backend_for "$name"; }
     [ "$state" = "none" ] && state="missing"
     printf '%s\t%s\t%s\t%s\n' "$name" "${required[$name]}" "${can_be_generated[$name]}" "$state"
-  done
+  done <<< "$sorted_names"
 }
 
 # secrets::orphans — pool files no active module's declared name accounts for,
@@ -220,17 +223,19 @@ secrets::inventory() {
 # rather than presented as something a module needs.
 secrets::orphans() {
   local -A declared=()
-  local name path bare
+  local name path bare needed pool_paths
+  needed=${ secrets::needed; }
   while IFS=$'\t' read -r name _; do
     [ -n "$name" ] || continue
     declared["$name"]=1
-  done < <(secrets::needed)
+  done <<< "$needed"
+  pool_paths=${ secrets::in_pool; }
   while IFS= read -r path; do
     [ -n "$path" ] || continue
     bare="${path#"$_MK_SECRETS_POOL_REL"/}"
     bare="${bare%.age}"
     [ -n "${declared[$bare]:-}" ] || printf '%s\n' "$path"
-  done < <(secrets::in_pool)
+  done <<< "$pool_paths"
 }
 
 # secrets::blueprints_dir — the local blueprint working tree `secrets put` writes
@@ -240,11 +245,11 @@ secrets::orphans() {
 # apply-time fetch cache is throwaway and never written to.
 secrets::blueprints_dir() {
   local override source dir
-  override=$(context::get "secrets.blueprints_dir" || true)
+  override=${ context::get "secrets.blueprints_dir" || true; }
   if [ -n "$override" ]; then
     dir="$override"
   else
-    source=$(context::get "blueprints.source" || true)
+    source=${ context::get "blueprints.source" || true; }
     case "$source" in
       "") lifecycle::fail "secrets: no blueprint working tree — pass --blueprints-dir (your local clone)." ;;
       file://*) dir="${source#file://}" ;;
@@ -265,9 +270,7 @@ secrets::dest_path() {
   local target="$1" base
   case "$target" in
     /*) printf '%s\n' "$target" ;;
-    # Standalone assignment, not an inline $() in printf's args: a lifecycle::fail
-    # in blueprints_dir must propagate under set -e, not be masked by printf.
-    *)  base="$(secrets::blueprints_dir)"
+    *)  base=${ secrets::blueprints_dir; }
         printf '%s/%s\n' "$base" "$target" ;;
   esac
 }

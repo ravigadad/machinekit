@@ -21,6 +21,12 @@ setup() {
   [ "$result" = "postgres" ]
 }
 
+@test "preflight validates the requested versions" {
+  mktest::stub_function postgres::_validate_requested_versions
+  postgres_app::preflight
+  mktest::assert_stub_called postgres::_validate_requested_versions
+}
+
 # --- postgres_app::install ---
 
 @test "install checks the requested versions and ensures the superuser" {
@@ -38,7 +44,7 @@ setup() {
 
 @test "install checks the default 5432 server when no versions are configured" {
   mktest::stub_function postgres_app::_assert_app_installed
-  STUB_RETURN=1 mktest::stub_function postgres::_requested_versions
+  STUB_OUTPUT="" mktest::stub_function postgres::_requested_versions
   mktest::stub_function postgres_app::_check_requested
   mktest::stub_function postgres_app::_check_default
   mktest::stub_function postgres::ensure_superuser
@@ -46,6 +52,20 @@ setup() {
   mktest::assert_stub_called postgres_app::_check_default
   mktest::assert_stub_not_called postgres_app::_check_requested
   mktest::assert_stub_called postgres::ensure_superuser
+}
+
+# A malformed versions table has to stop the run, not read as "none configured"
+# and quietly fall back to the default instance.
+@test "install stops when the versions table is malformed" {
+  mktest::stub_function postgres_app::_assert_app_installed
+  STUB_EXIT=97 mktest::stub_function postgres::_requested_versions
+  mktest::stub_function postgres_app::_check_requested
+  mktest::stub_function postgres_app::_check_default
+  mktest::stub_function postgres::ensure_superuser
+  run postgres_app::install
+  [ "$status" -eq 97 ]
+  mktest::assert_stub_not_called postgres_app::_check_default
+  mktest::assert_stub_not_called postgres_app::_check_requested
 }
 
 # --- postgres_app::instance_major_version (seam) ---

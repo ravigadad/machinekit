@@ -21,15 +21,15 @@
 # install time. A dir that's already present needs no source.
 agents_config_setup::preflight() {
   local dir source override
-  dir=$(agents_config_setup::dir)
+  dir=${ agents_config_setup::dir; }
   if ! agents_config_setup::_present "$dir"; then
-    source=$(agents_config_setup::_source)
+    source=${ agents_config_setup::_source; }
     [ -n "$source" ] || lifecycle::fail \
       "agents_config_setup: $dir is absent and no source is configured to seed it. Set [module.agents_config_setup].source."
     # Validate the source/protocol now, cleanly, rather than mid-install: an unknown
     # source_protocol or a cp/URL mismatch fails here via resolve_protocol's own
-    # lifecycle::fail (called directly, so it isn't swallowed in a $() subshell).
-    override=$(agents_config_setup::_source_protocol)
+    # lifecycle::fail.
+    override=${ agents_config_setup::_source_protocol; }
     fetch::resolve_protocol "$source" "$override" >/dev/null
   fi
 }
@@ -37,7 +37,7 @@ agents_config_setup::preflight() {
 agents_config_setup::install() {
   logging::step "agents_config_setup install"
   local dir source override protocol
-  dir=$(agents_config_setup::dir)
+  dir=${ agents_config_setup::dir; }
   if agents_config_setup::_present "$dir"; then
     # Idempotent skip: quiet on a normal run, but a dry run must still report the
     # no-op rather than going silent.
@@ -47,11 +47,11 @@ agents_config_setup::install() {
       logging::debug "agents_config_setup: $dir already present; nothing to seed"
     fi
   elif input::is_dry_run; then
-    logging::dry_run "would seed the agents config dir ($dir) from $(agents_config_setup::_source), then strip its .git (plain content; git_backup owns any repo)"
+    logging::dry_run "would seed the agents config dir ($dir) from ${ agents_config_setup::_source; }, then strip its .git (plain content; git_backup owns any repo)"
   else
-    source=$(agents_config_setup::_source)
-    override=$(agents_config_setup::_source_protocol)
-    protocol=$(fetch::resolve_protocol "$source" "$override")
+    source=${ agents_config_setup::_source; }
+    override=${ agents_config_setup::_source_protocol; }
+    protocol=${ fetch::resolve_protocol "$source" "$override"; }
     logging::info "Seeding agents config dir ($dir) from $source"
     # shallow: the .git is stripped right after, so history is pure waste to fetch.
     fetch::into "$source" "$dir" "$protocol" shallow
@@ -77,7 +77,7 @@ agents_config_setup::_strip_git() {
 # resolves it whether or not this module is activated.
 agents_config_setup::dir() {
   local dir
-  dir=$(config::get "module.agents_config_setup.dir" --default "$HOME/.agents")
+  dir=${ config::get "module.agents_config_setup.dir" --default "$HOME/.agents"; }
   # A blueprint may write the dir as ~/…; without this it would seed a literal
   # '~' directory. Same expansion the syncthing and git_backup folder paths do.
   printf '%s\n' "${dir/#\~/$HOME}"

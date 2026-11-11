@@ -3,19 +3,6 @@
 # sibling of hindsight/secrets.sh). The caller owns config reading, consent, and
 # which banks to send; this only speaks to the API.
 
-# hindsight::banks::validate_shape BANKS_JSON — fail unless BANKS_JSON is a table
-# whose every entry is itself a table of config fields. Catches both blueprint
-# typos: a scalar/array where the whole bank map should be (`additional_banks =
-# "music"`), and a scalar under a single bank name. Checked before apply.
-hindsight::banks::validate_shape() {
-  local banks_json="$1" malformed
-  malformed="$(printf '%s' "$banks_json" \
-    | jq 'if type != "object" then true else any(.[]; type != "object") end')"
-  [ "$malformed" = "true" ] && lifecycle::fail \
-    "hindsight: bank config must be a table of per-bank config tables."
-  return 0
-}
-
 # hindsight::banks::server_reachable URL — true when the API answers a health
 # probe. Its point is the same-box race: a server co-located with this apply may
 # not be up yet, so a false result means "skip, retry next apply", not "fail".

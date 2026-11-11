@@ -30,6 +30,7 @@ setup() {
 }
 
 @test "guard exits with a clear message under a bash below the floor" {
+  mktest::skip_unless_system_bash_below_floor
   run /bin/bash -c "source '$MACHINEKIT_DIR/lib/common/bash_floor.sh'; bash_floor::guard"
   [ "$status" -eq 1 ]
   [[ "$output" == *"bash >= 5.3 required"* ]]

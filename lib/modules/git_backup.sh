@@ -2,7 +2,7 @@
 # git_backup — periodically pushes one or more working dirs to git remotes, giving
 # a live, replicated dir (e.g. one Syncthing keeps in sync — which propagates
 # deletions and so is not itself a backup) durable history on a remote. Generic:
-# it backs up whatever folders the blueprint lists ([[module.git_backup.folders]])
+# it backs up whatever folders the blueprint lists ([module.git_backup.folders.*])
 # and knows nothing about what lives in them. Depends on no other module.
 #
 # One service runs for all folders; the push script (git_backup/push.sh) iterates
@@ -29,6 +29,8 @@ _GIT_BACKUP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # secrets-manager reference.
 _GIT_BACKUP_SECRET_NAMESPACE="git_backup/ssh_keys"
 
+_GIT_BACKUP_SERVICE_LABEL="git-backup"
+
 # Depends on whichever backend(s) resolve the referenced keys: age for pool-file
 # keys, secrets_manager for explicitly-referenced ones (a blueprint may mix both
 # across keys). Derived from the declared secrets (declared_secrets), so a
@@ -36,14 +38,16 @@ _GIT_BACKUP_SECRET_NAMESPACE="git_backup/ssh_keys"
 # preflight readiness — adds no edge, and ambient-SSH folders (no key, no
 # secret) declare nothing.
 git_backup::requires() {
-  git_backup::declared_secrets | secrets::declared_backend_requirements
+  local declared_secrets
+  declared_secrets=${ git_backup::declared_secrets; }
+  secrets::declared_backend_requirements <<< "$declared_secrets"
 }
 
 # Fail early on a misconfigured folder set, and remind that each folder is
 # single-writer. No folders configured = nothing to validate.
 git_backup::preflight() {
   local folders
-  folders=$(git_backup::_folders)
+  folders=${ git_backup::_folders; }
   [ -n "$folders" ] || return 0
   git_backup::_validate_folders "$folders"
   git_backup::_validate_ignores "$folders"
@@ -55,11 +59,36 @@ git_backup::preflight() {
 # Declares each referenced ssh key as a required secret — the push can't
 # decrypt a key that isn't there. A folder using ambient SSH references none.
 git_backup::declared_secrets() {
-  local name
+  local name key_names
+  key_names=${ git_backup::_referenced_key_names; }
   while IFS= read -r name; do
     [ -n "$name" ] || continue
     printf '%s\ttrue\tfalse\n' "$(git_backup::_secret_name "$name")"
-  done < <(git_backup::_referenced_key_names)
+  done <<< "$key_names"
+}
+
+# The names of every file install may put in this module's own dirs, whatever the
+# config, so an apply with no record of past installs can find them.
+git_backup::installed_file_patterns() {
+  printf '%s\n' \
+    $'data\tmanifest.tsv' \
+    $'data\tpush.sh' \
+    $'config\tssh_keys/*'
+}
+
+# What install puts on this machine for the current config, so an apply can remove
+# what a dropped folder, key or module left behind. No folders = nothing.
+git_backup::installed_artifacts() {
+  local folders name key_names
+  folders=${ git_backup::_folders; }
+  [ -n "$folders" ] || return 0
+  printf 'service\t%s\n' "$_GIT_BACKUP_SERVICE_LABEL"
+  printf 'file\t%s\n' "$(git_backup::_manifest_path)" "$(git_backup::_push_script_path)"
+  key_names=${ git_backup::_referenced_key_names; }
+  while IFS= read -r name; do
+    [ -n "$name" ] || continue
+    printf 'file\t%s\n' "$(git_backup::_key_path "$name")"
+  done <<< "$key_names"
 }
 
 # Install the keys, write the manifest, lay down the push script, and schedule the
@@ -67,13 +96,13 @@ git_backup::declared_secrets() {
 git_backup::install() {
   logging::step "git_backup install"
   local folders
-  folders=$(git_backup::_folders)
+  folders=${ git_backup::_folders; }
   if [ -z "$folders" ]; then
     logging::debug "git_backup: no folders configured; nothing to back up"
     return 0
   fi
   if input::is_dry_run; then
-    logging::dry_run "would install the git-backup service (ssh keys, manifest, push script, $(git_backup::_interval)s timer)"
+    logging::dry_run "would install the git-backup service (ssh keys, manifest, push script, ${ git_backup::_interval; }s timer)"
     return 0
   fi
   git_backup::_install_keys
@@ -88,10 +117,11 @@ git_backup::install() {
 # service runs on its own, so there is no next step to surface here (a bad deploy
 # key surfaces later through the push notifier, not at apply time).
 git_backup::postflight_info() {
-  local folders folder path remote cadence
-  folders=$(git_backup::_folders)
+  local folders folder path remote interval cadence
+  folders=${ git_backup::_folders; }
   [ -n "$folders" ] || return 0
-  cadence="$(git_backup::_human_interval "$(git_backup::_interval)")"
+  interval=${ git_backup::_interval; }
+  cadence=$(git_backup::_human_interval "$interval")
   while IFS= read -r folder; do
     [ -n "$folder" ] || continue
     path=$(printf '%s' "$folder" | jq -r '.path')
@@ -120,26 +150,29 @@ git_backup::_validate_folders() {
   bad=$(printf '%s' "$folders" | jq -r '
     any(.[]; (has("path")|not) or (has("remote")|not) or (.path == "") or (.remote == ""))')
   [ "$bad" = "true" ] && lifecycle::fail \
-    "git_backup: every [[module.git_backup.folders]] entry needs both a path and a remote."
+    "git_backup: every [module.git_backup.folders.<key>] entry needs both a path and a remote."
   return 0
 }
 
 # Each folder's ignore config must be coherent: refusing to manage .gitignore while
-# still listing ignore_patterns is a contradiction; managing it with neither
-# defaults nor patterns is a pointless empty block (warn, don't fail).
+# still listing patterns is a contradiction; managing it with neither defaults nor
+# patterns is a pointless empty block (warn, don't fail). Reading the patterns
+# here is also what makes a malformed pattern list stop the run in preflight
+# rather than mid-install.
 git_backup::_validate_ignores() {
-  local folders="$1" folder path manage add_defaults pattern_count
+  local folders="$1" folder path manage add_defaults patterns pattern_count
   while IFS= read -r folder; do
     [ -n "$folder" ] || continue
     path=$(printf '%s' "$folder" | jq -r '.path // "?"')
     manage=$(printf '%s' "$folder" | jq -r 'if .manage_gitignore == null then true else .manage_gitignore end')
     add_defaults=$(printf '%s' "$folder" | jq -r 'if .add_default_ignores == null then true else .add_default_ignores end')
-    pattern_count=$(printf '%s' "$folder" | jq -r '(.ignore_patterns // []) | length')
+    patterns=${ git_backup::_ignore_patterns "$folder"; }
+    pattern_count=$(printf '%s' "$patterns" | jq -r 'length')
     if [ "$manage" != "true" ] && [ "$pattern_count" -gt 0 ]; then
-      lifecycle::fail "git_backup: folder '$path' sets manage_gitignore = false but lists ignore_patterns — drop one (machinekit can't both manage .gitignore and leave it alone)."
+      lifecycle::fail "git_backup: folder '$path' sets manage_gitignore = false but has ignore patterns — drop one (machinekit can't both manage .gitignore and leave it alone)."
     fi
     if [ "$manage" = "true" ] && [ "$add_defaults" != "true" ] && [ "$pattern_count" -eq 0 ]; then
-      logging::warn "git_backup: folder '$path' manages .gitignore with no defaults and no ignore_patterns — only an empty managed block will be written."
+      logging::warn "git_backup: folder '$path' manages .gitignore with no defaults and no ignore patterns — only an empty managed block will be written."
     fi
   done < <(printf '%s' "$folders" | jq -c '.[]')
   return 0
@@ -148,21 +181,23 @@ git_backup::_validate_ignores() {
 # Every referenced ssh_key must have its encrypted secret in the pool, or the
 # decrypt at install would fail mid-run.
 git_backup::_validate_keys() {
-  local name
+  local name key_names
+  key_names=${ git_backup::_referenced_key_names; }
   while IFS= read -r name; do
     [ -n "$name" ] || continue
     secrets::present "$(git_backup::_secret_name "$name")" || lifecycle::fail \
       "git_backup: ssh_key '$name' is configured but no secret named $(git_backup::_secret_name "$name") — see docs/modules.md (git_backup)."
-  done < <(git_backup::_referenced_key_names)
+  done <<< "$key_names"
   return 0
 }
 
 git_backup::_install_keys() {
-  local name
+  local name key_names
+  key_names=${ git_backup::_referenced_key_names; }
   while IFS= read -r name; do
     [ -n "$name" ] || continue
     git_backup::_install_key "$name"
-  done < <(git_backup::_referenced_key_names)
+  done <<< "$key_names"
 }
 
 # Resolve one named ssh key to a private (600) file under a private (700) dir,
@@ -186,9 +221,9 @@ git_backup::_write_manifest() {
   manifest=$(git_backup::_manifest_path)
   mkdir -p "$(dirname "$manifest")"
   : > "$manifest"
-  folders=$(git_backup::_folders)
+  folders=${ git_backup::_folders; }
   [ -n "$folders" ] || return 0
-  default_ssh_key=$(git_backup::_default_ssh_key)
+  default_ssh_key=${ git_backup::_default_ssh_key; }
   while IFS= read -r folder; do
     [ -n "$folder" ] || continue
     git_backup::_manifest_row "$folder" "$default_ssh_key" >> "$manifest"
@@ -209,7 +244,7 @@ git_backup::_manifest_row() {
 
 git_backup::_apply_gitignores() {
   local folders folder path
-  folders=$(git_backup::_folders)
+  folders=${ git_backup::_folders; }
   [ -n "$folders" ] || return 0
   while IFS= read -r folder; do
     [ -n "$folder" ] || continue
@@ -224,22 +259,40 @@ git_backup::_apply_gitignores() {
 # dir holding just a .gitignore reads as "present" and would block its seed).
 # manage_gitignore = false leaves the file to the user.
 git_backup::_apply_gitignore() {
-  local folder="$1" path="$2"
+  local folder="$1" path="$2" patterns
   [ -d "$path" ] || return 0
   [ "$(printf '%s' "$folder" | jq -r 'if .manage_gitignore == null then true else .manage_gitignore end')" = "true" ] || return 0
-  git_backup::_gitignore_patterns "$folder" | managed_block::ensure "$path/.gitignore" "#"
+  patterns=${ git_backup::_gitignore_patterns "$folder"; }
+  printf '%s\n' "$patterns" | managed_block::ensure "$path/.gitignore" "#"
 }
 
-# Emit the folder's ordered, de-duplicated ignore lines: user ignore_patterns
-# first, then the defaults unless add_default_ignores is false.
+# Emit the folder's ordered, de-duplicated ignore lines. .gitignore applies the
+# last matching pattern, so the most specific layer goes last, letting its `!`
+# negations win: the defaults unless add_default_ignores is false, then the
+# folder's patterns.
 git_backup::_gitignore_patterns() {
-  local folder="$1"
+  local folder="$1" patterns
+  patterns=${ git_backup::_ignore_patterns "$folder"; }
   {
-    printf '%s' "$folder" | jq -r '.ignore_patterns[]? // empty'
     if [ "$(printf '%s' "$folder" | jq -r 'if .add_default_ignores == null then true else .add_default_ignores end')" = "true" ]; then
       git_backup::_default_ignores
     fi
-  } | awk 'NF && !seen[$0]++'
+    printf '%s' "$patterns" | jq -r '.[]'
+  } | git_backup::_dedup_keep_last
+}
+
+# The folder's ignore_patterns with a machine type's additional_ignore_patterns
+# after them, as a JSON array.
+git_backup::_ignore_patterns() {
+  local folder="$1" path
+  path=$(printf '%s' "$folder" | jq -r '.path // "?"')
+  config::extended_list "$folder" ignore_patterns after "git_backup folder '$path'"
+}
+
+# Drop blank lines and keep each line's last occurrence. git applies the last
+# pattern that matches, so the last copy of a repeated line is the one in effect.
+git_backup::_dedup_keep_last() {
+  awk 'NF { line[NR] = $0; last[$0] = NR } END { for (i = 1; i <= NR; i++) if ((i in line) && last[line[i]] == i) print line[i] }'
 }
 
 # Junk a backup repo should never carry. Syncthing keeps its own machine-local
@@ -263,21 +316,24 @@ git_backup::_install_push_script() {
 # directly (its shebang picks the interpreter); the launchd/systemd split is
 # service.sh's job.
 git_backup::_install_service() {
+  local interval notify
+  interval=${ git_backup::_interval; }
+  notify=${ git_backup::_notify; }
   service::install_interval \
-    git-backup \
+    "$_GIT_BACKUP_SERVICE_LABEL" \
     "$(git_backup::_push_script_path)" \
-    "$(git_backup::_interval)" \
+    "$interval" \
     "MK_GIT_BACKUP_MANIFEST=$(git_backup::_manifest_path)" \
-    "MK_GIT_BACKUP_NOTIFY=$(git_backup::_notify)" \
+    "MK_GIT_BACKUP_NOTIFY=$notify" \
     "MK_GIT_BACKUP_GIT=$(git_backup::_git_path)"
 }
 
 # --- config accessors + paths ---
 
-# Array-of-tables; `|| true` so an unset key is an empty result (no folders is a
-# valid no-op config), not a set -e failure.
+# Each folder's key is only a handle for overrides; `path` stays a field. Empty
+# when none are configured (no folders is a valid no-op config).
 git_backup::_folders() {
-  config::get "module.git_backup.folders" || true
+  config::entries "module.git_backup.folders"
 }
 
 git_backup::_interval() {
@@ -307,9 +363,9 @@ git_backup::_default_ssh_key() {
 # decrypt, validate, and require age for.
 git_backup::_referenced_key_names() {
   local folders default_ssh_key
-  folders=$(git_backup::_folders)
+  folders=${ git_backup::_folders; }
   [ -n "$folders" ] || return 0
-  default_ssh_key=$(git_backup::_default_ssh_key)
+  default_ssh_key=${ git_backup::_default_ssh_key; }
   printf '%s' "$folders" \
     | jq -r --arg default "$default_ssh_key" '.[] | (.ssh_key // $default) | select(. != "")' \
     | sort -u
@@ -322,13 +378,13 @@ git_backup::_secret_name() {
 }
 
 git_backup::_key_path() {
-  printf '%s\n' "${XDG_CONFIG_HOME:-$HOME/.config}/machinekit/git_backup/ssh_keys/$1"
+  printf '%s\n' "${ artifacts::module_config_dir git_backup; }/ssh_keys/$1"
 }
 
 git_backup::_manifest_path() {
-  printf '%s\n' "${XDG_DATA_HOME:-$HOME/.local/share}/machinekit/git_backup/manifest.tsv"
+  printf '%s\n' "${ artifacts::module_data_dir git_backup; }/manifest.tsv"
 }
 
 git_backup::_push_script_path() {
-  printf '%s\n' "${XDG_DATA_HOME:-$HOME/.local/share}/machinekit/git_backup/push.sh"
+  printf '%s\n' "${ artifacts::module_data_dir git_backup; }/push.sh"
 }

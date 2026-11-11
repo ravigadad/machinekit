@@ -178,6 +178,50 @@ setup() {
   mktest::assert_stub_not_called age::_manager_sources_key
 }
 
+@test "preflight stops when reading the key path fails" {
+  STUB_EXIT=97 mktest::stub_function config::get "module.age.key_path" "--default" "$AGE_KEY_PATH" "--store-default"
+  run age::preflight
+  [ "$status" -eq 97 ]
+}
+
+@test "preflight stops when reading the existing key file fails" {
+  STUB_OUTPUT="$AGE_KEY_PATH" mktest::stub_function config::get "module.age.key_path" "--default" "$AGE_KEY_PATH" "--store-default"
+  STUB_EXIT=97 mktest::stub_function context::get "existing_age_key_file"
+  run age::preflight
+  [ "$status" -eq 97 ]
+}
+
+@test "preflight stops when reading the generate request over an existing key fails" {
+  mkdir -p "$(dirname "$AGE_KEY_PATH")"
+  printf 'existing key\n' > "$AGE_KEY_PATH"
+  STUB_OUTPUT="$AGE_KEY_PATH" mktest::stub_function config::get "module.age.key_path" "--default" "$AGE_KEY_PATH" "--store-default"
+  STUB_RETURN=1 mktest::stub_function context::get "existing_age_key_file"
+  STUB_EXIT=97 mktest::stub_function context::get "age.key_generate" "--coerce" "boolean" "--default" "false" "--store-default"
+  run age::preflight
+  [ "$status" -eq 97 ]
+}
+
+@test "preflight stops when reading the generate request with no key on disk fails" {
+  STUB_OUTPUT="$AGE_KEY_PATH" mktest::stub_function config::get "module.age.key_path" "--default" "$AGE_KEY_PATH" "--store-default"
+  STUB_RETURN=1 mktest::stub_function context::get "existing_age_key_file"
+  STUB_EXIT=97 mktest::stub_function context::get "age.key_generate" "--coerce" "boolean" "--default" "false"
+  run age::preflight
+  [ "$status" -eq 97 ]
+}
+
+@test "preflight stops when prompting for key generation fails" {
+  local generate_prompt
+  # shellcheck disable=SC2059
+  printf -v generate_prompt "$_AGE_GENERATE_PROMPT" "$AGE_KEY_PATH"
+  STUB_OUTPUT="$AGE_KEY_PATH" mktest::stub_function config::get "module.age.key_path" "--default" "$AGE_KEY_PATH" "--store-default"
+  STUB_RETURN=1 mktest::stub_function context::get "existing_age_key_file"
+  STUB_RETURN=1 mktest::stub_function age::_manager_sources_key
+  STUB_OUTPUT="false" mktest::stub_function context::get "age.key_generate" "--coerce" "boolean" "--default" "false"
+  STUB_EXIT=97 mktest::stub_function context::get "age.key_generate" "--required" "--coerce" "boolean" "--prompt" "$generate_prompt"
+  run age::preflight
+  [ "$status" -eq 97 ]
+}
+
 # --- age::_confirm_overwrite ---
 
 @test "_confirm_overwrite succeeds when overwrite is confirmed" {
@@ -185,11 +229,23 @@ setup() {
   age::_confirm_overwrite "/some/key.txt" "should not fail"
 }
 
+@test "_confirm_overwrite leaves no prompt variable behind in the caller's scope" {
+  STUB_OUTPUT="true" mktest::stub_function context::get
+  age::_confirm_overwrite "/some/key.txt" "--fake-flag"
+  [ -z "${overwrite_prompt+set}" ]
+}
+
 @test "_confirm_overwrite fails with the provided message when overwrite is declined" {
   STUB_OUTPUT="false" mktest::stub_function context::get
   STUB_EXIT=1 mktest::stub_function lifecycle::fail
   run ! age::_confirm_overwrite "/some/key.txt" "explicit fail message"
   MATCH="explicit fail message" mktest::assert_stub_called lifecycle::fail
+}
+
+@test "_confirm_overwrite stops when prompting for the overwrite fails" {
+  STUB_EXIT=97 mktest::stub_function context::get
+  run age::_confirm_overwrite "/some/key.txt" "--fake-flag"
+  [ "$status" -eq 97 ]
 }
 
 # --- age::install ---
@@ -285,6 +341,33 @@ setup() {
   age::install
   mktest::assert_stub_called age::_install_use_existing "$AGE_KEY_PATH"
   mktest::assert_stub_not_called age::_manager_sources_key
+}
+
+@test "install stops when reading the key path fails" {
+  mktest::stub_function logging::step
+  mktest::stub_function brew::install_formula "age"
+  STUB_EXIT=97 mktest::stub_function config::get "module.age.key_path"
+  run age::install
+  [ "$status" -eq 97 ]
+}
+
+@test "install stops when reading the existing key file fails" {
+  mktest::stub_function logging::step
+  mktest::stub_function brew::install_formula "age"
+  STUB_OUTPUT="$AGE_KEY_PATH" mktest::stub_function config::get "module.age.key_path"
+  STUB_EXIT=97 mktest::stub_function context::get "existing_age_key_file"
+  run age::install
+  [ "$status" -eq 97 ]
+}
+
+@test "install stops when reading the generate request fails" {
+  mktest::stub_function logging::step
+  mktest::stub_function brew::install_formula "age"
+  STUB_OUTPUT="$AGE_KEY_PATH" mktest::stub_function config::get "module.age.key_path"
+  STUB_RETURN=1 mktest::stub_function context::get "existing_age_key_file"
+  STUB_EXIT=97 mktest::stub_function context::get "age.key_generate" "--coerce" "boolean" "--default" "false"
+  run age::install
+  [ "$status" -eq 97 ]
 }
 
 # --- age::_report_dry_run ---
@@ -385,6 +468,14 @@ setup() {
   MATCH="returned no value" mktest::assert_stub_called lifecycle::fail
 }
 
+@test "_install_from_manager stops when resolving the key reference fails" {
+  STUB_EXIT=97 mktest::stub_function age::_reference_for_key
+  mktest::stub_function secrets::install_secret_file
+  run age::_install_from_manager "$AGE_KEY_PATH"
+  [ "$status" -eq 97 ]
+  mktest::assert_stub_not_called secrets::install_secret_file
+}
+
 # --- age::file_transforms ---
 
 @test "file_transforms maps .age to the decrypt decode handler" {
@@ -426,6 +517,12 @@ setup() {
   MATCH="not found" mktest::assert_stub_called lifecycle::fail
 }
 
+@test "decrypt stops when reading the key path fails" {
+  STUB_EXIT=97 mktest::stub_function config::get "module.age.key_path" "--default" "$AGE_KEY_PATH"
+  run age::decrypt "$BATS_TEST_TMPDIR/secret.age"
+  [ "$status" -eq 97 ]
+}
+
 # --- age::recipient ---
 
 @test "recipient derives the public key from the installed identity" {
@@ -444,6 +541,12 @@ setup() {
   STUB_EXIT=1 mktest::stub_function lifecycle::fail
   run ! age::recipient
   MATCH="no age key" mktest::assert_stub_called lifecycle::fail
+}
+
+@test "recipient stops when reading the key path fails" {
+  STUB_EXIT=97 mktest::stub_function config::get "module.age.key_path" "--default" "$AGE_KEY_PATH"
+  run age::recipient
+  [ "$status" -eq 97 ]
 }
 
 # --- age::encrypt ---
@@ -502,6 +605,13 @@ setup() {
   run ! age::can_decrypt "$file"
 }
 
+@test "can_decrypt stops when reading the key path fails" {
+  STUB_EXIT=97 mktest::stub_function config::get "module.age.key_path" "--default" "$AGE_KEY_PATH"
+  mktest::stub_function age
+  run age::can_decrypt "$BATS_TEST_TMPDIR/secret.age"
+  [ "$status" -eq 97 ]
+}
+
 # --- age::_key_source_type ---
 
 @test "_key_source_type reads module.age.key_source_type, defaulting to file" {
@@ -514,6 +624,14 @@ setup() {
   STUB_OUTPUT="secrets_manager" mktest::stub_function config::get "module.age.key_source_type" --default "file"
   run age::_key_source_type
   [ "$output" = "secrets_manager" ]
+}
+
+@test "_key_source_type fails on an unrecognized value" {
+  STUB_OUTPUT="vault" mktest::stub_function config::get "module.age.key_source_type" --default "file"
+  STUB_EXIT=1 mktest::stub_function lifecycle::fail
+  run age::_key_source_type
+  [ "$status" -eq 1 ]
+  MATCH="invalid module.age.key_source_type 'vault'" mktest::assert_stub_called lifecycle::fail
 }
 
 # --- age::_reference_for_key ---
@@ -538,24 +656,10 @@ setup() {
   [ "$status" -ne 0 ]
 }
 
-# --- age::assert_key_source_type ---
-
-@test "assert_key_source_type accepts file" {
-  STUB_OUTPUT="file" mktest::stub_function age::_key_source_type
-  age::assert_key_source_type
-}
-
-@test "assert_key_source_type accepts secrets_manager" {
-  STUB_OUTPUT="secrets_manager" mktest::stub_function age::_key_source_type
-  age::assert_key_source_type
-}
-
-@test "assert_key_source_type aborts on an unrecognized value — fires in the main shell" {
-  STUB_OUTPUT="vault" mktest::stub_function age::_key_source_type
-  STUB_EXIT=1 mktest::stub_function lifecycle::fail
-  run age::assert_key_source_type
-  [ "$status" -ne 0 ]
-  MATCH="invalid module.age.key_source_type 'vault'" mktest::assert_stub_called lifecycle::fail
+@test "_manager_sources_key stops when reading the key source fails" {
+  STUB_EXIT=97 mktest::stub_function age::_key_source_type
+  run age::_manager_sources_key
+  [ "$status" -eq 97 ]
 }
 
 # --- age::_warn_source_override ---

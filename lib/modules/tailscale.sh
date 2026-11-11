@@ -30,25 +30,28 @@ _TAILSCALE_SECRET_NAMESPACE="tailscale"
 # already-listed manager during preflight readiness — correctly adds no edge,
 # and an untagged device (which declares no secret) declares no dependency.
 tailscale::requires() {
-  tailscale::declared_secrets | secrets::declared_backend_requirements
+  local declared_secrets
+  declared_secrets=${ tailscale::declared_secrets; }
+  secrets::declared_backend_requirements <<< "$declared_secrets"
 }
 
 # Tagged devices can only join if their secret is present; fail early and
 # clearly rather than at join time. Untagged devices need no secret.
 tailscale::preflight() {
-  local tag
-  tag=$(tailscale::_tag)
+  local tag secret_name
+  tag=${ tailscale::_tag; }
   [ -n "$tag" ] || return 0
-  secrets::present "$(tailscale::_secret_name)" || lifecycle::fail \
-    "tailscale: tagged device (tag:$tag) needs a secret named $(tailscale::_secret_name) — see docs/modules.md (tailscale) to provide it."
+  secret_name=${ tailscale::_secret_name; }
+  secrets::present "$secret_name" || lifecycle::fail \
+    "tailscale: tagged device (tag:$tag) needs a secret named $secret_name — see docs/modules.md (tailscale) to provide it."
 }
 
 # Declares the secret this device will use, given current config. Only a
 # tagged device joins the tailnet itself, so only it draws on the encrypted
 # secret; an untagged (user) device signs in by hand and declares nothing.
 tailscale::declared_secrets() {
-  [ -n "$(tailscale::_tag)" ] || return 0
-  printf '%s\ttrue\tfalse\n' "$(tailscale::_secret_name)"
+  [ -n "${ tailscale::_tag; }" ] || return 0
+  printf '%s\ttrue\tfalse\n' "${ tailscale::_secret_name; }"
 }
 
 # The cask token is `tailscale-app` (the GUI app); the formula is `tailscale`
@@ -59,7 +62,7 @@ tailscale::install() {
     tailscale::_install_cask
     return 0
   fi
-  if [ "$(tailscale::_os_family)" = "linux" ]; then
+  if [ "${ tailscale::_os_family; }" = "linux" ]; then
     tailscale::_install_linux
     return 0
   fi
@@ -118,7 +121,7 @@ tailscale::_start_daemon() {
 # The cask (macOS GUI app) applies only to an attended Mac. Tagged devices and
 # all Linux devices get the formula.
 tailscale::_use_cask() {
-  [ -z "$(tailscale::_tag)" ] && [ "$(tailscale::_os_family)" = "darwin" ]
+  [ -z "${ tailscale::_tag; }" ] && [ "${ tailscale::_os_family; }" = "darwin" ]
 }
 
 # Joining happens after home::sync (post_apply) so the daemon is in place first.
@@ -126,7 +129,7 @@ tailscale::_use_cask() {
 # postflight instruction rather than a line buried mid-apply.
 tailscale::post_apply() {
   local tag
-  tag=$(tailscale::_tag)
+  tag=${ tailscale::_tag; }
   [ -n "$tag" ] || return 0
   tailscale::_join "$tag"
 }
@@ -142,16 +145,17 @@ tailscale::_join() {
     return 0
   fi
   local consent
-  consent=$(context::get "tailscale.join" --default false --coerce boolean \
-    --prompt "Join the tailnet now as tagged device tag:$tag? (y/n)")
+  consent=${ context::get "tailscale.join" --default false --coerce boolean \
+    --prompt "Join the tailnet now as tagged device tag:$tag? (y/n)"; }
   if [ "$consent" != "true" ]; then
     logging::warn "tailscale: join not consented; skipping. Set MACHINEKIT_TAILSCALE_JOIN=1 to join."
     return 0
   fi
-  local secret
-  secret=$(secrets::resolve "$(tailscale::_secret_name)")
+  local secret_name secret
+  secret_name=${ tailscale::_secret_name; }
+  secret=${ secrets::resolve "$secret_name"; }
   tailscale::_up "$secret" "$tag"
-  logging::success "tailscale: $(tailscale::_membership_summary "$tag")"
+  logging::success "tailscale: ${ tailscale::_membership_summary "$tag"; }"
 }
 
 # The one-line summary of a tagged device's tailnet membership. Single source for
@@ -159,7 +163,7 @@ tailscale::_join() {
 # and the pinned-hostname clause — lives in exactly one place.
 tailscale::_membership_summary() {
   local tag="$1" hostname
-  hostname="$(tailscale::_hostname)"
+  hostname=${ tailscale::_hostname; }
   if [ -n "$hostname" ]; then
     printf 'joined the tailnet as tag:%s (hostname: %s).\n' "$tag" "$hostname"
   else
@@ -170,7 +174,7 @@ tailscale::_membership_summary() {
 # The platform-specific manual sign-in step for an untagged (user) device: the
 # GUI app on macOS, the CLI on Linux (where no brew GUI app exists).
 tailscale::_signin_instruction() {
-  if [ "$(tailscale::_os_family)" = "darwin" ]; then
+  if [ "${ tailscale::_os_family; }" = "darwin" ]; then
     printf 'Open the Tailscale app and sign in to join your tailnet.\n'
   else
     printf "Run 'sudo tailscale up' to sign in and join your tailnet.\n"
@@ -182,7 +186,7 @@ tailscale::_signin_instruction() {
 # (its next step lives in postflight_instructions).
 tailscale::postflight_info() {
   local tag
-  tag="$(tailscale::_tag)"
+  tag=${ tailscale::_tag; }
   [ -n "$tag" ] || return 0
   tailscale::_is_connected || return 0
   tailscale::_membership_summary "$tag"
@@ -192,7 +196,7 @@ tailscale::postflight_info() {
 # untagged device, or re-apply with consent on a tagged device that didn't join.
 tailscale::postflight_instructions() {
   local tag
-  tag="$(tailscale::_tag)"
+  tag=${ tailscale::_tag; }
   if [ -z "$tag" ]; then
     tailscale::_signin_instruction
     return 0
@@ -219,7 +223,7 @@ tailscale::postflight_instructions() {
 # signs it in.
 tailscale::_up() {
   local secret="$1" tag="$2" hostname
-  hostname="$(tailscale::_hostname)"
+  hostname=${ tailscale::_hostname; }
   local args=(up --auth-key file:/dev/stdin --advertise-tags "tag:${tag}")
   [ -n "$hostname" ] && args+=("--hostname=${hostname}")
   printf '%s' "${secret}?ephemeral=false" \
@@ -259,5 +263,5 @@ tailscale::_tailnet() {
 # it; every other function asks secrets::resolve/present/backend_for for the
 # rest, so this module never knows which backend actually holds the value.
 tailscale::_secret_name() {
-  printf '%s/%s\n' "$_TAILSCALE_SECRET_NAMESPACE" "$(tailscale::_tailnet)"
+  printf '%s/%s\n' "$_TAILSCALE_SECRET_NAMESPACE" "${ tailscale::_tailnet; }"
 }

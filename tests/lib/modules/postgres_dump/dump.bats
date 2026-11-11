@@ -80,7 +80,8 @@ seed_generation() {
 }
 
 generations() {
-  find "$DIRECTORY" -maxdepth 1 -type f -name "$1-*.dump" | sort
+  find "$DIRECTORY" -maxdepth 1 -type f \
+    -name "$1-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]T[0-9][0-9][0-9][0-9][0-9][0-9]Z.dump" | sort
 }
 
 generation_count() {
@@ -194,6 +195,24 @@ generation_count() {
   run_dump 1
   [ "$status" -eq 0 ]
   [ "$(generation_count otherdb)" -eq 2 ]
+}
+
+@test "retention never touches a database whose name starts with this one's" {
+  seed_generation somedb-staging 20200101T000000Z
+  seed_generation somedb-staging 20200102T000000Z
+  run_dump 1
+  [ "$status" -eq 0 ]
+  [ "$(generation_count somedb-staging)" -eq 2 ]
+  [ "$(generation_count somedb)" -eq 1 ]
+}
+
+@test "retention reads a glob character in a database name literally" {
+  seed_generation someXdb 20200101T000000Z
+  printf '%s\t%s\t%s\n' "some?db" "$DIRECTORY" 1 > "$MANIFEST"
+  run_manifest
+  [ "$status" -eq 0 ]
+  [ "$(generation_count someXdb)" -eq 1 ]
+  [ "$(find "$DIRECTORY" -maxdepth 1 -type f -name '*.dump' | grep -c .)" -eq 2 ]
 }
 
 # --- multiple databases ---

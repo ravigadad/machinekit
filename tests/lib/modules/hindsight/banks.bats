@@ -8,41 +8,6 @@ setup() {
   source "$MACHINEKIT_DIR/lib/modules/hindsight/banks.sh"
 }
 
-# --- validate_shape ---
-
-@test "validate_shape passes when every bank is a table" {
-  STUB_EXIT=1 mktest::stub_function lifecycle::fail
-  hindsight::banks::validate_shape '{"music":{"retain_mission":"x"},"personal":{"disposition_empathy":4}}'
-  mktest::assert_stub_not_called lifecycle::fail
-}
-
-@test "validate_shape passes when the bank map is empty" {
-  STUB_EXIT=1 mktest::stub_function lifecycle::fail
-  hindsight::banks::validate_shape '{}'
-  mktest::assert_stub_not_called lifecycle::fail
-}
-
-@test "validate_shape fails when a bank is a scalar" {
-  STUB_EXIT=1 mktest::stub_function lifecycle::fail
-  run hindsight::banks::validate_shape '{"music":"oops"}'
-  [ "$status" -ne 0 ]
-  MATCH="must be a table" mktest::assert_stub_called lifecycle::fail
-}
-
-@test "validate_shape fails when the whole bank map is a scalar" {
-  STUB_EXIT=1 mktest::stub_function lifecycle::fail
-  run hindsight::banks::validate_shape '"music"'
-  [ "$status" -ne 0 ]
-  MATCH="must be a table" mktest::assert_stub_called lifecycle::fail
-}
-
-@test "validate_shape fails when the whole bank map is an array" {
-  STUB_EXIT=1 mktest::stub_function lifecycle::fail
-  run hindsight::banks::validate_shape '["music"]'
-  [ "$status" -ne 0 ]
-  MATCH="must be a table" mktest::assert_stub_called lifecycle::fail
-}
-
 # --- server_reachable ---
 
 @test "server_reachable is true when the health probe succeeds" {

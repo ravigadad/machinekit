@@ -34,6 +34,8 @@ source "$_mk_core_dir/config.sh"
 source "$_mk_core_dir/resolver.sh"
 # shellcheck source=machinekit/modules.sh
 source "$_mk_core_dir/modules.sh"
+# shellcheck source=machinekit/artifacts.sh
+source "$_mk_core_dir/artifacts.sh"
 # shellcheck source=machinekit/secrets.sh
 source "$_mk_core_dir/secrets.sh"
 # shellcheck source=machinekit/home.sh

@@ -41,6 +41,19 @@ setup() {
   mktest::assert_stub_not_called secrets::render::_table
 }
 
+@test "render stops when reading the inventory fails" {
+  STUB_EXIT=97 mktest::stub_function secrets::inventory
+  run secrets::render
+  [ "$status" -eq 97 ]
+}
+
+@test "render stops when reading the orphans fails" {
+  STUB_OUTPUT="" mktest::stub_function secrets::inventory
+  STUB_EXIT=97 mktest::stub_function secrets::orphans
+  run secrets::render
+  [ "$status" -eq 97 ]
+}
+
 # --- secrets::render::_table ---
 
 @test "_table prints a blank line, a header, and the resolved source/yes-no columns" {

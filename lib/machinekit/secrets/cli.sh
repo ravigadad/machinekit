@@ -28,7 +28,6 @@ secrets::cli::list() {
   preflight::resolve_inputs
   secrets_manager::ensure_ready
   secrets::assert_age_key_not_pooled
-  age::assert_key_source_type
   secrets::render
 }
 

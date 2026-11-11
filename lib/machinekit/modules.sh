@@ -26,11 +26,22 @@ modules::dir() {
 modules::source_all() {
   [ -n "${_MK_MODULES_SOURCED:-}" ] && return 0
   _MK_MODULES_SOURCED=1
-  local f
+  local f module_files
+  module_files=$(modules::_files)
   # shellcheck disable=SC1090
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    source "$f"
+  done <<< "$module_files"
+}
+
+# Every module file, one path per line: the top-level *.sh, plus the capability
+# satisfiers in capabilities/.
+modules::_files() {
+  local f
   for f in "$_MK_MODULES_DIR"/*.sh "$_MK_MODULES_DIR"/capabilities/*.sh; do
     [ -f "$f" ] || continue
-    source "$f"
+    printf '%s\n' "$f"
   done
 }
 
@@ -55,12 +66,40 @@ modules::collect() {
 }
 
 modules::_call_function_per_module() {
-  local mod
+  local defining_modules mod
+  defining_modules=${ modules::active_defining "$1"; }
   while IFS= read -r mod; do
-    declare -F "${mod}::$1" > /dev/null 2>&1 || continue
+    [ -n "$mod" ] || continue
     logging::debug "running ${mod}::$1"
     "${mod}::$1"
-  done < <(context::get_array "modules.active")
+  done <<< "$defining_modules"
+}
+
+# modules::active_defining HOOK — the active modules that define <mod>::HOOK, in
+# run order, one per line.
+modules::active_defining() {
+  local active_modules mod
+  active_modules=${ context::get_array "modules.active" || true; }
+  while IFS= read -r mod; do
+    [ -n "$mod" ] || continue
+    declare -F "${mod}::$1" > /dev/null 2>&1 || continue
+    printf '%s\n' "$mod"
+  done <<< "$active_modules"
+}
+
+# modules::defining HOOK — every module that defines <mod>::HOOK, active or not,
+# one per line. For reaching what a module left behind after the blueprint
+# dropped it.
+modules::defining() {
+  local module_files file mod
+  module_files=$(modules::_files)
+  while IFS= read -r file; do
+    [ -n "$file" ] || continue
+    mod=${file##*/}
+    mod=${mod%.sh}
+    declare -F "${mod}::$1" > /dev/null 2>&1 || continue
+    printf '%s\n' "$mod"
+  done <<< "$module_files"
 }
 
 # modules::capability_active CAPABILITY — true if any active module provides it.
@@ -77,12 +116,13 @@ modules::capability_active() {
 # genuinely divergent implementations, unlike container_manager's
 # orbstack/docker_ce sharing one `docker` CLI) needs the name itself.
 modules::capability_satisfier() {
-  local capability="$1" mod provided
+  local capability="$1" providing_modules mod provided
+  providing_modules=${ modules::active_defining provides; }
   while IFS= read -r mod; do
-    declare -F "${mod}::provides" > /dev/null 2>&1 || continue
+    [ -n "$mod" ] || continue
     while IFS= read -r provided; do
       [ "$provided" = "$capability" ] && { printf '%s\n' "$mod"; return 0; }
     done < <("${mod}::provides")
-  done < <(context::get_array "modules.active")
+  done <<< "$providing_modules"
   return 1
 }

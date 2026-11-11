@@ -37,6 +37,14 @@ setup() {
   [ -z "$output" ]
 }
 
+@test "requires stops when declaring its secrets fails" {
+  STUB_EXIT=97 mktest::stub_function git_backup::declared_secrets
+  mktest::stub_function secrets::declared_backend_requirements
+  run git_backup::requires
+  [ "$status" -eq 97 ]
+  mktest::assert_stub_not_called secrets::declared_backend_requirements
+}
+
 # --- preflight ---
 
 @test "preflight is a no-op when no folders are configured" {
@@ -64,6 +72,12 @@ setup() {
   mktest::assert_stub_not_called lifecycle::fail
 }
 
+@test "preflight stops when reading the folders fails" {
+  STUB_EXIT=97 mktest::stub_function git_backup::_folders
+  run git_backup::preflight
+  [ "$status" -eq 97 ]
+}
+
 # --- declared_secrets ---
 
 @test "declared_secrets declares each referenced ssh key required and not generatable" {
@@ -82,6 +96,56 @@ setup() {
   [ "$status" -eq 0 ]
   [ -z "$output" ]
   mktest::assert_stub_not_called git_backup::_secret_name
+}
+
+@test "declared_secrets stops when reading the key names fails" {
+  STUB_EXIT=97 mktest::stub_function git_backup::_referenced_key_names
+  run git_backup::declared_secrets
+  [ "$status" -eq 97 ]
+}
+
+# --- installed_file_patterns ---
+
+@test "installed_file_patterns names the manifest, the push script and every ssh key file" {
+  run git_backup::installed_file_patterns
+  [ "$status" -eq 0 ]
+  [ "$output" = $'data\tmanifest.tsv\ndata\tpush.sh\nconfig\tssh_keys/*' ]
+}
+
+# --- installed_artifacts ---
+
+@test "installed_artifacts declares the service, its manifest and push script, and each referenced key file" {
+  STUB_OUTPUT='[{"path":"/fake/folder"}]' mktest::stub_function git_backup::_folders
+  STUB_OUTPUT="/fake/manifest.tsv" mktest::stub_function git_backup::_manifest_path
+  STUB_OUTPUT="/fake/push.sh" mktest::stub_function git_backup::_push_script_path
+  STUB_OUTPUT=$'deploy\nmirror' mktest::stub_function git_backup::_referenced_key_names
+  STUB_OUTPUT="/fake/keys/deploy" mktest::stub_function git_backup::_key_path deploy
+  STUB_OUTPUT="/fake/keys/mirror" mktest::stub_function git_backup::_key_path mirror
+  run git_backup::installed_artifacts
+  [ "$status" -eq 0 ]
+  [ "$output" = $'service\tgit-backup\nfile\t/fake/manifest.tsv\nfile\t/fake/push.sh\nfile\t/fake/keys/deploy\nfile\t/fake/keys/mirror' ]
+}
+
+@test "installed_artifacts declares nothing when no folders are configured" {
+  STUB_OUTPUT="" mktest::stub_function git_backup::_folders
+  run git_backup::installed_artifacts
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "installed_artifacts stops when reading the folders fails" {
+  STUB_EXIT=97 mktest::stub_function git_backup::_folders
+  run git_backup::installed_artifacts
+  [ "$status" -eq 97 ]
+}
+
+@test "installed_artifacts stops when reading the key names fails" {
+  STUB_OUTPUT='[{"path":"/fake/folder"}]' mktest::stub_function git_backup::_folders
+  mktest::stub_function git_backup::_manifest_path
+  mktest::stub_function git_backup::_push_script_path
+  STUB_EXIT=97 mktest::stub_function git_backup::_referenced_key_names
+  run git_backup::installed_artifacts
+  [ "$status" -eq 97 ]
 }
 
 # --- install ---
@@ -120,6 +184,20 @@ setup() {
   mktest::assert_stub_called git_backup::_install_service
 }
 
+@test "install stops when reading the folders fails" {
+  STUB_EXIT=97 mktest::stub_function git_backup::_folders
+  run git_backup::install
+  [ "$status" -eq 97 ]
+}
+
+@test "install in dry-run stops when reading the interval fails" {
+  STUB_OUTPUT='[{"path":"/a","remote":"r1"}]' mktest::stub_function git_backup::_folders
+  mktest::stub_function input::is_dry_run
+  STUB_EXIT=97 mktest::stub_function git_backup::_interval
+  run git_backup::install
+  [ "$status" -eq 97 ]
+}
+
 # --- postflight_info ---
 
 @test "postflight_info reports each folder's destination and delegates cadence to _human_interval" {
@@ -151,6 +229,20 @@ setup() {
   STUB_OUTPUT="" mktest::stub_function git_backup::_folders
   run git_backup::postflight_info
   [ -z "$output" ]
+}
+
+@test "postflight_info stops when reading the folders fails" {
+  STUB_EXIT=97 mktest::stub_function git_backup::_folders
+  run git_backup::postflight_info
+  [ "$status" -eq 97 ]
+}
+
+@test "postflight_info stops when reading the interval fails" {
+  STUB_OUTPUT='[{"path":"/a","remote":"r1"}]' mktest::stub_function git_backup::_folders
+  STUB_EXIT=97 mktest::stub_function git_backup::_interval
+  mktest::stub_function git_backup::_human_interval
+  run git_backup::postflight_info
+  [ "$status" -eq 97 ]
 }
 
 # --- _human_interval ---
@@ -187,6 +279,7 @@ setup() {
 # --- _validate_ignores ---
 
 @test "_validate_ignores passes the common defaults-on, no-patterns folder" {
+  STUB_OUTPUT='[]' mktest::stub_function git_backup::_ignore_patterns '{"path":"/a","remote":"r1"}'
   STUB_EXIT=1 mktest::stub_function lifecycle::fail
   git_backup::_validate_ignores '[{"path":"/a","remote":"r1"}]'
   mktest::assert_stub_not_called lifecycle::fail
@@ -194,22 +287,31 @@ setup() {
 }
 
 @test "_validate_ignores passes an opt-out folder with no patterns" {
+  STUB_OUTPUT='[]' mktest::stub_function git_backup::_ignore_patterns '{"path":"/a","remote":"r1","manage_gitignore":false}'
   STUB_EXIT=1 mktest::stub_function lifecycle::fail
   git_backup::_validate_ignores '[{"path":"/a","remote":"r1","manage_gitignore":false}]'
   mktest::assert_stub_not_called lifecycle::fail
 }
 
-@test "_validate_ignores fails an opt-out folder that still lists ignore_patterns" {
+@test "_validate_ignores fails an opt-out folder that still has patterns" {
+  STUB_OUTPUT='["x"]' mktest::stub_function git_backup::_ignore_patterns '{"path":"/a","remote":"r1","manage_gitignore":false}'
   STUB_EXIT=1 mktest::stub_function lifecycle::fail
-  run ! git_backup::_validate_ignores '[{"path":"/a","remote":"r1","manage_gitignore":false,"ignore_patterns":["x"]}]'
+  run ! git_backup::_validate_ignores '[{"path":"/a","remote":"r1","manage_gitignore":false}]'
   MATCH="manage_gitignore = false" mktest::assert_stub_called lifecycle::fail
 }
 
 @test "_validate_ignores warns on the all-empty no-op folder" {
+  STUB_OUTPUT='[]' mktest::stub_function git_backup::_ignore_patterns '{"path":"/a","remote":"r1","add_default_ignores":false}'
   STUB_EXIT=1 mktest::stub_function lifecycle::fail
   git_backup::_validate_ignores '[{"path":"/a","remote":"r1","add_default_ignores":false}]'
   mktest::assert_stub_not_called lifecycle::fail
   mktest::assert_stub_called logging::warn
+}
+
+@test "_validate_ignores stops when reading a folder's ignore patterns fails" {
+  STUB_EXIT=97 mktest::stub_function git_backup::_ignore_patterns
+  run git_backup::_validate_ignores '[{"path":"/fake"}]'
+  [ "$status" -eq 97 ]
 }
 
 # --- _validate_keys ---
@@ -232,6 +334,12 @@ setup() {
   MATCH="ssh_key 'agents'" mktest::assert_stub_called lifecycle::fail
 }
 
+@test "_validate_keys stops when reading the key names fails" {
+  STUB_EXIT=97 mktest::stub_function git_backup::_referenced_key_names
+  run git_backup::_validate_keys
+  [ "$status" -eq 97 ]
+}
+
 # --- _install_keys ---
 
 @test "_install_keys installs every referenced key" {
@@ -241,6 +349,12 @@ setup() {
   git_backup::_install_keys
   mktest::assert_stub_called git_backup::_install_key "k1"
   mktest::assert_stub_called git_backup::_install_key "k2"
+}
+
+@test "_install_keys stops when reading the key names fails" {
+  STUB_EXIT=97 mktest::stub_function git_backup::_referenced_key_names
+  run git_backup::_install_keys
+  [ "$status" -eq 97 ]
 }
 
 # --- _install_key ---
@@ -277,6 +391,21 @@ setup() {
   mktest::assert_stub_called git_backup::_manifest_row '{"path":"/a","remote":"r1"}' "defaultkey"
   mktest::assert_stub_called git_backup::_manifest_row '{"path":"/b","remote":"r2"}' "defaultkey"
   [ "$(grep -c 'manifest-row' "$manifest")" -eq 2 ]
+}
+
+@test "_write_manifest stops when reading the folders fails" {
+  STUB_EXIT=97 mktest::stub_function git_backup::_folders
+  run git_backup::_write_manifest
+  [ "$status" -eq 97 ]
+}
+
+@test "_write_manifest stops when reading the default ssh key fails" {
+  STUB_OUTPUT="$BATS_TEST_TMPDIR/out/manifest.tsv" mktest::stub_function git_backup::_manifest_path
+  STUB_OUTPUT='[{"path":"/a","remote":"r1"}]' mktest::stub_function git_backup::_folders
+  STUB_EXIT=97 mktest::stub_function git_backup::_default_ssh_key
+  mktest::stub_function git_backup::_manifest_row
+  run git_backup::_write_manifest
+  [ "$status" -eq 97 ]
 }
 
 # --- _manifest_row ---
@@ -323,6 +452,12 @@ setup() {
   mktest::assert_stub_not_called git_backup::_apply_gitignore
 }
 
+@test "_apply_gitignores stops when reading the folders fails" {
+  STUB_EXIT=97 mktest::stub_function git_backup::_folders
+  run git_backup::_apply_gitignores
+  [ "$status" -eq 97 ]
+}
+
 @test "_apply_gitignore pipes the folder's patterns into managed_block::ensure for its .gitignore" {
   local dir="$BATS_TEST_TMPDIR/repo"; mkdir "$dir"
   STUB_OUTPUT=$'a\nb' mktest::stub_function git_backup::_gitignore_patterns '{"path":"x"}'
@@ -349,24 +484,51 @@ setup() {
   mktest::assert_stub_not_called managed_block::ensure
 }
 
-@test "_gitignore_patterns emits user patterns before defaults" {
-  run git_backup::_gitignore_patterns '{"ignore_patterns":["build/","node_modules/"]}'
-  [ "${lines[0]}" = "build/" ]
-  [ "${lines[1]}" = "node_modules/" ]
-  [ "${lines[2]}" = ".DS_Store" ]
-  [ "${lines[3]}" = "._*" ]
-  [ "${lines[4]}" = ".stversions/" ]
+@test "_apply_gitignore stops when building the patterns fails" {
+  mktest::stub_function managed_block::ensure
+  STUB_EXIT=97 mktest::stub_function git_backup::_gitignore_patterns
+  run git_backup::_apply_gitignore '{"path":"/fake"}' "$BATS_TEST_TMPDIR"
+  [ "$status" -eq 97 ]
+}
+
+# .gitignore applies the last matching pattern, so the most specific layer goes
+# last, letting its `!` negations win: the defaults, then the folder's patterns.
+@test "_gitignore_patterns emits the defaults, then the folder's patterns, de-duplicated" {
+  STUB_OUTPUT=$'default1\ndefault2' mktest::stub_function git_backup::_default_ignores
+  STUB_OUTPUT='["build/","!default1"]' mktest::stub_function git_backup::_ignore_patterns '{"path":"/a"}'
+  git_backup::_dedup_keep_last() { cat > "$BATS_TEST_TMPDIR/dedup_stdin"; printf 'the-deduped-lines\n'; }
+  run git_backup::_gitignore_patterns '{"path":"/a"}'
+  [ "$output" = "the-deduped-lines" ]
+  [ "$(cat "$BATS_TEST_TMPDIR/dedup_stdin")" = "$(printf 'default1\ndefault2\nbuild/\n!default1')" ]
 }
 
 @test "_gitignore_patterns omits defaults when add_default_ignores is false" {
-  run git_backup::_gitignore_patterns '{"ignore_patterns":["build/"],"add_default_ignores":false}'
-  [ "$output" = "build/" ]
+  mktest::stub_function git_backup::_default_ignores
+  STUB_OUTPUT='["build/"]' mktest::stub_function git_backup::_ignore_patterns '{"path":"/a","add_default_ignores":false}'
+  git_backup::_dedup_keep_last() { cat > "$BATS_TEST_TMPDIR/dedup_stdin"; }
+  run git_backup::_gitignore_patterns '{"path":"/a","add_default_ignores":false}'
+  [ "$(cat "$BATS_TEST_TMPDIR/dedup_stdin")" = "build/" ]
+  mktest::assert_stub_not_called git_backup::_default_ignores
 }
 
-@test "_gitignore_patterns de-duplicates, keeping the user's occurrence" {
-  run git_backup::_gitignore_patterns '{"ignore_patterns":[".stversions/"]}'
-  [ "${lines[0]}" = ".stversions/" ]
-  [ "${#lines[@]}" -eq 5 ]
+@test "_gitignore_patterns stops when reading the ignore patterns fails" {
+  STUB_EXIT=97 mktest::stub_function git_backup::_ignore_patterns
+  run git_backup::_gitignore_patterns '{"path":"/fake","add_default_ignores":false}'
+  [ "$status" -eq 97 ]
+}
+
+@test "_ignore_patterns combines the folder's patterns with its additions last, naming the folder" {
+  STUB_OUTPUT='the-pattern-list' mktest::stub_function config::extended_list \
+    '{"path":"/a"}' "ignore_patterns" "after" "git_backup folder '/a'"
+  run git_backup::_ignore_patterns '{"path":"/a"}'
+  [ "$output" = "the-pattern-list" ]
+}
+
+# Keeping the last occurrence preserves what git sees: a repeated pattern still
+# lands after any `!` exception written between its two occurrences.
+@test "_dedup_keep_last keeps each line's last occurrence, in order, dropping blanks" {
+  run git_backup::_dedup_keep_last <<< $'default1\n\ndefault2\n!default1\ndefault1'
+  [ "$output" = "$(printf 'default2\n!default1\ndefault1')" ]
 }
 
 @test "_default_ignores includes Syncthing's machine-local artifacts" {
@@ -409,19 +571,34 @@ setup() {
     "MK_GIT_BACKUP_GIT=/b/git"
 }
 
+@test "_install_service stops when reading the interval fails" {
+  STUB_OUTPUT="/s/push.sh" mktest::stub_function git_backup::_push_script_path
+  STUB_OUTPUT="/m/manifest.tsv" mktest::stub_function git_backup::_manifest_path
+  STUB_OUTPUT="/n/notify" mktest::stub_function git_backup::_notify
+  STUB_OUTPUT="/b/git" mktest::stub_function git_backup::_git_path
+  STUB_EXIT=97 mktest::stub_function git_backup::_interval
+  mktest::stub_function service::install_interval
+  run git_backup::_install_service
+  [ "$status" -eq 97 ]
+}
+
+@test "_install_service stops when reading the notify command fails" {
+  STUB_OUTPUT="/s/push.sh" mktest::stub_function git_backup::_push_script_path
+  STUB_OUTPUT="/m/manifest.tsv" mktest::stub_function git_backup::_manifest_path
+  STUB_EXIT=97 mktest::stub_function git_backup::_notify
+  STUB_OUTPUT="/b/git" mktest::stub_function git_backup::_git_path
+  STUB_OUTPUT="300" mktest::stub_function git_backup::_interval
+  mktest::stub_function service::install_interval
+  run git_backup::_install_service
+  [ "$status" -eq 97 ]
+}
+
 # --- config accessors + paths ---
 
 @test "_folders returns the configured folders" {
-  STUB_OUTPUT='[{"path":"/a","remote":"r1"}]' mktest::stub_function config::get "module.git_backup.folders"
+  STUB_OUTPUT="the-folders" mktest::stub_function config::entries "module.git_backup.folders"
   run git_backup::_folders
-  [ "$output" = '[{"path":"/a","remote":"r1"}]' ]
-}
-
-@test "_folders is empty and succeeds when the key is unset" {
-  STUB_RETURN=1 mktest::stub_function config::get
-  run git_backup::_folders
-  [ "$status" -eq 0 ]
-  [ -z "$output" ]
+  [ "$output" = "the-folders" ]
 }
 
 @test "_interval defaults to 300" {
@@ -471,49 +648,39 @@ setup() {
   [ -z "$output" ]
 }
 
+@test "_referenced_key_names stops when reading the folders fails" {
+  STUB_EXIT=97 mktest::stub_function git_backup::_folders
+  run git_backup::_referenced_key_names
+  [ "$status" -eq 97 ]
+}
+
+@test "_referenced_key_names stops when reading the default ssh key fails" {
+  STUB_OUTPUT='[{"ssh_key":"fake-key"}]' mktest::stub_function git_backup::_folders
+  STUB_EXIT=97 mktest::stub_function git_backup::_default_ssh_key
+  run git_backup::_referenced_key_names
+  [ "$status" -eq 97 ]
+}
+
 @test "_secret_name builds the bare logical secret name for a key name" {
   run git_backup::_secret_name "agents"
   [ "$output" = "git_backup/ssh_keys/agents" ]
 }
 
-@test "_key_path locates the decrypted key under the default config dir" {
-  HOME=/fake/home
-  unset XDG_CONFIG_HOME
+@test "_key_path places the decrypted key in the module's own config dir" {
+  STUB_OUTPUT="/fake/config/git_backup" mktest::stub_function artifacts::module_config_dir git_backup
   run git_backup::_key_path "agents"
-  [ "$output" = "/fake/home/.config/machinekit/git_backup/ssh_keys/agents" ]
+  [ "$output" = "/fake/config/git_backup/ssh_keys/agents" ]
 }
 
-@test "_key_path honors XDG_CONFIG_HOME for the machinekit config dir" {
-  HOME=/fake/home
-  XDG_CONFIG_HOME=/fake/home/.xdg
-  run git_backup::_key_path "agents"
-  [ "$output" = "/fake/home/.xdg/machinekit/git_backup/ssh_keys/agents" ]
-}
-
-@test "_manifest_path locates the manifest under the default data dir" {
-  HOME=/fake/home
-  unset XDG_DATA_HOME
+@test "_manifest_path places the manifest in the module's own data dir" {
+  STUB_OUTPUT="/fake/data/git_backup" mktest::stub_function artifacts::module_data_dir git_backup
   run git_backup::_manifest_path
-  [ "$output" = "/fake/home/.local/share/machinekit/git_backup/manifest.tsv" ]
+  [ "$output" = "/fake/data/git_backup/manifest.tsv" ]
 }
 
-@test "_manifest_path honors XDG_DATA_HOME" {
-  HOME=/fake/home
-  XDG_DATA_HOME=/fake/home/.xdg-data
-  run git_backup::_manifest_path
-  [ "$output" = "/fake/home/.xdg-data/machinekit/git_backup/manifest.tsv" ]
-}
-
-@test "_push_script_path locates the installed push script under the default data dir" {
-  HOME=/fake/home
-  unset XDG_DATA_HOME
+@test "_push_script_path places the installed push script in the module's own data dir" {
+  STUB_OUTPUT="/fake/data/git_backup" mktest::stub_function artifacts::module_data_dir git_backup
   run git_backup::_push_script_path
-  [ "$output" = "/fake/home/.local/share/machinekit/git_backup/push.sh" ]
+  [ "$output" = "/fake/data/git_backup/push.sh" ]
 }
 
-@test "_push_script_path honors XDG_DATA_HOME" {
-  HOME=/fake/home
-  XDG_DATA_HOME=/fake/home/.xdg-data
-  run git_backup::_push_script_path
-  [ "$output" = "/fake/home/.xdg-data/machinekit/git_backup/push.sh" ]
-}

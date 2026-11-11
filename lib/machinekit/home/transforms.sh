@@ -60,17 +60,17 @@ home::transforms::register() {
 # so any directly-registered framework transforms are preserved. Each hook emits
 # "ext tier fn" lines; modules without the hook contribute nothing.
 home::transforms::register_from_modules() {
-  local mod line fields
+  local defining_modules mod line fields
+  defining_modules=${ modules::active_defining file_transforms; }
   while IFS= read -r mod; do
     [ -z "$mod" ] && continue
-    declare -F "${mod}::file_transforms" > /dev/null 2>&1 || continue
     while IFS= read -r line; do
       [ -z "$line" ] && continue
       read -r -a fields <<< "$line"
       [ "${#fields[@]}" -eq 3 ] || lifecycle::fail "home::transforms: ${mod}::file_transforms emitted a malformed line (expected 'ext tier fn'): '$line'"
       home::transforms::register "${fields[0]}" "${fields[1]}" "${fields[2]}"
     done < <("${mod}::file_transforms")
-  done < <(context::get_array "modules.active")
+  done <<< "$defining_modules"
 }
 
 # lookup EXT — print "TIER FN" for a registered extension; nonzero if unknown.

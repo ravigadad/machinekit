@@ -27,6 +27,13 @@ setup() {
   mktest::assert_stub_called postgres_brew::access::_open_for_containers
 }
 
+@test "configure stops when reading the OS family fails" {
+  STUB_EXIT=97 mktest::stub_function context::get "os.family"
+  mktest::stub_function postgres_brew::access::_open_for_containers
+  run postgres_brew::access::configure
+  [ "$status" -eq 97 ]
+}
+
 # --- postgres_brew::access::_open_for_containers ---
 
 @test "_open_for_containers opens listen, authorizes the subnet, then restarts" {
@@ -53,6 +60,29 @@ setup() {
   mktest::assert_stub_not_called container_manager::container_subnet
 }
 
+@test "_open_for_containers stops when resolving the instance fails" {
+  STUB_RETURN=1 mktest::stub_function input::is_dry_run
+  STUB_EXIT=97 mktest::stub_function postgres_brew::introspect::instance_version
+  STUB_EXIT=1 mktest::stub_function lifecycle::fail
+  mktest::stub_function container_manager::container_subnet
+  run postgres_brew::access::_open_for_containers
+  [ "$status" -eq 97 ]
+  mktest::assert_stub_not_called container_manager::container_subnet
+}
+
+@test "_open_for_containers stops when reading the container subnet fails" {
+  STUB_RETURN=1 mktest::stub_function input::is_dry_run
+  STUB_OUTPUT="17" mktest::stub_function postgres_brew::introspect::instance_version
+  STUB_EXIT=97 mktest::stub_function container_manager::container_subnet
+  mktest::stub_function postgres_brew::access::_open_listen
+  mktest::stub_function postgres_brew::access::_authorize_subnet
+  mktest::stub_function postgres_brew::_restart
+  mktest::stub_function logging::success
+  run postgres_brew::access::_open_for_containers
+  [ "$status" -eq 97 ]
+  mktest::assert_stub_not_called postgres_brew::access::_open_listen
+}
+
 @test "_open_for_containers in dry-run reports without touching docker or the config" {
   mktest::stub_function input::is_dry_run
   mktest::stub_function logging::dry_run
@@ -77,6 +107,14 @@ setup() {
     "/fake/d/postgresql.conf" "listen_addresses = '*'"
 }
 
+@test "_open_listen stops when locating the data directory fails" {
+  STUB_EXIT=97 mktest::stub_function postgres_brew::introspect::data_dir "17"
+  mktest::stub_function postgres_brew::access::_write_block
+  run postgres_brew::access::_open_listen 17
+  [ "$status" -eq 97 ]
+  mktest::assert_stub_not_called postgres_brew::access::_write_block
+}
+
 # --- postgres_brew::access::_authorize_subnet ---
 
 @test "_authorize_subnet writes a scram pg_hba line scoped to the subnet" {
@@ -86,6 +124,14 @@ setup() {
   postgres_brew::access::_authorize_subnet 17 "172.30.0.0/16"
   mktest::assert_stub_called postgres_brew::access::_write_block \
     "/fake/d/pg_hba.conf" "host all all 172.30.0.0/16 scram-sha-256"
+}
+
+@test "_authorize_subnet stops when locating the data directory fails" {
+  STUB_EXIT=97 mktest::stub_function postgres_brew::introspect::data_dir "17"
+  mktest::stub_function postgres_brew::access::_write_block
+  run postgres_brew::access::_authorize_subnet 17 "172.30.0.0/16"
+  [ "$status" -eq 97 ]
+  mktest::assert_stub_not_called postgres_brew::access::_write_block
 }
 
 # --- postgres_brew::access::_write_block ---

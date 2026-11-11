@@ -13,7 +13,7 @@ secrets_manager::is_capability() { return 0; }
 # (secrets.sh, age.sh) uses; no caller ever names a concrete satisfier.
 secrets_manager::fetch() {
   local reference="$1" satisfier
-  satisfier=$(modules::capability_satisfier secrets_manager) \
+  satisfier=${ modules::capability_satisfier secrets_manager; } \
     || lifecycle::fail "secrets_manager: no secrets-manager module is active — add one (e.g. infisical) to modules = [...]."
   "${satisfier}::fetch" "$reference"
 }
@@ -24,7 +24,7 @@ secrets_manager::fetch() {
 # when no satisfier is active.
 secrets_manager::ensure_ready() {
   local satisfier
-  satisfier=$(modules::capability_satisfier secrets_manager) || return 0
+  satisfier=${ modules::capability_satisfier secrets_manager; } || return 0
   "${satisfier}::ensure_ready"
 }
 
@@ -34,7 +34,7 @@ secrets_manager::ensure_ready() {
 # once capability_active has confirmed one, so that is a defensive floor).
 secrets_manager::has() {
   local name="$1" satisfier
-  satisfier=$(modules::capability_satisfier secrets_manager) || return 1
+  satisfier=${ modules::capability_satisfier secrets_manager; } || return 1
   "${satisfier}::has" "$name"
 }
 
@@ -45,7 +45,7 @@ secrets_manager::has() {
 # defensive false-when-none floor as ::has.
 secrets_manager::has_reference() {
   local reference="$1" satisfier
-  satisfier=$(modules::capability_satisfier secrets_manager) || return 1
+  satisfier=${ modules::capability_satisfier secrets_manager; } || return 1
   "${satisfier}::has_reference" "$reference"
 }
 

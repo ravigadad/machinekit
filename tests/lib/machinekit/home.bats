@@ -61,12 +61,29 @@ setup() {
   mktest::assert_stub_not_called home::dry_run::show_diff
 }
 
+@test "sync stops when counting the planned files fails" {
+  STUB_EXIT=97 mktest::stub_function home::_planned_count
+  mktest::stub_function context::set
+  mktest::stub_function input::is_dry_run
+  mktest::stub_function home::dry_run::show_diff
+  mktest::stub_function home::_apply
+  run home::sync
+  [ "$status" -eq 97 ]
+}
+
 @test "_planned_count counts the non-suppressed planned files" {
   STUB_OUTPUT='[{"suppressed":false},{"suppressed":true},{"suppressed":false}]' \
     mktest::stub_function home::_build_plan
   run home::_planned_count
   [ "$status" -eq 0 ]
   [ "$output" = "2" ]
+}
+
+@test "_planned_count stops when building the plan fails" {
+  STUB_EXIT=97 mktest::stub_function home::_build_plan
+  run home::_planned_count
+  [ "$status" -eq 97 ]
+  [ -z "$output" ]
 }
 
 # --- home::will_exist ---
@@ -99,6 +116,12 @@ setup() {
   STUB_OUTPUT="[{\"dest\":\"$query\",\"suppressed\":true}]" mktest::stub_function home::_build_plan
   run home::will_exist "$query"
   [ "$status" -ne 0 ]
+}
+
+@test "will_exist stops when building the plan fails" {
+  STUB_EXIT=97 mktest::stub_function home::_build_plan
+  run home::will_exist "$BATS_TEST_TMPDIR/nope"
+  [ "$status" -eq 97 ]
 }
 
 # --- home::_build_plan ---
@@ -182,6 +205,25 @@ _stub_plan_resolution() {
   [ "$(jq -r 'length' <<<"$plan")" = "0" ]
 }
 
+@test "_build_plan stops when finding the staging dir fails" {
+  STUB_EXIT=97 mktest::stub_function home::staging::dir
+  _stub_plan_resolution
+  run home::_build_plan
+  [ "$status" -eq 97 ]
+}
+
+@test "_build_plan stops when resolving a file's transforms fails, emitting no plan" {
+  local staging="$BATS_TEST_TMPDIR/staging"
+  mkdir -p "$staging"
+  : > "$staging/a"
+  STUB_OUTPUT="$staging" mktest::stub_function home::staging::dir
+  _stub_plan_resolution
+  STUB_EXIT=97 mktest::stub_function home::transforms::resolve
+  run home::_build_plan
+  [ "$status" -eq 97 ]
+  [ -z "$output" ]
+}
+
 # --- home::_each_planned_file ---
 
 @test "_each_planned_file streams every record — including suppressed — to the callback with fields then pipeline" {
@@ -201,6 +243,13 @@ _stub_plan_resolution() {
   mktest::stub_function fake_sink
   home::_each_planned_file fake_sink "the-prefix"
   mktest::assert_stub_called fake_sink "the-prefix" "/s/a" "a" "/h/a" "ka" "0" "false"
+}
+
+@test "_each_planned_file stops when building the plan fails" {
+  STUB_EXIT=97 mktest::stub_function home::_build_plan
+  mktest::stub_function fake_sink
+  run home::_each_planned_file fake_sink
+  [ "$status" -eq 97 ]
 }
 
 # --- home::_apply ---
@@ -538,6 +587,13 @@ _stub_plan_resolution() {
     || result=$?
   [ "$result" -eq 1 ]
   [ "$MACHINEKIT_CONFLICT_BEHAVIOR" = "skip" ]
+}
+
+@test "_conflict_action stops when reading the conflict behavior fails" {
+  STUB_EXIT=97 mktest::stub_function input::conflict_behavior
+  STUB_RETURN=1 mktest::stub_function input::is_interactive
+  run home::_conflict_action ".zshrc" "$BATS_TEST_TMPDIR/resolved" "$BATS_TEST_TMPDIR/dest"
+  [ "$status" -eq 97 ]
 }
 
 # --- home::_prompt_conflict ---

@@ -46,6 +46,21 @@ setup() {
 
 }
 
+@test "install stops when resolving the blueprints dir fails" {
+  STUB_EXIT=97 mktest::stub_function blueprints::dir
+  mktest::stub_function brewfile::_apply_one
+  run brewfile::install
+  [ "$status" -eq 97 ]
+}
+
+@test "install stops when reading the machine type fails" {
+  STUB_OUTPUT="/fake/blueprints" mktest::stub_function blueprints::dir
+  STUB_EXIT=97 mktest::stub_function context::get "machine_type"
+  mktest::stub_function brewfile::_apply_one
+  run brewfile::install
+  [ "$status" -eq 97 ]
+}
+
 # --- brewfile::_apply_one ---
 
 @test "_apply_one returns 0 and skips brew bundle when Brewfile does not exist" {
@@ -140,4 +155,26 @@ setup() {
   run brewfile::_diff "$brewfile"
   [ "$status" -eq 0 ]
   mktest::assert_stub_not_called logging::dry_run
+}
+
+@test "diff stops when listing installed formulae fails" {
+  mktest::stub_function input::command_exists "brew"
+  STUB_EXIT=97 mktest::stub_function brew::_installed formula
+  mktest::stub_function brew::_installed cask
+  mktest::stub_function logging::dry_run
+  local brewfile="$BATS_TEST_TMPDIR/Brewfile"
+  printf 'brew "fake-formula"\n' > "$brewfile"
+  run brewfile::_diff "$brewfile"
+  [ "$status" -eq 97 ]
+}
+
+@test "diff stops when listing installed casks fails" {
+  mktest::stub_function input::command_exists "brew"
+  mktest::stub_function brew::_installed formula
+  STUB_EXIT=97 mktest::stub_function brew::_installed cask
+  mktest::stub_function logging::dry_run
+  local brewfile="$BATS_TEST_TMPDIR/Brewfile"
+  printf 'cask "fake-cask"\n' > "$brewfile"
+  run brewfile::_diff "$brewfile"
+  [ "$status" -eq 97 ]
 }

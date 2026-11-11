@@ -57,6 +57,12 @@ setup() {
   [ -z "$output" ]
 }
 
+@test "postflight_instructions stops when reading the install flag fails" {
+  STUB_EXIT=97 mktest::stub_function context::get "codex.installed" --default false
+  run codex::postflight_instructions
+  [ "$status" -eq 97 ]
+}
+
 # --- codex::_run_installer ---
 
 @test "_run_installer fetches the official installer over curl" {

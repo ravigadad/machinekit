@@ -23,6 +23,12 @@ setup() {
   [ "$result" = "postgres" ]
 }
 
+@test "preflight validates the requested versions" {
+  mktest::stub_function postgres::_validate_requested_versions
+  postgres_brew::preflight
+  mktest::assert_stub_called postgres::_validate_requested_versions
+}
+
 # --- postgres_brew::install (dispatch + superuser) ---
 
 @test "install routes to the requested-versions path and ensures the superuser" {
@@ -37,7 +43,7 @@ setup() {
 }
 
 @test "install routes to the default path when no versions are configured" {
-  STUB_RETURN=1 mktest::stub_function postgres::_requested_versions
+  STUB_OUTPUT="" mktest::stub_function postgres::_requested_versions
   mktest::stub_function postgres_brew::_install_requested
   mktest::stub_function postgres_brew::_install_default
   mktest::stub_function postgres::ensure_superuser
@@ -45,6 +51,19 @@ setup() {
   mktest::assert_stub_called postgres_brew::_install_default
   mktest::assert_stub_not_called postgres_brew::_install_requested
   mktest::assert_stub_called postgres::ensure_superuser
+}
+
+# A malformed versions table has to stop the run, not read as "none configured"
+# and quietly fall back to the default instance.
+@test "install stops when the versions table is malformed" {
+  STUB_EXIT=97 mktest::stub_function postgres::_requested_versions
+  mktest::stub_function postgres_brew::_install_requested
+  mktest::stub_function postgres_brew::_install_default
+  mktest::stub_function postgres::ensure_superuser
+  run postgres_brew::install
+  [ "$status" -eq 97 ]
+  mktest::assert_stub_not_called postgres_brew::_install_default
+  mktest::assert_stub_not_called postgres_brew::_install_requested
 }
 
 # --- postgres_brew::configure_container_access ---
@@ -72,6 +91,14 @@ setup() {
   [ "$output" = "/fake/keg/bin" ]
 }
 
+@test "bin_dir stops when resolving the instance fails" {
+  STUB_EXIT=97 mktest::stub_function postgres_brew::introspect::instance_version
+  mktest::stub_function postgres_brew::introspect::bin_dir
+  run postgres_brew::bin_dir
+  [ "$status" -eq 97 ]
+  mktest::assert_stub_not_called postgres_brew::introspect::bin_dir
+}
+
 # --- postgres_brew::ensure_extension_available (seam) ---
 
 @test "ensure_extension_available installs the extension's brew formula" {
@@ -79,6 +106,14 @@ setup() {
   mktest::stub_function brew::install_formula "pgvector"
   postgres_brew::ensure_extension_available "vector"
   mktest::assert_stub_called brew::install_formula "pgvector"
+}
+
+@test "ensure_extension_available stops when mapping the extension to a formula fails" {
+  STUB_EXIT=97 mktest::stub_function postgres_brew::_extension_formula "bogus"
+  mktest::stub_function brew::install_formula
+  run postgres_brew::ensure_extension_available "bogus"
+  [ "$status" -eq 97 ]
+  mktest::assert_stub_not_called brew::install_formula
 }
 
 # --- postgres_brew::_extension_formula ---
@@ -163,6 +198,17 @@ setup() {
   mktest::assert_stub_not_called postgres_brew::_install_on_port
 }
 
+@test "_install_default stops when resolving the instance fails" {
+  STUB_EXIT=97 mktest::stub_function postgres_brew::introspect::instance_version
+  mktest::stub_function postgres_brew::_ensure_running
+  STUB_OUTPUT="18" mktest::stub_function postgres_brew::introspect::latest_available_version
+  STUB_RETURN=1 mktest::stub_function postgres_brew::introspect::is_installed
+  mktest::stub_function postgres_brew::_install_on_port
+  run postgres_brew::_install_default
+  [ "$status" -eq 97 ]
+  mktest::assert_stub_not_called postgres_brew::_install_on_port
+}
+
 # --- postgres_brew::_assert_compatible_with_installed ---
 
 @test "_assert_compatible_with_installed passes when installs match the request" {
@@ -210,6 +256,21 @@ setup() {
   MATCH="will not change.*port" mktest::assert_stub_called lifecycle::fail
 }
 
+@test "_assert_compatible_with_installed stops when listing the installed versions fails" {
+  STUB_EXIT=97 mktest::stub_function postgres_brew::introspect::installed_versions
+  run postgres_brew::_assert_compatible_with_installed '[{"version":"17","port":"5432"}]'
+  [ "$status" -eq 97 ]
+}
+
+@test "_assert_compatible_with_installed stops when reading an installed version's port fails" {
+  STUB_OUTPUT="17" mktest::stub_function postgres_brew::introspect::installed_versions
+  mktest::stub_function postgres_brew::introspect::is_initialized "17"
+  STUB_EXIT=97 mktest::stub_function postgres_brew::introspect::configured_port "17"
+  mktest::stub_function lifecycle::fail
+  run postgres_brew::_assert_compatible_with_installed '[{"version":"17","port":"5432"}]'
+  [ "$status" -eq 97 ]
+}
+
 # --- postgres_brew::_ensure_requested ---
 
 @test "_ensure_requested starts installed versions and installs missing ones on their ports" {
@@ -249,6 +310,13 @@ setup() {
   mktest::assert_stub_called_in_order brew::install_formula "postgresql@14"
   mktest::assert_stub_called_in_order postgres_brew::_set_port "14" "5433"
   mktest::assert_stub_called_in_order postgres_brew::_start "14"
+}
+
+@test "_install_on_port stops when naming the formula fails" {
+  mktest::stub_function postgres_brew::_assert_port_not_foreign
+  STUB_EXIT=97 mktest::stub_function postgres_brew::introspect::formula
+  run postgres_brew::_install_on_port "17" "5432"
+  [ "$status" -eq 97 ]
 }
 
 # --- postgres_brew::_assert_port_not_foreign ---
@@ -295,6 +363,20 @@ setup() {
   run ! postgres_brew::_port_is_my_cluster 5432
 }
 
+@test "_port_is_my_cluster stops when listing the installed versions fails" {
+  STUB_EXIT=97 mktest::stub_function postgres_brew::introspect::installed_versions
+  run postgres_brew::_port_is_my_cluster 5432
+  [ "$status" -eq 97 ]
+}
+
+@test "_port_is_my_cluster stops when locating a cluster's data directory fails" {
+  STUB_OUTPUT="17" mktest::stub_function postgres_brew::introspect::installed_versions
+  STUB_EXIT=97 mktest::stub_function postgres_brew::introspect::data_dir "17"
+  mktest::stub_function postgres::_datadir_port
+  run postgres_brew::_port_is_my_cluster 5432
+  [ "$status" -eq 97 ]
+}
+
 # --- postgres_brew::_set_port ---
 
 @test "_set_port sets the port in postgresql.conf, preserving other lines and staying idempotent" {
@@ -317,6 +399,13 @@ setup() {
   postgres_brew::_set_port 14 5433
   mktest::assert_stub_called logging::dry_run
   mktest::assert_stub_not_called postgres_brew::introspect::data_dir
+}
+
+@test "_set_port stops when locating the data directory fails" {
+  STUB_RETURN=1 mktest::stub_function input::is_dry_run
+  STUB_EXIT=97 mktest::stub_function postgres_brew::introspect::data_dir "14"
+  run postgres_brew::_set_port 14 5433
+  [ "$status" -eq 97 ]
 }
 
 # --- postgres_brew::_ensure_running ---
@@ -354,6 +443,13 @@ setup() {
   mktest::assert_stub_called logging::dry_run
 }
 
+@test "_start stops when naming the formula fails" {
+  STUB_RETURN=1 mktest::stub_function input::is_dry_run
+  STUB_EXIT=97 mktest::stub_function postgres_brew::introspect::formula
+  run postgres_brew::_start "17"
+  [ "$status" -eq 97 ]
+}
+
 # --- postgres_brew::_restart ---
 
 @test "_restart restarts the resolved formula's service" {
@@ -361,4 +457,10 @@ setup() {
   mktest::stub_function brew::restart_service "postgresql@17"
   postgres_brew::_restart 17
   mktest::assert_stub_called brew::restart_service "postgresql@17"
+}
+
+@test "_restart stops when naming the formula fails" {
+  STUB_EXIT=97 mktest::stub_function postgres_brew::introspect::formula
+  run postgres_brew::_restart "17"
+  [ "$status" -eq 97 ]
 }

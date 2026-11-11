@@ -57,6 +57,12 @@ setup() {
   [ -z "$output" ]
 }
 
+@test "postflight_instructions stops when reading the install flag fails" {
+  STUB_EXIT=97 mktest::stub_function context::get "opencode.installed" --default false
+  run opencode::postflight_instructions
+  [ "$status" -eq 97 ]
+}
+
 # --- opencode::_run_installer ---
 
 @test "_run_installer fetches the official installer over curl" {

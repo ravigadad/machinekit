@@ -15,22 +15,20 @@ home::staging::build() {
   home::staging::_prepare_dir
   logging::step "Building home staging dir"
 
-  # Resolve once into a local: blueprints::dir can lifecycle::fail, and in
-  # argument position that exit is swallowed by the command substitution. A
-  # standalone assignment lets set -e propagate it (and it's a small DRY win).
   local blueprints_dir
-  blueprints_dir="$(blueprints::dir)"
+  blueprints_dir=${ blueprints::dir; }
 
-  local module
+  local active_modules module
+  active_modules=${ context::get_array "modules.active" || true; }
   while IFS= read -r module; do
     [ -z "$module" ] && continue
     home::staging::_layer_dir "$(modules::dir)/$module/templates" "$module templates"
-  done < <(context::get_array "modules.active" || true)
+  done <<< "$active_modules"
 
   home::staging::_layer_dir "$blueprints_dir/common/home" "blueprint common/home"
 
   local machine_type
-  machine_type="$(context::get "machine_type" 2>/dev/null || true)"
+  machine_type=${ context::get "machine_type" 2>/dev/null || true; }
   if [ -n "$machine_type" ]; then
     home::staging::_layer_dir "$blueprints_dir/machine_types/$machine_type/home" "blueprint machine_types/$machine_type/home"
   fi

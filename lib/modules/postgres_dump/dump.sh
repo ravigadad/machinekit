@@ -38,6 +38,12 @@
 #   MK_POSTGRES_DUMP_PORT        port to connect to; optional (default: 5432)
 set -euo pipefail
 
+# A generation's filename is <name>-<timestamp>.dump. The pattern is the format's
+# exact shape, so retention can tell this database's generations from those of a
+# database whose name merely starts with this one (app vs app-staging).
+_DUMP_TIMESTAMP_FORMAT='%Y%m%dT%H%M%SZ'
+_DUMP_TIMESTAMP_PATTERN='[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]T[0-9][0-9][0-9][0-9][0-9][0-9]Z'
+
 dump::notify() {
   local message="$1"
   if [ -n "${MK_POSTGRES_DUMP_NOTIFY:-}" ]; then
@@ -61,7 +67,7 @@ dump::fail() {
 dump::dump_database() {
   local name="$1" directory="$2" retain_count="$3" timestamp partial final
   mkdir -p "$directory" || dump::fail "postgres_dump: cannot create dump directory $directory."
-  timestamp=$(date -u +%Y%m%dT%H%M%SZ)
+  timestamp=$(date -u "+$_DUMP_TIMESTAMP_FORMAT")
   final="$directory/$name-$timestamp.dump"
   partial="$directory/.$name-$timestamp.dump.partial"
   # Every exit path from here to the rename removes the in-flight file: a failed
@@ -107,11 +113,20 @@ dump::prune() {
 
 # The generations of NAME beyond the newest RETAIN_COUNT, one path per line. The
 # filename timestamp is UTC and fixed-width, so a reverse lexical sort is newest
-# first — and the NAME- prefix keeps a sibling database's generations out of it.
+# first.
 dump::stale_generations() {
   local name="$1" directory="$2" retain_count="$3"
-  find "$directory" -maxdepth 1 -type f -name "$name-*.dump" \
-    | sort -r | tail -n "+$((retain_count + 1))"
+  dump::generations "$name" "$directory" | sort -r | tail -n "+$((retain_count + 1))"
+}
+
+# Every generation of NAME in DIRECTORY, one path per line. The name is quoted in
+# the match so a glob character in it is read literally.
+dump::generations() {
+  local name="$1" directory="$2" path
+  for path in "$directory"/*.dump; do
+    [[ -f "$path" && "${path##*/}" == "$name-"$_DUMP_TIMESTAMP_PATTERN.dump ]] || continue
+    printf '%s\n' "$path"
+  done
 }
 
 # Iterate the manifest, dumping each database in isolation. A database's failure

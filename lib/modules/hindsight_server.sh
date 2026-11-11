@@ -36,7 +36,9 @@ _HINDSIGHT_SERVER_DEFAULT_UI_PORT="9999"
 hindsight_server::requires() {
   printf 'container_manager\n'
   printf 'postgres\n'
-  hindsight_server::declared_secrets | secrets::declared_backend_requirements
+  local declared_secrets
+  declared_secrets=${ hindsight_server::declared_secrets; }
+  secrets::declared_backend_requirements <<< "$declared_secrets"
 }
 
 # Fail before any work if the blueprint hasn't supplied what the server can't run
@@ -44,7 +46,7 @@ hindsight_server::requires() {
 # LLM API key. The tenant key and DB password are generated when absent, so they
 # are not required here.
 hindsight_server::preflight() {
-  [ -n "$(hindsight_server::_llm_provider)" ] || lifecycle::fail \
+  [ -n "${ hindsight_server::_llm_provider; }" ] || lifecycle::fail \
     "hindsight_server: set [module.hindsight_server] llm_provider in your blueprint config."
   hindsight_server::_llm_key_available || lifecycle::fail \
     "hindsight_server: supply the $(hindsight::secrets::name llm_api_key) secret, or an already-assembled ~/$(hindsight_server::_env_rel)."
@@ -98,8 +100,11 @@ hindsight_server::post_apply() {
 # which is printed during apply. Emitted whenever this module is active (the
 # server was brought up in post_apply).
 hindsight_server::postflight_info() {
-  printf 'Hindsight API:    http://localhost:%s\n' "$(hindsight_server::_api_port)"
-  printf 'Hindsight web UI: http://localhost:%s\n' "$(hindsight_server::_ui_port)"
+  local api_port ui_port
+  api_port=${ hindsight_server::_api_port; }
+  ui_port=${ hindsight_server::_ui_port; }
+  printf 'Hindsight API:    http://localhost:%s\n' "$api_port"
+  printf 'Hindsight web UI: http://localhost:%s\n' "$ui_port"
   printf 'Config + secrets: ~/%s\n' "$(hindsight_server::_env_rel)"
 }
 
@@ -118,23 +123,22 @@ hindsight_server::postflight_instructions() {
 # Order is the contract: the extension can only be created in a database that
 # already exists.
 hindsight_server::_provision_database() {
-  postgres::ensure_database "$(hindsight_server::_db_name)"
-  postgres::ensure_extension "$(hindsight_server::_db_name)" vector
+  local db_name
+  db_name=${ hindsight_server::_db_name; }
+  postgres::ensure_database "$db_name"
+  postgres::ensure_extension "$db_name" vector
 }
 
 hindsight_server::_provision_role() {
-  # Resolve into locals first: _db_password can lifecycle::fail, and in argument
-  # position ("$(…)") that exit is swallowed by the command substitution — the
-  # role would be created with an empty password. A standalone assignment lets
-  # set -e propagate the failure.
-  local db_user db_password
-  db_user="$(hindsight_server::_db_user)"
-  db_password="$(hindsight_server::_db_password)"
+  local db_user db_password db_name
+  db_user=${ hindsight_server::_db_user; }
+  db_password=${ hindsight_server::_db_password; }
   postgres::ensure_role "$db_user" "$db_password"
   # _provision_database (install) created the db under the postgres superuser,
   # before this role existed. Now that it does, hand it ownership so the
   # container's startup migrations (DDL) can run.
-  postgres::ensure_database "$(hindsight_server::_db_name)" "$db_user"
+  db_name=${ hindsight_server::_db_name; }
+  postgres::ensure_database "$db_name" "$db_user"
 }
 
 # Assemble-once: if the env file is already present, never touch it — it may hold
@@ -158,16 +162,13 @@ hindsight_server::_ensure_env_file() {
 
 # Resolve the secrets (provide-or-generate) and write the 600 env file. What was
 # generated vs. provided is not announced here — postflight re-derives it
-# (secrets::present) and surfaces the operator-facing steps. Standalone
-# assignments, not `local x=$(…)`: resolution can lifecycle::fail (missing LLM
-# key or age key) and in local/argument position the failing command
-# substitution is swallowed by set -e.
+# (secrets::present) and surfaces the operator-facing steps.
 hindsight_server::_assemble_env_file() {
   local env_path="$1" llm tenant db_password cp_access
-  llm="$(hindsight_server::_resolve_llm_key)"
-  tenant="$(hindsight::secrets::resolve tenant_api_key)"
-  db_password="$(hindsight::secrets::resolve db_password)"
-  cp_access="$(hindsight_server::_resolve_cp_access_key)"
+  llm=${ hindsight_server::_resolve_llm_key; }
+  tenant=${ hindsight::secrets::resolve tenant_api_key; }
+  db_password=${ hindsight::secrets::resolve db_password; }
+  cp_access=${ hindsight_server::_resolve_cp_access_key; }
   hindsight_server::_write_env_file "$env_path" "$llm" "$tenant" "$db_password" "$cp_access"
 }
 
@@ -191,8 +192,8 @@ hindsight_server::_resolve_cp_access_key() {
     hindsight::secrets::resolve cp_access_key
     return 0
   fi
-  if entered=$(context::get "module.hindsight_server.cp_access_key" \
-      --prompt "Set a control-plane UI password (leave blank to generate one)" --secret); then
+  if entered=${ context::get "module.hindsight_server.cp_access_key" \
+      --prompt "Set a control-plane UI password (leave blank to generate one)" --secret; }; then
     printf '%s\n' "$entered"
     return 0
   fi
@@ -236,26 +237,31 @@ hindsight_server::_place_compose() {
 # upstream config reference, not a live run — confirm the keys the image actually
 # reads and that extra_hosts resolves before trusting this shape.
 hindsight_server::_render_compose() {
-  local db_url model model_line="" base_url base_url_line=""
-  db_url="$(hindsight_server::_database_url)"
+  local db_url model model_line="" base_url base_url_line="" image api_port ui_port env_path llm_provider
+  db_url=${ hindsight_server::_database_url; }
   # Pre-resolve the optional model/base-url lines (newline-prefixed when set,
   # empty when not) rather than escaping quotes inside the heredoc, where \" wouldn't.
-  model="$(hindsight_server::_llm_model)"
+  model=${ hindsight_server::_llm_model; }
   [ -n "$model" ] && model_line=$'\n'"      HINDSIGHT_API_LLM_MODEL: \"$model\""
-  base_url="$(hindsight_server::_llm_base_url)"
+  base_url=${ hindsight_server::_llm_base_url; }
   [ -n "$base_url" ] && base_url_line=$'\n'"      HINDSIGHT_API_LLM_BASE_URL: \"$base_url\""
+  image=${ hindsight_server::_image; }
+  api_port=${ hindsight_server::_api_port; }
+  ui_port=${ hindsight_server::_ui_port; }
+  env_path=${ hindsight_server::_env_path; }
+  llm_provider=${ hindsight_server::_llm_provider; }
   cat <<YAML
 services:
   hindsight:
-    image: $(hindsight_server::_image)
+    image: $image
     restart: unless-stopped
     ports:
-      - "$(hindsight_server::_api_port):8888"
-      - "$(hindsight_server::_ui_port):9999"
+      - "$api_port:8888"
+      - "$ui_port:9999"
     env_file:
-      - $(hindsight_server::_env_path)
+      - $env_path
     environment:
-      HINDSIGHT_API_LLM_PROVIDER: "$(hindsight_server::_llm_provider)"$model_line$base_url_line
+      HINDSIGHT_API_LLM_PROVIDER: "$llm_provider"$model_line$base_url_line
       HINDSIGHT_API_TENANT_EXTENSION: "hindsight_api.extensions.builtin.tenant:ApiKeyTenantExtension"
       HINDSIGHT_API_DATABASE_URL: "$db_url"
       HINDSIGHT_API_PORT: "8888"
@@ -276,8 +282,10 @@ YAML
 hindsight_server::_database_url() {
   # Literal on purpose: the placeholder must reach the compose file unexpanded.
   # shellcheck disable=SC2016
-  local placeholder='${MACHINEKIT_HINDSIGHT_DB_PASSWORD}' base
-  base="$(postgres::connection_string "$(hindsight_server::_db_name)" "$(hindsight_server::_db_user)" container)"
+  local placeholder='${MACHINEKIT_HINDSIGHT_DB_PASSWORD}' db_name db_user base
+  db_name=${ hindsight_server::_db_name; }
+  db_user=${ hindsight_server::_db_user; }
+  base=${ postgres::connection_string "$db_name" "$db_user" container; }
   printf '%s\n' "${base/@/:${placeholder}@}"
 }
 
@@ -296,8 +304,9 @@ hindsight_server::_compose_up() {
 # check later — a first-ever boot can exceed any sane wait, and that shouldn't
 # fail the apply.
 hindsight_server::_health_check() {
-  local url attempts=15 delay=2 i
-  url="http://localhost:$(hindsight_server::_api_port)/health"
+  local url api_port attempts=15 delay=2 i
+  api_port=${ hindsight_server::_api_port; }
+  url="http://localhost:$api_port/health"
   # The poll can take several seconds (more on a cold first boot); say so, or the
   # silent wait reads as a hang.
   logging::info "hindsight_server: started; polling $url for readiness (up to $(( attempts * delay ))s)..."

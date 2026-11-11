@@ -19,15 +19,20 @@ setup() {
   mktest::assert_stub_called config::get "module.git.user_email" "--required" "--prompt" "Git user.email"
 }
 
-@test "preflight fails when user name cannot be resolved" {
-  STUB_EXIT=1 mktest::stub_function config::get "module.git.user_name" "--required" "--prompt" "Git user.name"
-  run ! git::preflight
+@test "preflight stops when resolving the user name fails" {
+  STUB_EXIT=97 mktest::stub_function config::get "module.git.user_name" "--required" "--prompt" "Git user.name"
+  mktest::stub_function config::get "module.git.user_email" "--required" "--prompt" "Git user.email"
+  mktest::stub_function logging::info
+  run git::preflight
+  [ "$status" -eq 97 ]
 }
 
-@test "preflight fails when user email cannot be resolved" {
+@test "preflight stops when resolving the user email fails" {
   STUB_OUTPUT="Jane Doe" mktest::stub_function config::get "module.git.user_name"  "--required" "--prompt" "Git user.name"
-  STUB_EXIT=1            mktest::stub_function config::get "module.git.user_email" "--required" "--prompt" "Git user.email"
-  run ! git::preflight
+  STUB_EXIT=97           mktest::stub_function config::get "module.git.user_email" "--required" "--prompt" "Git user.email"
+  mktest::stub_function logging::info
+  run git::preflight
+  [ "$status" -eq 97 ]
 }
 
 # --- git::install ---

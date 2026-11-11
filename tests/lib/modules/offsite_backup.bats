@@ -19,7 +19,7 @@ setup() {
 
 # One well-formed repository entry, used wherever the entry's own content is
 # incidental to what the test is checking.
-ENTRY='{"name":"fake_repo","repository":"fake:repository","paths":[{"path":"/fake/dumps"}]}'
+ENTRY='{"name":"fake_repo","repository":"fake:repository","paths":{"dumps":{"path":"/fake/dumps"}}}'
 
 # --- requires ---
 
@@ -42,6 +42,14 @@ ENTRY='{"name":"fake_repo","repository":"fake:repository","paths":[{"path":"/fak
   [ -z "$output" ]
 }
 
+@test "requires stops when declaring its secrets fails" {
+  STUB_EXIT=97 mktest::stub_function offsite_backup::declared_secrets
+  mktest::stub_function secrets::declared_backend_requirements
+  run offsite_backup::requires
+  [ "$status" -eq 97 ]
+  mktest::assert_stub_not_called secrets::declared_backend_requirements
+}
+
 # --- declared_secrets ---
 
 @test "declared_secrets namespaces a password and a credentials secret per repository" {
@@ -62,6 +70,12 @@ offsite_backup/second_repo/credentials\tfalse\tfalse' ]
   run offsite_backup::declared_secrets
   [ "$status" -eq 0 ]
   [ -z "$output" ]
+}
+
+@test "declared_secrets stops when reading the repositories fails" {
+  STUB_EXIT=97 mktest::stub_function offsite_backup::_repositories
+  run offsite_backup::declared_secrets
+  [ "$status" -eq 97 ]
 }
 
 # --- preflight ---
@@ -94,6 +108,12 @@ offsite_backup/second_repo/credentials\tfalse\tfalse' ]
   mktest::assert_stub_not_called offsite_backup::_validate_repository
 }
 
+@test "preflight stops when reading the repositories fails" {
+  STUB_EXIT=97 mktest::stub_function offsite_backup::_repositories
+  run offsite_backup::preflight
+  [ "$status" -eq 97 ]
+}
+
 # --- _validate_repository ---
 
 @test "_validate_repository checks its paths, its secrets, and both of its schedules" {
@@ -101,15 +121,107 @@ offsite_backup/second_repo/credentials\tfalse\tfalse' ]
   STUB_OUTPUT='[{"path":"/fake/dumps"}]' mktest::stub_function offsite_backup::_paths "$ENTRY"
   STUB_OUTPUT="30 3 * * *" mktest::stub_function offsite_backup::_schedule "$ENTRY"
   STUB_OUTPUT="0 4 * * 0" mktest::stub_function offsite_backup::_check_schedule "$ENTRY"
-  mktest::stub_function offsite_backup::_validate_paths '[{"path":"/fake/dumps"}]'
+  mktest::stub_function offsite_backup::_validate_paths '[{"path":"/fake/dumps"}]' "fake_repo"
   mktest::stub_function offsite_backup::_validate_secrets "fake_repo"
   mktest::stub_function service::validate_cron "30 3 * * *"
   mktest::stub_function service::validate_cron "0 4 * * 0"
   offsite_backup::_validate_repository "$ENTRY"
-  mktest::assert_stub_called offsite_backup::_validate_paths '[{"path":"/fake/dumps"}]'
+  mktest::assert_stub_called offsite_backup::_validate_paths '[{"path":"/fake/dumps"}]' "fake_repo"
   mktest::assert_stub_called offsite_backup::_validate_secrets "fake_repo"
   mktest::assert_stub_called service::validate_cron "30 3 * * *"
   mktest::assert_stub_called service::validate_cron "0 4 * * 0"
+}
+
+@test "_validate_repository stops when reading the paths fails" {
+  STUB_OUTPUT="fake_repo" mktest::stub_function offsite_backup::_name
+  STUB_EXIT=97 mktest::stub_function offsite_backup::_paths
+  run offsite_backup::_validate_repository '{"name":"fake_repo"}'
+  [ "$status" -eq 97 ]
+}
+
+@test "_validate_repository stops when reading the backup schedule fails" {
+  STUB_OUTPUT="fake_repo" mktest::stub_function offsite_backup::_name "$ENTRY"
+  STUB_OUTPUT="[]" mktest::stub_function offsite_backup::_paths "$ENTRY"
+  mktest::stub_function offsite_backup::_validate_paths
+  mktest::stub_function offsite_backup::_validate_secrets
+  STUB_EXIT=97 mktest::stub_function offsite_backup::_schedule "$ENTRY"
+  STUB_OUTPUT="0 4 * * 0" mktest::stub_function offsite_backup::_check_schedule "$ENTRY"
+  mktest::stub_function service::validate_cron
+  run offsite_backup::_validate_repository "$ENTRY"
+  [ "$status" -eq 97 ]
+}
+
+@test "_validate_repository stops when reading the check schedule fails" {
+  STUB_OUTPUT="fake_repo" mktest::stub_function offsite_backup::_name "$ENTRY"
+  STUB_OUTPUT="[]" mktest::stub_function offsite_backup::_paths "$ENTRY"
+  mktest::stub_function offsite_backup::_validate_paths
+  mktest::stub_function offsite_backup::_validate_secrets
+  STUB_OUTPUT="30 3 * * *" mktest::stub_function offsite_backup::_schedule "$ENTRY"
+  STUB_EXIT=97 mktest::stub_function offsite_backup::_check_schedule "$ENTRY"
+  mktest::stub_function service::validate_cron
+  run offsite_backup::_validate_repository "$ENTRY"
+  [ "$status" -eq 97 ]
+}
+
+# --- installed_file_patterns ---
+
+@test "installed_file_patterns names the run script, each repository's manifest and each repository's secret files" {
+  run offsite_backup::installed_file_patterns
+  [ "$status" -eq 0 ]
+  [ "$output" = $'data\trestic_run.sh\ndata\tmanifest-*.tsv\nconfig\t*/repository_password\nconfig\t*/credentials' ]
+}
+
+# --- installed_artifacts ---
+
+@test "installed_artifacts declares the shared run script, then each repository's artifacts" {
+  STUB_OUTPUT='[{"name":"one"},{"name":"two"}]' mktest::stub_function offsite_backup::_repositories
+  STUB_OUTPUT="/fake/restic_run.sh" mktest::stub_function offsite_backup::_run_script_path
+  STUB_OUTPUT=$'service\tone' mktest::stub_function offsite_backup::_repository_artifacts '{"name":"one"}'
+  STUB_OUTPUT=$'service\ttwo' mktest::stub_function offsite_backup::_repository_artifacts '{"name":"two"}'
+  run offsite_backup::installed_artifacts
+  [ "$status" -eq 0 ]
+  [ "$output" = $'file\t/fake/restic_run.sh\nservice\tone\nservice\ttwo' ]
+}
+
+@test "installed_artifacts declares nothing when no repositories are configured" {
+  STUB_OUTPUT="" mktest::stub_function offsite_backup::_repositories
+  run offsite_backup::installed_artifacts
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "installed_artifacts stops when reading the repositories fails" {
+  STUB_EXIT=97 mktest::stub_function offsite_backup::_repositories
+  run offsite_backup::installed_artifacts
+  [ "$status" -eq 97 ]
+}
+
+# --- _repository_artifacts ---
+
+@test "_repository_artifacts declares both services, the manifest, and the password and credentials files" {
+  STUB_OUTPUT="fake_repo" mktest::stub_function offsite_backup::_name "$ENTRY"
+  STUB_OUTPUT="offsite-backup-fake-repo" mktest::stub_function offsite_backup::_service_label "fake_repo"
+  STUB_OUTPUT="offsite-backup-fake-repo-check" mktest::stub_function offsite_backup::_check_service_label "fake_repo"
+  STUB_OUTPUT="/fake/manifest.tsv" mktest::stub_function offsite_backup::_manifest_path "fake_repo"
+  STUB_OUTPUT="/fake/repository_password" mktest::stub_function offsite_backup::_password_file_path "fake_repo"
+  STUB_OUTPUT="/fake/credentials" mktest::stub_function offsite_backup::_credentials_file_path "fake_repo"
+  mktest::stub_function offsite_backup::_has_credentials "fake_repo"
+  run offsite_backup::_repository_artifacts "$ENTRY"
+  [ "$status" -eq 0 ]
+  [ "$output" = $'service\toffsite-backup-fake-repo\nservice\toffsite-backup-fake-repo-check\nfile\t/fake/manifest.tsv\nfile\t/fake/repository_password\nfile\t/fake/credentials' ]
+}
+
+@test "_repository_artifacts leaves out the credentials file when the repository has no credentials secret" {
+  STUB_OUTPUT="fake_repo" mktest::stub_function offsite_backup::_name "$ENTRY"
+  STUB_OUTPUT="offsite-backup-fake-repo" mktest::stub_function offsite_backup::_service_label "fake_repo"
+  STUB_OUTPUT="offsite-backup-fake-repo-check" mktest::stub_function offsite_backup::_check_service_label "fake_repo"
+  STUB_OUTPUT="/fake/manifest.tsv" mktest::stub_function offsite_backup::_manifest_path "fake_repo"
+  STUB_OUTPUT="/fake/repository_password" mktest::stub_function offsite_backup::_password_file_path "fake_repo"
+  mktest::stub_function offsite_backup::_credentials_file_path
+  STUB_RETURN=1 mktest::stub_function offsite_backup::_has_credentials "fake_repo"
+  run offsite_backup::_repository_artifacts "$ENTRY"
+  [ "$status" -eq 0 ]
+  [ "$output" = $'service\toffsite-backup-fake-repo\nservice\toffsite-backup-fake-repo-check\nfile\t/fake/manifest.tsv\nfile\t/fake/repository_password' ]
 }
 
 # --- install ---
@@ -153,6 +265,12 @@ offsite_backup/second_repo/credentials\tfalse\tfalse' ]
   mktest::assert_stub_called logging::dry_run
 }
 
+@test "install stops when reading the repositories fails" {
+  STUB_EXIT=97 mktest::stub_function offsite_backup::_repositories
+  run offsite_backup::install
+  [ "$status" -eq 97 ]
+}
+
 # --- _install_repository ---
 
 @test "_install_repository lays down its secrets and manifest, creates it, then schedules both services" {
@@ -172,11 +290,20 @@ offsite_backup/second_repo/credentials\tfalse\tfalse' ]
   mktest::assert_stub_called_in_order offsite_backup::_ensure_repository "$ENTRY"
 }
 
+@test "_install_repository stops when reading the paths fails" {
+  STUB_OUTPUT="fake_repo" mktest::stub_function offsite_backup::_name
+  STUB_EXIT=97 mktest::stub_function offsite_backup::_paths
+  run offsite_backup::_install_repository '{"name":"fake_repo"}'
+  [ "$status" -eq 97 ]
+}
+
 # --- postflight_info / postflight_instructions ---
 
 @test "postflight_info reports each repository's paths, schedule, and retention" {
-  STUB_OUTPUT='[{"name":"fake_repo","repository":"fake:repository","paths":[{"path":"~/dumps"}]}]' \
+  STUB_OUTPUT='[{"name":"fake_repo","repository":"fake:repository"}]' \
     mktest::stub_function offsite_backup::_repositories
+  STUB_OUTPUT='[{"path":"~/dumps"}]' \
+    mktest::stub_function offsite_backup::_paths '{"name":"fake_repo","repository":"fake:repository"}'
   STUB_OUTPUT="30 3 * * *" mktest::stub_function offsite_backup::_schedule
   STUB_OUTPUT="0 4 * * 0" mktest::stub_function offsite_backup::_check_schedule
   STUB_OUTPUT="7" mktest::stub_function offsite_backup::_keep_daily
@@ -195,8 +322,12 @@ offsite_backup/second_repo/credentials\tfalse\tfalse' ]
 }
 
 @test "postflight_info names the repository each line belongs to" {
-  STUB_OUTPUT='[{"name":"first_repo","repository":"fake:one","paths":[{"path":"/fake/a"}]},{"name":"second_repo","repository":"fake:two","paths":[{"path":"/fake/b"}]}]' \
+  STUB_OUTPUT='[{"name":"first_repo","repository":"fake:one"},{"name":"second_repo","repository":"fake:two"}]' \
     mktest::stub_function offsite_backup::_repositories
+  STUB_OUTPUT='[{"path":"/fake/a"}]' \
+    mktest::stub_function offsite_backup::_paths '{"name":"first_repo","repository":"fake:one"}'
+  STUB_OUTPUT='[{"path":"/fake/b"}]' \
+    mktest::stub_function offsite_backup::_paths '{"name":"second_repo","repository":"fake:two"}'
   STUB_OUTPUT="30 3 * * *" mktest::stub_function offsite_backup::_schedule
   STUB_OUTPUT="0 4 * * 0" mktest::stub_function offsite_backup::_check_schedule
   STUB_OUTPUT="7" mktest::stub_function offsite_backup::_keep_daily
@@ -211,6 +342,91 @@ offsite_backup/second_repo/credentials\tfalse\tfalse' ]
   STUB_OUTPUT="" mktest::stub_function offsite_backup::_repositories
   run offsite_backup::postflight_info
   [ -z "$output" ]
+}
+
+@test "postflight_info stops when reading the repositories fails" {
+  STUB_EXIT=97 mktest::stub_function offsite_backup::_repositories
+  run offsite_backup::postflight_info
+  [ "$status" -eq 97 ]
+}
+
+@test "postflight_info stops when reading a repository's paths fails" {
+  STUB_OUTPUT='[{"name":"fake_repo"}]' mktest::stub_function offsite_backup::_repositories
+  STUB_OUTPUT="fake_repo" mktest::stub_function offsite_backup::_name
+  STUB_OUTPUT="fake:repository" mktest::stub_function offsite_backup::_repository
+  STUB_EXIT=97 mktest::stub_function offsite_backup::_paths
+  run offsite_backup::postflight_info
+  [ "$status" -eq 97 ]
+}
+
+@test "postflight_info stops when reading the backup schedule fails" {
+  STUB_OUTPUT="[$ENTRY]" mktest::stub_function offsite_backup::_repositories
+  STUB_OUTPUT="fake_repo" mktest::stub_function offsite_backup::_name "$ENTRY"
+  STUB_OUTPUT="fake:repository" mktest::stub_function offsite_backup::_repository "$ENTRY"
+  STUB_OUTPUT='[{"path":"/fake/dumps"}]' mktest::stub_function offsite_backup::_paths "$ENTRY"
+  STUB_EXIT=97 mktest::stub_function offsite_backup::_schedule "$ENTRY"
+  STUB_OUTPUT="7" mktest::stub_function offsite_backup::_keep_daily "$ENTRY"
+  STUB_OUTPUT="4" mktest::stub_function offsite_backup::_keep_weekly "$ENTRY"
+  STUB_OUTPUT="12" mktest::stub_function offsite_backup::_keep_monthly "$ENTRY"
+  STUB_OUTPUT="0 4 * * 0" mktest::stub_function offsite_backup::_check_schedule "$ENTRY"
+  run offsite_backup::postflight_info
+  [ "$status" -eq 97 ]
+}
+
+@test "postflight_info stops when reading the daily retention fails" {
+  STUB_OUTPUT="[$ENTRY]" mktest::stub_function offsite_backup::_repositories
+  STUB_OUTPUT="fake_repo" mktest::stub_function offsite_backup::_name "$ENTRY"
+  STUB_OUTPUT="fake:repository" mktest::stub_function offsite_backup::_repository "$ENTRY"
+  STUB_OUTPUT='[{"path":"/fake/dumps"}]' mktest::stub_function offsite_backup::_paths "$ENTRY"
+  STUB_OUTPUT="30 3 * * *" mktest::stub_function offsite_backup::_schedule "$ENTRY"
+  STUB_EXIT=97 mktest::stub_function offsite_backup::_keep_daily "$ENTRY"
+  STUB_OUTPUT="4" mktest::stub_function offsite_backup::_keep_weekly "$ENTRY"
+  STUB_OUTPUT="12" mktest::stub_function offsite_backup::_keep_monthly "$ENTRY"
+  STUB_OUTPUT="0 4 * * 0" mktest::stub_function offsite_backup::_check_schedule "$ENTRY"
+  run offsite_backup::postflight_info
+  [ "$status" -eq 97 ]
+}
+
+@test "postflight_info stops when reading the weekly retention fails" {
+  STUB_OUTPUT="[$ENTRY]" mktest::stub_function offsite_backup::_repositories
+  STUB_OUTPUT="fake_repo" mktest::stub_function offsite_backup::_name "$ENTRY"
+  STUB_OUTPUT="fake:repository" mktest::stub_function offsite_backup::_repository "$ENTRY"
+  STUB_OUTPUT='[{"path":"/fake/dumps"}]' mktest::stub_function offsite_backup::_paths "$ENTRY"
+  STUB_OUTPUT="30 3 * * *" mktest::stub_function offsite_backup::_schedule "$ENTRY"
+  STUB_OUTPUT="7" mktest::stub_function offsite_backup::_keep_daily "$ENTRY"
+  STUB_EXIT=97 mktest::stub_function offsite_backup::_keep_weekly "$ENTRY"
+  STUB_OUTPUT="12" mktest::stub_function offsite_backup::_keep_monthly "$ENTRY"
+  STUB_OUTPUT="0 4 * * 0" mktest::stub_function offsite_backup::_check_schedule "$ENTRY"
+  run offsite_backup::postflight_info
+  [ "$status" -eq 97 ]
+}
+
+@test "postflight_info stops when reading the monthly retention fails" {
+  STUB_OUTPUT="[$ENTRY]" mktest::stub_function offsite_backup::_repositories
+  STUB_OUTPUT="fake_repo" mktest::stub_function offsite_backup::_name "$ENTRY"
+  STUB_OUTPUT="fake:repository" mktest::stub_function offsite_backup::_repository "$ENTRY"
+  STUB_OUTPUT='[{"path":"/fake/dumps"}]' mktest::stub_function offsite_backup::_paths "$ENTRY"
+  STUB_OUTPUT="30 3 * * *" mktest::stub_function offsite_backup::_schedule "$ENTRY"
+  STUB_OUTPUT="7" mktest::stub_function offsite_backup::_keep_daily "$ENTRY"
+  STUB_OUTPUT="4" mktest::stub_function offsite_backup::_keep_weekly "$ENTRY"
+  STUB_EXIT=97 mktest::stub_function offsite_backup::_keep_monthly "$ENTRY"
+  STUB_OUTPUT="0 4 * * 0" mktest::stub_function offsite_backup::_check_schedule "$ENTRY"
+  run offsite_backup::postflight_info
+  [ "$status" -eq 97 ]
+}
+
+@test "postflight_info stops when reading the check schedule fails" {
+  STUB_OUTPUT="[$ENTRY]" mktest::stub_function offsite_backup::_repositories
+  STUB_OUTPUT="fake_repo" mktest::stub_function offsite_backup::_name "$ENTRY"
+  STUB_OUTPUT="fake:repository" mktest::stub_function offsite_backup::_repository "$ENTRY"
+  STUB_OUTPUT='[{"path":"/fake/dumps"}]' mktest::stub_function offsite_backup::_paths "$ENTRY"
+  STUB_OUTPUT="30 3 * * *" mktest::stub_function offsite_backup::_schedule "$ENTRY"
+  STUB_OUTPUT="7" mktest::stub_function offsite_backup::_keep_daily "$ENTRY"
+  STUB_OUTPUT="4" mktest::stub_function offsite_backup::_keep_weekly "$ENTRY"
+  STUB_OUTPUT="12" mktest::stub_function offsite_backup::_keep_monthly "$ENTRY"
+  STUB_EXIT=97 mktest::stub_function offsite_backup::_check_schedule "$ENTRY"
+  run offsite_backup::postflight_info
+  [ "$status" -eq 97 ]
 }
 
 @test "postflight_instructions names only the repositories that still do not exist" {
@@ -236,6 +452,20 @@ offsite_backup/second_repo/credentials\tfalse\tfalse' ]
   STUB_OUTPUT="" mktest::stub_function offsite_backup::_repositories
   run offsite_backup::postflight_instructions
   [ -z "$output" ]
+}
+
+@test "postflight_instructions stops when reading the repositories fails" {
+  STUB_EXIT=97 mktest::stub_function offsite_backup::_repositories
+  run offsite_backup::postflight_instructions
+  [ "$status" -eq 97 ]
+}
+
+@test "postflight_instructions stops when reading whether a repository is ready fails" {
+  STUB_OUTPUT="[$ENTRY]" mktest::stub_function offsite_backup::_repositories
+  STUB_OUTPUT="fake_repo" mktest::stub_function offsite_backup::_name "$ENTRY"
+  STUB_EXIT=97 mktest::stub_function offsite_backup::_repository_ready "fake_repo"
+  run offsite_backup::postflight_instructions
+  [ "$status" -eq 97 ]
 }
 
 # --- _validate_repositories / _repositories_shape_error ---
@@ -274,40 +504,37 @@ offsite_backup/second_repo/credentials\tfalse\tfalse' ]
   [[ "$output" == *"lowercase"* ]]
 }
 
-@test "_repositories_shape_error reports a duplicated name" {
-  run offsite_backup::_repositories_shape_error \
-    '[{"name":"same","repository":"fake:one","paths":[{"path":"/fake/a"}]},{"name":"same","repository":"fake:two","paths":[{"path":"/fake/b"}]}]'
-  [[ "$output" == *"more than once"* ]]
-}
-
 @test "_repositories_shape_error reports an entry with no repository string" {
   run offsite_backup::_repositories_shape_error \
     '[{"name":"fake_repo","paths":[{"path":"/fake/dumps"}]}]'
   [[ "$output" == *"repository"* ]]
 }
 
-@test "_repositories_shape_error reports a repository with no paths" {
-  run offsite_backup::_repositories_shape_error '[{"name":"fake_repo","repository":"fake:repository"}]'
-  [[ "$output" == *"paths"* ]]
-}
-
 # --- _validate_paths ---
 
 @test "_validate_paths passes a well-formed path set" {
   STUB_EXIT=1 mktest::stub_function lifecycle::fail
-  offsite_backup::_validate_paths '[{"path":"/fake/dumps"},{"path":"/fake/other","max_age_hours":36}]'
+  offsite_backup::_validate_paths '[{"path":"/fake/dumps"},{"path":"/fake/other","max_age_hours":36}]' "fake_repo"
   mktest::assert_stub_not_called lifecycle::fail
+}
+
+# Checked here rather than with the repository set, because a path a machine type
+# turned off leaves nothing to back up just as surely as one never written.
+@test "_validate_paths fails, naming the repository, when it has no enabled paths" {
+  STUB_EXIT=1 mktest::stub_function lifecycle::fail
+  run ! offsite_backup::_validate_paths "" "fake_repo"
+  MATCH="fake_repo.*at least one" mktest::assert_stub_called lifecycle::fail
 }
 
 @test "_validate_paths fails when an entry has no path" {
   STUB_EXIT=1 mktest::stub_function lifecycle::fail
-  run ! offsite_backup::_validate_paths '[{"max_age_hours":36}]'
+  run ! offsite_backup::_validate_paths '[{"max_age_hours":36}]' "fake_repo"
   MATCH="needs a path" mktest::assert_stub_called lifecycle::fail
 }
 
 @test "_validate_paths fails on a non-numeric max_age_hours" {
   STUB_EXIT=1 mktest::stub_function lifecycle::fail
-  run ! offsite_backup::_validate_paths '[{"path":"/fake/dumps","max_age_hours":"a while"}]'
+  run ! offsite_backup::_validate_paths '[{"path":"/fake/dumps","max_age_hours":"a while"}]' "fake_repo"
   MATCH="max_age_hours" mktest::assert_stub_called lifecycle::fail
 }
 
@@ -340,7 +567,7 @@ offsite_backup/second_repo/credentials\tfalse\tfalse' ]
     mktest::stub_function offsite_backup::_secret_name "fake_repo" credentials
   STUB_OUTPUT="/fake/password" mktest::stub_function offsite_backup::_password_file_path "fake_repo"
   STUB_OUTPUT="/fake/credentials" mktest::stub_function offsite_backup::_credentials_file_path "fake_repo"
-  mktest::stub_function secrets::present "offsite_backup/fake_repo/credentials"
+  mktest::stub_function offsite_backup::_has_credentials "fake_repo"
   mktest::stub_function offsite_backup::_write_secret_file "/fake/password" "offsite_backup/fake_repo/repository_password"
   mktest::stub_function offsite_backup::_write_secret_file "/fake/credentials" "offsite_backup/fake_repo/credentials"
   offsite_backup::_install_secret_files "fake_repo"
@@ -357,7 +584,7 @@ offsite_backup/second_repo/credentials\tfalse\tfalse' ]
     mktest::stub_function offsite_backup::_secret_name "fake_repo" credentials
   STUB_OUTPUT="/fake/password" mktest::stub_function offsite_backup::_password_file_path "fake_repo"
   STUB_OUTPUT="/fake/credentials" mktest::stub_function offsite_backup::_credentials_file_path "fake_repo"
-  STUB_RETURN=1 mktest::stub_function secrets::present "offsite_backup/fake_repo/credentials"
+  STUB_RETURN=1 mktest::stub_function offsite_backup::_has_credentials "fake_repo"
   mktest::stub_function offsite_backup::_write_secret_file "/fake/password" "offsite_backup/fake_repo/repository_password"
   offsite_backup::_install_secret_files "fake_repo"
   mktest::assert_stub_not_called offsite_backup::_write_secret_file "/fake/credentials" "offsite_backup/fake_repo/credentials"
@@ -477,6 +704,12 @@ offsite_backup/second_repo/credentials\tfalse\tfalse' ]
   run ! offsite_backup::_init_consented "fake:repository"
 }
 
+@test "_init_consented stops when reading the consent signal fails" {
+  STUB_EXIT=97 mktest::stub_function context::get
+  run offsite_backup::_init_consented "fake:repository"
+  [ "$status" -eq 97 ]
+}
+
 @test "_repository_reachable asks the run script, silently" {
   mktest::stub_function offsite_backup::_run_script_mode probe "$ENTRY"
   offsite_backup::_repository_reachable "$ENTRY"
@@ -505,6 +738,15 @@ EOF
   [ "$output" = "$(printf 'fake-mode\ncommon-value')" ]
 }
 
+@test "_run_script_mode stops when building the repository's environment fails" {
+  STUB_OUTPUT="/fake/restic_run.sh" mktest::stub_function offsite_backup::_run_script_path
+  STUB_EXIT=97 mktest::stub_function offsite_backup::_common_service_env "$ENTRY"
+  mktest::stub_function env
+  run offsite_backup::_run_script_mode "fake-mode" "$ENTRY"
+  [ "$status" -eq 97 ]
+  mktest::assert_stub_not_called env
+}
+
 # --- _common_service_env ---
 
 @test "_common_service_env pins the notify hook, the binary, and this repository's location and secret paths" {
@@ -522,6 +764,18 @@ EOF
     "MK_OFFSITE_BACKUP_REPOSITORY=fake:repository" \
     "MK_OFFSITE_BACKUP_PASSWORD_FILE=/c/fake_repo/password" \
     "MK_OFFSITE_BACKUP_CREDENTIALS_FILE=/c/fake_repo/credentials")" ]
+}
+
+@test "_common_service_env stops when reading the notify command fails" {
+  STUB_OUTPUT="fake_repo" mktest::stub_function offsite_backup::_name "$ENTRY"
+  STUB_EXIT=97 mktest::stub_function offsite_backup::_notify "$ENTRY"
+  STUB_OUTPUT="/b/restic" mktest::stub_function offsite_backup::_restic_path
+  STUB_OUTPUT="fake:repository" mktest::stub_function offsite_backup::_repository "$ENTRY"
+  STUB_OUTPUT="/c/password" mktest::stub_function offsite_backup::_password_file_path "fake_repo"
+  STUB_OUTPUT="/c/credentials" mktest::stub_function offsite_backup::_credentials_file_path "fake_repo"
+  run offsite_backup::_common_service_env "$ENTRY"
+  [ "$status" -eq 97 ]
+  [ -z "$output" ]
 }
 
 # --- _install_backup_service / _install_check_service ---
@@ -553,9 +807,89 @@ EOF
     "MK_OFFSITE_BACKUP_KEEP_MONTHLY=12"
 }
 
-@test "_install_check_service schedules the same script in check mode on this repository's own cadence" {
+@test "_install_backup_service stops when building the repository's environment fails" {
   STUB_OUTPUT="fake_repo" mktest::stub_function offsite_backup::_name "$ENTRY"
   STUB_OUTPUT="offsite-backup-fake-repo" mktest::stub_function offsite_backup::_service_label "fake_repo"
+  STUB_OUTPUT="/s/restic_run.sh" mktest::stub_function offsite_backup::_run_script_path
+  STUB_OUTPUT="30 3 * * *" mktest::stub_function offsite_backup::_schedule "$ENTRY"
+  STUB_OUTPUT="/m/manifest.tsv" mktest::stub_function offsite_backup::_manifest_path "fake_repo"
+  STUB_EXIT=97 mktest::stub_function offsite_backup::_common_service_env "$ENTRY"
+  STUB_OUTPUT="7" mktest::stub_function offsite_backup::_keep_daily "$ENTRY"
+  STUB_OUTPUT="4" mktest::stub_function offsite_backup::_keep_weekly "$ENTRY"
+  STUB_OUTPUT="12" mktest::stub_function offsite_backup::_keep_monthly "$ENTRY"
+  mktest::stub_function service::install_calendar
+  run offsite_backup::_install_backup_service "$ENTRY"
+  [ "$status" -eq 97 ]
+  mktest::assert_stub_not_called service::install_calendar
+}
+
+@test "_install_backup_service stops when reading the backup schedule fails" {
+  STUB_OUTPUT="fake_repo" mktest::stub_function offsite_backup::_name "$ENTRY"
+  STUB_OUTPUT="offsite-backup-fake-repo" mktest::stub_function offsite_backup::_service_label "fake_repo"
+  STUB_OUTPUT="/s/restic_run.sh" mktest::stub_function offsite_backup::_run_script_path
+  STUB_EXIT=97 mktest::stub_function offsite_backup::_schedule "$ENTRY"
+  STUB_OUTPUT="/m/manifest.tsv" mktest::stub_function offsite_backup::_manifest_path "fake_repo"
+  STUB_OUTPUT="COMMON=env" mktest::stub_function offsite_backup::_common_service_env "$ENTRY"
+  STUB_OUTPUT="7" mktest::stub_function offsite_backup::_keep_daily "$ENTRY"
+  STUB_OUTPUT="4" mktest::stub_function offsite_backup::_keep_weekly "$ENTRY"
+  STUB_OUTPUT="12" mktest::stub_function offsite_backup::_keep_monthly "$ENTRY"
+  mktest::stub_function service::install_calendar
+  run offsite_backup::_install_backup_service "$ENTRY"
+  [ "$status" -eq 97 ]
+  mktest::assert_stub_not_called service::install_calendar
+}
+
+@test "_install_backup_service stops when reading the daily retention fails" {
+  STUB_OUTPUT="fake_repo" mktest::stub_function offsite_backup::_name "$ENTRY"
+  STUB_OUTPUT="offsite-backup-fake-repo" mktest::stub_function offsite_backup::_service_label "fake_repo"
+  STUB_OUTPUT="/s/restic_run.sh" mktest::stub_function offsite_backup::_run_script_path
+  STUB_OUTPUT="30 3 * * *" mktest::stub_function offsite_backup::_schedule "$ENTRY"
+  STUB_OUTPUT="/m/manifest.tsv" mktest::stub_function offsite_backup::_manifest_path "fake_repo"
+  STUB_OUTPUT="COMMON=env" mktest::stub_function offsite_backup::_common_service_env "$ENTRY"
+  STUB_EXIT=97 mktest::stub_function offsite_backup::_keep_daily "$ENTRY"
+  STUB_OUTPUT="4" mktest::stub_function offsite_backup::_keep_weekly "$ENTRY"
+  STUB_OUTPUT="12" mktest::stub_function offsite_backup::_keep_monthly "$ENTRY"
+  mktest::stub_function service::install_calendar
+  run offsite_backup::_install_backup_service "$ENTRY"
+  [ "$status" -eq 97 ]
+  mktest::assert_stub_not_called service::install_calendar
+}
+
+@test "_install_backup_service stops when reading the weekly retention fails" {
+  STUB_OUTPUT="fake_repo" mktest::stub_function offsite_backup::_name "$ENTRY"
+  STUB_OUTPUT="offsite-backup-fake-repo" mktest::stub_function offsite_backup::_service_label "fake_repo"
+  STUB_OUTPUT="/s/restic_run.sh" mktest::stub_function offsite_backup::_run_script_path
+  STUB_OUTPUT="30 3 * * *" mktest::stub_function offsite_backup::_schedule "$ENTRY"
+  STUB_OUTPUT="/m/manifest.tsv" mktest::stub_function offsite_backup::_manifest_path "fake_repo"
+  STUB_OUTPUT="COMMON=env" mktest::stub_function offsite_backup::_common_service_env "$ENTRY"
+  STUB_OUTPUT="7" mktest::stub_function offsite_backup::_keep_daily "$ENTRY"
+  STUB_EXIT=97 mktest::stub_function offsite_backup::_keep_weekly "$ENTRY"
+  STUB_OUTPUT="12" mktest::stub_function offsite_backup::_keep_monthly "$ENTRY"
+  mktest::stub_function service::install_calendar
+  run offsite_backup::_install_backup_service "$ENTRY"
+  [ "$status" -eq 97 ]
+  mktest::assert_stub_not_called service::install_calendar
+}
+
+@test "_install_backup_service stops when reading the monthly retention fails" {
+  STUB_OUTPUT="fake_repo" mktest::stub_function offsite_backup::_name "$ENTRY"
+  STUB_OUTPUT="offsite-backup-fake-repo" mktest::stub_function offsite_backup::_service_label "fake_repo"
+  STUB_OUTPUT="/s/restic_run.sh" mktest::stub_function offsite_backup::_run_script_path
+  STUB_OUTPUT="30 3 * * *" mktest::stub_function offsite_backup::_schedule "$ENTRY"
+  STUB_OUTPUT="/m/manifest.tsv" mktest::stub_function offsite_backup::_manifest_path "fake_repo"
+  STUB_OUTPUT="COMMON=env" mktest::stub_function offsite_backup::_common_service_env "$ENTRY"
+  STUB_OUTPUT="7" mktest::stub_function offsite_backup::_keep_daily "$ENTRY"
+  STUB_OUTPUT="4" mktest::stub_function offsite_backup::_keep_weekly "$ENTRY"
+  STUB_EXIT=97 mktest::stub_function offsite_backup::_keep_monthly "$ENTRY"
+  mktest::stub_function service::install_calendar
+  run offsite_backup::_install_backup_service "$ENTRY"
+  [ "$status" -eq 97 ]
+  mktest::assert_stub_not_called service::install_calendar
+}
+
+@test "_install_check_service schedules the same script in check mode on this repository's own cadence" {
+  STUB_OUTPUT="fake_repo" mktest::stub_function offsite_backup::_name "$ENTRY"
+  STUB_OUTPUT="offsite-backup-fake-repo-check" mktest::stub_function offsite_backup::_check_service_label "fake_repo"
   STUB_OUTPUT="/s/restic_run.sh" mktest::stub_function offsite_backup::_run_script_path
   STUB_OUTPUT="0 4 * * 0" mktest::stub_function offsite_backup::_check_schedule "$ENTRY"
   STUB_OUTPUT="COMMON=env" mktest::stub_function offsite_backup::_common_service_env "$ENTRY"
@@ -571,19 +905,51 @@ EOF
     "MK_OFFSITE_BACKUP_READ_DATA=false"
 }
 
-# --- _repositories / per-entry accessors ---
-
-@test "_repositories returns the configured repositories" {
-  STUB_OUTPUT="[$ENTRY]" mktest::stub_function config::get "module.offsite_backup.repositories"
-  run offsite_backup::_repositories
-  [ "$output" = "[$ENTRY]" ]
+@test "_install_check_service stops when building the repository's environment fails" {
+  STUB_OUTPUT="fake_repo" mktest::stub_function offsite_backup::_name "$ENTRY"
+  STUB_OUTPUT="offsite-backup-fake-repo-check" mktest::stub_function offsite_backup::_check_service_label "fake_repo"
+  STUB_OUTPUT="/s/restic_run.sh" mktest::stub_function offsite_backup::_run_script_path
+  STUB_OUTPUT="0 4 * * 0" mktest::stub_function offsite_backup::_check_schedule "$ENTRY"
+  STUB_EXIT=97 mktest::stub_function offsite_backup::_common_service_env "$ENTRY"
+  STUB_OUTPUT="false" mktest::stub_function offsite_backup::_check_read_data "$ENTRY"
+  mktest::stub_function service::install_calendar
+  run offsite_backup::_install_check_service "$ENTRY"
+  [ "$status" -eq 97 ]
+  mktest::assert_stub_not_called service::install_calendar
 }
 
-@test "_repositories is empty and succeeds when the key is unset" {
-  STUB_RETURN=1 mktest::stub_function config::get
+@test "_install_check_service stops when reading the check schedule fails" {
+  STUB_OUTPUT="fake_repo" mktest::stub_function offsite_backup::_name "$ENTRY"
+  STUB_OUTPUT="offsite-backup-fake-repo-check" mktest::stub_function offsite_backup::_check_service_label "fake_repo"
+  STUB_OUTPUT="/s/restic_run.sh" mktest::stub_function offsite_backup::_run_script_path
+  STUB_EXIT=97 mktest::stub_function offsite_backup::_check_schedule "$ENTRY"
+  STUB_OUTPUT="COMMON=env" mktest::stub_function offsite_backup::_common_service_env "$ENTRY"
+  STUB_OUTPUT="false" mktest::stub_function offsite_backup::_check_read_data "$ENTRY"
+  mktest::stub_function service::install_calendar
+  run offsite_backup::_install_check_service "$ENTRY"
+  [ "$status" -eq 97 ]
+  mktest::assert_stub_not_called service::install_calendar
+}
+
+@test "_install_check_service stops when reading the read-data flag fails" {
+  STUB_OUTPUT="fake_repo" mktest::stub_function offsite_backup::_name "$ENTRY"
+  STUB_OUTPUT="offsite-backup-fake-repo-check" mktest::stub_function offsite_backup::_check_service_label "fake_repo"
+  STUB_OUTPUT="/s/restic_run.sh" mktest::stub_function offsite_backup::_run_script_path
+  STUB_OUTPUT="0 4 * * 0" mktest::stub_function offsite_backup::_check_schedule "$ENTRY"
+  STUB_OUTPUT="COMMON=env" mktest::stub_function offsite_backup::_common_service_env "$ENTRY"
+  STUB_EXIT=97 mktest::stub_function offsite_backup::_check_read_data "$ENTRY"
+  mktest::stub_function service::install_calendar
+  run offsite_backup::_install_check_service "$ENTRY"
+  [ "$status" -eq 97 ]
+  mktest::assert_stub_not_called service::install_calendar
+}
+
+# --- _repositories / per-entry accessors ---
+
+@test "_repositories returns the configured repositories, each key filling the name" {
+  STUB_OUTPUT="the-repositories" mktest::stub_function config::entries "module.offsite_backup.repositories" "name"
   run offsite_backup::_repositories
-  [ "$status" -eq 0 ]
-  [ -z "$output" ]
+  [ "$output" = "the-repositories" ]
 }
 
 @test "_name reads the repository's name" {
@@ -596,14 +962,20 @@ EOF
   [ "$output" = "fake:repository" ]
 }
 
-@test "_paths reads the repository's own path list" {
+@test "_paths reads the enabled entries of the repository's own paths collection" {
+  STUB_OUTPUT="fake_repo" mktest::stub_function offsite_backup::_name "$ENTRY"
+  STUB_OUTPUT="the-paths" mktest::stub_function config::entries_from_json \
+    '{"dumps":{"path":"/fake/dumps"}}' "offsite_backup repository 'fake_repo' paths"
   run offsite_backup::_paths "$ENTRY"
-  [ "$output" = '[{"path":"/fake/dumps"}]' ]
+  [ "$output" = "the-paths" ]
 }
 
-@test "_paths is an empty list when the repository declares none" {
+@test "_paths reads an empty collection when the repository declares none" {
+  STUB_OUTPUT="fake_repo" mktest::stub_function offsite_backup::_name '{"name":"fake_repo"}'
+  STUB_OUTPUT="" mktest::stub_function config::entries_from_json '{}' "offsite_backup repository 'fake_repo' paths"
   run offsite_backup::_paths '{"name":"fake_repo"}'
-  [ "$output" = "[]" ]
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
 }
 
 # --- _repository_setting (the entry-beats-module cascade) ---
@@ -629,6 +1001,13 @@ EOF
   [ "$output" = "from-cascade" ]
 }
 
+@test "_schedule stops when reading the module default fails" {
+  STUB_EXIT=97 mktest::stub_function config::get
+  mktest::stub_function offsite_backup::_repository_setting
+  run offsite_backup::_schedule "$ENTRY"
+  [ "$status" -eq 97 ]
+}
+
 @test "_check_schedule defaults to a weekly verification" {
   STUB_OUTPUT="0 6 * * 1" mktest::stub_function config::get \
     "module.offsite_backup.check_schedule" "--default" "0 4 * * 0"
@@ -636,6 +1015,13 @@ EOF
     "$ENTRY" check_schedule "0 6 * * 1"
   run offsite_backup::_check_schedule "$ENTRY"
   [ "$output" = "from-cascade" ]
+}
+
+@test "_check_schedule stops when reading the module default fails" {
+  STUB_EXIT=97 mktest::stub_function config::get
+  mktest::stub_function offsite_backup::_repository_setting
+  run offsite_backup::_check_schedule "$ENTRY"
+  [ "$status" -eq 97 ]
 }
 
 @test "_keep_daily defaults to 7" {
@@ -647,6 +1033,13 @@ EOF
   [ "$output" = "from-cascade" ]
 }
 
+@test "_keep_daily stops when reading the module default fails" {
+  STUB_EXIT=97 mktest::stub_function config::get
+  mktest::stub_function offsite_backup::_repository_setting
+  run offsite_backup::_keep_daily "$ENTRY"
+  [ "$status" -eq 97 ]
+}
+
 @test "_keep_weekly defaults to 4" {
   STUB_OUTPUT="8" mktest::stub_function config::get \
     "module.offsite_backup.keep_weekly" "--default" "4"
@@ -654,6 +1047,13 @@ EOF
     "$ENTRY" keep_weekly "8"
   run offsite_backup::_keep_weekly "$ENTRY"
   [ "$output" = "from-cascade" ]
+}
+
+@test "_keep_weekly stops when reading the module default fails" {
+  STUB_EXIT=97 mktest::stub_function config::get
+  mktest::stub_function offsite_backup::_repository_setting
+  run offsite_backup::_keep_weekly "$ENTRY"
+  [ "$status" -eq 97 ]
 }
 
 @test "_keep_monthly defaults to 12" {
@@ -665,6 +1065,13 @@ EOF
   [ "$output" = "from-cascade" ]
 }
 
+@test "_keep_monthly stops when reading the module default fails" {
+  STUB_EXIT=97 mktest::stub_function config::get
+  mktest::stub_function offsite_backup::_repository_setting
+  run offsite_backup::_keep_monthly "$ENTRY"
+  [ "$status" -eq 97 ]
+}
+
 @test "_check_read_data defaults to false, keeping the expensive verification opt-in" {
   STUB_OUTPUT="true" mktest::stub_function config::get \
     "module.offsite_backup.check_read_data" "--default" "false" "--coerce" "boolean"
@@ -674,12 +1081,26 @@ EOF
   [ "$output" = "from-cascade" ]
 }
 
+@test "_check_read_data stops when reading the module default fails" {
+  STUB_EXIT=97 mktest::stub_function config::get
+  mktest::stub_function offsite_backup::_repository_setting
+  run offsite_backup::_check_read_data "$ENTRY"
+  [ "$status" -eq 97 ]
+}
+
 @test "_notify defaults to empty" {
   STUB_OUTPUT="" mktest::stub_function config::get "module.offsite_backup.notify" "--default" ""
   STUB_OUTPUT="from-cascade" mktest::stub_function offsite_backup::_repository_setting \
     "$ENTRY" notify ""
   run offsite_backup::_notify "$ENTRY"
   [ "$output" = "from-cascade" ]
+}
+
+@test "_notify stops when reading the module default fails" {
+  STUB_EXIT=97 mktest::stub_function config::get
+  mktest::stub_function offsite_backup::_repository_setting
+  run offsite_backup::_notify "$ENTRY"
+  [ "$status" -eq 97 ]
 }
 
 # --- names + paths ---
@@ -694,6 +1115,25 @@ EOF
   # dash-separated, and service.sh namespaces whatever it is handed.
   run offsite_backup::_service_label "fake_repo"
   [ "$output" = "offsite-backup-fake-repo" ]
+}
+
+@test "_has_credentials asks whether the repository's credentials secret exists" {
+  STUB_OUTPUT="offsite_backup/fake_repo/credentials" mktest::stub_function offsite_backup::_secret_name "fake_repo" credentials
+  mktest::stub_function secrets::present "offsite_backup/fake_repo/credentials"
+  offsite_backup::_has_credentials "fake_repo"
+}
+
+@test "_has_credentials is false when the repository has no credentials secret" {
+  STUB_OUTPUT="offsite_backup/fake_repo/credentials" mktest::stub_function offsite_backup::_secret_name "fake_repo" credentials
+  STUB_RETURN=1 mktest::stub_function secrets::present "offsite_backup/fake_repo/credentials"
+  run offsite_backup::_has_credentials "fake_repo"
+  [ "$status" -eq 1 ]
+}
+
+@test "_check_service_label is the repository's service label with a check suffix" {
+  STUB_OUTPUT="offsite-backup-fake-repo" mktest::stub_function offsite_backup::_service_label "fake_repo"
+  run offsite_backup::_check_service_label "fake_repo"
+  [ "$output" = "offsite-backup-fake-repo-check" ]
 }
 
 @test "_repository_ready reads the outcome install recorded for that repository" {
@@ -712,30 +1152,27 @@ EOF
   [ "$output" = "$fakebin/restic" ]
 }
 
-@test "_password_file_path locates the password under the repository's own config dir" {
-  HOME=/fake/home
-  unset XDG_CONFIG_HOME
+@test "_password_file_path places the password, under the repository's own dir in the module's own config dir" {
+  STUB_OUTPUT="/fake/config/offsite_backup" mktest::stub_function artifacts::module_config_dir offsite_backup
   run offsite_backup::_password_file_path "fake_repo"
-  [ "$output" = "/fake/home/.config/machinekit/offsite_backup/fake_repo/repository_password" ]
+  [ "$output" = "/fake/config/offsite_backup/fake_repo/repository_password" ]
 }
 
-@test "_credentials_file_path locates the credentials under the repository's own config dir" {
-  HOME=/fake/home
-  unset XDG_CONFIG_HOME
+@test "_credentials_file_path places the credentials, under the repository's own dir in the module's own config dir" {
+  STUB_OUTPUT="/fake/config/offsite_backup" mktest::stub_function artifacts::module_config_dir offsite_backup
   run offsite_backup::_credentials_file_path "fake_repo"
-  [ "$output" = "/fake/home/.config/machinekit/offsite_backup/fake_repo/credentials" ]
+  [ "$output" = "/fake/config/offsite_backup/fake_repo/credentials" ]
 }
 
-@test "_manifest_path gives each repository its own manifest" {
-  HOME=/fake/home
-  unset XDG_DATA_HOME
+@test "_manifest_path places each repository's own manifest in the module's own data dir" {
+  STUB_OUTPUT="/fake/data/offsite_backup" mktest::stub_function artifacts::module_data_dir offsite_backup
   run offsite_backup::_manifest_path "fake_repo"
-  [ "$output" = "/fake/home/.local/share/machinekit/offsite_backup/manifest-fake_repo.tsv" ]
+  [ "$output" = "/fake/data/offsite_backup/manifest-fake_repo.tsv" ]
 }
 
-@test "_run_script_path locates the one installed run script under the default data dir" {
-  HOME=/fake/home
-  unset XDG_DATA_HOME
+@test "_run_script_path places the one installed run script in the module's own data dir" {
+  STUB_OUTPUT="/fake/data/offsite_backup" mktest::stub_function artifacts::module_data_dir offsite_backup
   run offsite_backup::_run_script_path
-  [ "$output" = "/fake/home/.local/share/machinekit/offsite_backup/restic_run.sh" ]
+  [ "$output" = "/fake/data/offsite_backup/restic_run.sh" ]
 }
+

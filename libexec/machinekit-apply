@@ -65,6 +65,12 @@ Mode:
                                            differ from machinekit's version.
                                            Valid: overwrite (default), skip, abort
                                            Env: MACHINEKIT_CONFLICT_BEHAVIOR
+      --remove-unconfigured                Remove what an earlier apply installed and
+                                           the blueprint no longer asks for (its
+                                           services and machinekit's files for it).
+                                           Without it, apply asks, or in
+                                           non-interactive mode keeps them and warns.
+                                           Env: MACHINEKIT_REMOVE_UNCONFIGURED=1
       --dry-run                            Show what would change without modifying
                                            the system.
                                            Env: MACHINEKIT_MODE_DRY_RUN=1
@@ -105,6 +111,7 @@ while [ $# -gt 0 ]; do
     --overwrite-age-key)             export MACHINEKIT_AGE_KEY_OVERWRITE=1;                     shift ;;
     --conflict-behavior)             export MACHINEKIT_CONFLICT_BEHAVIOR="${2}";                shift 2 ;;
     --conflict-behavior=*)           export MACHINEKIT_CONFLICT_BEHAVIOR="${1#*=}";              shift ;;
+    --remove-unconfigured)           export MACHINEKIT_REMOVE_UNCONFIGURED=1;                   shift ;;
     --dry-run)                       export MACHINEKIT_MODE_DRY_RUN=1;                          shift ;;
     --non-interactive)               export MACHINEKIT_MODE_INTERACTIVE=0;                      shift ;;
     --interactive)                   export MACHINEKIT_MODE_INTERACTIVE=1;                      shift ;;
@@ -133,6 +140,7 @@ main() {
   sudo::ensure
   preflight::run
   modules::run_installs
+  artifacts::remove_stale
   home::sync
   modules::run_post_apply
   hooks::run_post_apply

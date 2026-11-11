@@ -38,16 +38,18 @@ _SYNCTHING_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 _SYNCTHING_FOLDER_TYPES="sendreceive sendonly receiveonly receiveencrypted"
 _SYNCTHING_DEFAULT_FOLDER_TYPE="sendreceive"
 
+_SYNCTHING_CONFLICT_SERVICE_LABEL="syncthing-conflicts"
+
 syncthing::preflight() {
   local folders peers
-  folders=$(syncthing::_folders)
-  peers=$(syncthing::_peers)
+  folders=${ syncthing::_folders; }
+  peers=${ syncthing::_peers; }
   [ -n "$folders" ] && syncthing::_validate_folders "$folders"
   [ -n "$folders" ] && syncthing::_validate_ignores "$folders"
   [ -n "$folders" ] && syncthing::_validate_folder_types "$folders"
   [ -n "$peers" ] && syncthing::_validate_peers "$peers"
-  # Validate the discovery posture now (called directly, so an unknown value's
-  # lifecycle::fail isn't swallowed the way it would be in _apply_discovery's loop).
+  # Built here only for its check, so an unknown posture stops the run before
+  # install rather than partway through it.
   syncthing::_discovery_options >/dev/null
   return 0
 }
@@ -71,7 +73,7 @@ syncthing::install() {
   local share_with=""
   if syncthing::_join_consented; then
     context::set "syncthing.joined" true
-    share_with=$(syncthing::_join)
+    share_with=${ syncthing::_join; }
   else
     context::set "syncthing.joined" false
     logging::warn "syncthing: mesh join not consented; folders stay local. Set MACHINEKIT_SYNCTHING_JOIN=1 to join."
@@ -80,15 +82,58 @@ syncthing::install() {
   syncthing::_install_conflict_notifier
 }
 
+# The names of every file install may put in this module's own dirs, whatever the
+# config, so an apply with no record of past installs can find them.
+syncthing::installed_file_patterns() {
+  printf '%s\n' \
+    $'data\tconflict_manifest.txt' \
+    $'data\tconflict_scan.sh'
+}
+
+# What install puts on this machine for the current config, so an apply can remove
+# a dropped folder from the daemon and, once no folders remain, the conflict
+# notifier. The daemon, its identity and its peers stay. No folders = nothing.
+syncthing::installed_artifacts() {
+  local folders
+  folders=${ syncthing::_folders; }
+  [ -n "$folders" ] || return 0
+  printf 'service\t%s\n' "$_SYNCTHING_CONFLICT_SERVICE_LABEL"
+  printf 'file\t%s\n' "$(syncthing::_conflict_manifest_path)" "$(syncthing::_conflict_scan_script_path)"
+  printf '%s' "$folders" | jq -r '.[] | "folder\t\(.id)"'
+}
+
+# Removing a folder only takes it out of this daemon's config, so this machine
+# stops syncing it. Syncthing leaves the folder's files on disk.
+syncthing::remove_artifact() {
+  local kind="$1" name="$2"
+  case "$kind" in
+    folder) syncthing::_remove_folder "$name" ;;
+    *)
+      logging::warn "syncthing: no way to remove a $kind."
+      return 1
+      ;;
+  esac
+}
+
+# A folder the daemon no longer has is already removed. A daemon that can't list
+# its folders proves nothing either way, so that is a failure.
+syncthing::_remove_folder() {
+  local id="$1" folder_ids
+  folder_ids=$(syncthing::_cli_folder_ids) || return 1
+  grep -qxF -- "$id" <<< "$folder_ids" || return 0
+  syncthing::_cli_delete_folder "$id"
+}
+
 # Each folder entry must carry an id (stable + identical across machines, so the
-# same logical folder lines up) and a path. Fail loudly on a malformed entry
+# same logical folder lines up) and a path. The id defaults to the entry's key, so
+# it is missing only when set to "" explicitly. Fail loudly on a malformed entry
 # rather than producing a half-configured mesh.
 syncthing::_validate_folders() {
   local folders="$1" bad
   bad=$(printf '%s' "$folders" | jq -r '
     any(.[]; (has("id")|not) or (has("path")|not) or (.id == "") or (.path == ""))')
   [ "$bad" = "true" ] && lifecycle::fail \
-    "syncthing: every [[module.syncthing.folders]] entry needs both an id and a path."
+    "syncthing: every [module.syncthing.folders.<key>] entry needs both an id and a path (the id defaults to the key)."
   return 0
 }
 
@@ -100,7 +145,7 @@ syncthing::_validate_peers() {
   bad=$(printf '%s' "$peers" | jq -r '
     any(.[]; (has("device_id")|not) or (.device_id == ""))')
   [ "$bad" = "true" ] && lifecycle::fail \
-    "syncthing: every [[module.syncthing.peers]] entry needs a device_id."
+    "syncthing: every [module.syncthing.peers.<key>] entry needs a device_id."
   return 0
 }
 
@@ -113,26 +158,29 @@ syncthing::_validate_folder_types() {
     ($valid | split(" ")) as $types
     | any(.[]; .type as $declared | ($declared != null) and (($types | index($declared)) == null))')
   [ "$bad" = "true" ] && lifecycle::fail \
-    "syncthing: a [[module.syncthing.folders]] type must be one of: $_SYNCTHING_FOLDER_TYPES."
+    "syncthing: a [module.syncthing.folders.<key>] type must be one of: $_SYNCTHING_FOLDER_TYPES."
   return 0
 }
 
 # Each folder's ignore config must be coherent: refusing to manage .stignore while
-# still listing ignore_patterns is a contradiction; managing it with neither
-# defaults nor patterns is a pointless empty block (warn, don't fail).
+# still listing patterns is a contradiction; managing it with neither defaults nor
+# patterns is a pointless empty block (warn, don't fail). Reading the patterns
+# here is also what makes a malformed pattern list stop the run in preflight
+# rather than mid-install.
 syncthing::_validate_ignores() {
-  local folders="$1" folder id manage add_defaults pattern_count
+  local folders="$1" folder id manage add_defaults patterns pattern_count
   while IFS= read -r folder; do
     [ -n "$folder" ] || continue
     id=$(printf '%s' "$folder" | jq -r '.id // "?"')
     manage=$(printf '%s' "$folder" | jq -r 'if .manage_stignore == null then true else .manage_stignore end')
     add_defaults=$(printf '%s' "$folder" | jq -r 'if .add_default_ignores == null then true else .add_default_ignores end')
-    pattern_count=$(printf '%s' "$folder" | jq -r '(.ignore_patterns // []) | length')
+    patterns=${ syncthing::_ignore_patterns "$folder"; }
+    pattern_count=$(printf '%s' "$patterns" | jq -r 'length')
     if [ "$manage" != "true" ] && [ "$pattern_count" -gt 0 ]; then
-      lifecycle::fail "syncthing: folder '$id' sets manage_stignore = false but lists ignore_patterns — drop one (machinekit can't both manage .stignore and leave it alone)."
+      lifecycle::fail "syncthing: folder '$id' sets manage_stignore = false but has ignore patterns — drop one (machinekit can't both manage .stignore and leave it alone)."
     fi
     if [ "$manage" = "true" ] && [ "$add_defaults" != "true" ] && [ "$pattern_count" -eq 0 ]; then
-      logging::warn "syncthing: folder '$id' manages .stignore with no defaults and no ignore_patterns — only an empty managed block will be written."
+      logging::warn "syncthing: folder '$id' manages .stignore with no defaults and no ignore patterns — only an empty managed block will be written."
     fi
   done < <(printf '%s' "$folders" | jq -c '.[]')
   return 0
@@ -157,7 +205,7 @@ syncthing::postflight_info() {
     printf 'Syncthing hub device ID: %s\n' "$(syncthing::_own_device_id)"
     return 0
   fi
-  [ "$(syncthing::_joined)" = "true" ] || return 0
+  [ "${ syncthing::_joined; }" = "true" ] || return 0
   printf 'Joined the Syncthing mesh via the hub.\n'
 }
 
@@ -165,10 +213,10 @@ syncthing::postflight_info() {
 # client, join an unjoined client, or approve a joined client on the hub.
 syncthing::postflight_instructions() {
   if syncthing::_is_hub; then
-    printf "Add this device ID to each client's [[module.syncthing.peers]] (introducer = true).\n"
+    printf "Add this device ID to a [module.syncthing.peers.<key>] entry in each client's config (introducer = true).\n"
     return 0
   fi
-  if [ "$(syncthing::_joined)" = "true" ]; then
+  if [ "${ syncthing::_joined; }" = "true" ]; then
     printf 'Approve this device on the hub (it appears there as a pending device), or re-apply the hub.\n'
   else
     printf 'Re-apply with MACHINEKIT_SYNCTHING_JOIN=1 to join the mesh.\n'
@@ -180,7 +228,7 @@ syncthing::postflight_instructions() {
 # on the folder id, so re-runs converge rather than duplicate.
 syncthing::_ensure_folders() {
   local share_with="$1" folder folders
-  folders=$(syncthing::_folders)
+  folders=${ syncthing::_folders; }
   [ -n "$folders" ] || return 0
   while IFS= read -r folder; do
     [ -n "$folder" ] || continue
@@ -215,24 +263,35 @@ syncthing::_folder_type() {
 
 # Reconcile the folder's .stignore from its ignore config. manage_stignore = false
 # leaves the file entirely to the user; otherwise machinekit maintains its block
-# (user patterns first, then the built-in defaults).
+# (the blueprint's patterns first, then the built-in defaults).
 syncthing::_apply_stignore() {
-  local folder="$1" path="$2"
+  local folder="$1" path="$2" patterns
   [ "$(printf '%s' "$folder" | jq -r 'if .manage_stignore == null then true else .manage_stignore end')" = "true" ] || return 0
-  syncthing::_stignore_patterns "$folder" | managed_block::ensure "$path/.stignore" "//"
+  patterns=${ syncthing::_stignore_patterns "$folder"; }
+  printf '%s\n' "$patterns" | managed_block::ensure "$path/.stignore" "//"
 }
 
-# Emit the folder's ordered, de-duplicated ignore lines: user ignore_patterns
-# first (so a user negation wins .stignore's first-match precedence), then the
-# defaults unless add_default_ignores is false.
+# Emit the folder's ordered, de-duplicated ignore lines. .stignore applies the
+# first matching pattern, so the most specific layer goes first, letting its `!`
+# negations win: a machine type's additional_ignore_patterns, then the inherited
+# ignore_patterns, then the defaults unless add_default_ignores is false.
 syncthing::_stignore_patterns() {
-  local folder="$1"
+  local folder="$1" patterns
+  patterns=${ syncthing::_ignore_patterns "$folder"; }
   {
-    printf '%s' "$folder" | jq -r '.ignore_patterns[]? // empty'
+    printf '%s' "$patterns" | jq -r '.[]'
     if [ "$(printf '%s' "$folder" | jq -r 'if .add_default_ignores == null then true else .add_default_ignores end')" = "true" ]; then
       syncthing::_default_ignores
     fi
   } | awk 'NF && !seen[$0]++'
+}
+
+# The folder's ignore_patterns with a machine type's additional_ignore_patterns
+# before them, as a JSON array.
+syncthing::_ignore_patterns() {
+  local folder="$1" id
+  id=$(printf '%s' "$folder" | jq -r '.id // "?"')
+  config::extended_list "$folder" ignore_patterns before "syncthing folder '$id'"
 }
 
 # Junk that should never replicate. (?d) marks them deletable so they can't block a
@@ -276,7 +335,7 @@ syncthing::_accept_pending() {
 # lists nobody (it accepts joiners instead). Reached only once join is consented.
 syncthing::_ensure_peers() {
   local peer peers
-  peers=$(syncthing::_peers)
+  peers=${ syncthing::_peers; }
   [ -n "$peers" ] || return 0
   while IFS= read -r peer; do
     [ -n "$peer" ] || continue
@@ -297,12 +356,10 @@ syncthing::_ensure_peer() {
   printf '%s\n' "$device_id"
 }
 
-# Apply the configured discovery posture. Capture the options first so a bad
-# preset's lifecycle::fail propagates — a process substitution would run the loop
-# in a subshell and swallow the exit.
+# Apply the configured discovery posture.
 syncthing::_apply_discovery() {
   local options option value
-  options=$(syncthing::_discovery_options)
+  options=${ syncthing::_discovery_options; }
   while read -r option value; do
     [ -n "$option" ] || continue
     syncthing::_cli_set_option "$option" "$value"
@@ -311,8 +368,8 @@ syncthing::_apply_discovery() {
 
 syncthing::_join_consented() {
   local consent
-  consent=$(context::get "syncthing.join" --default false --coerce boolean \
-    --prompt "Join the Syncthing mesh now (add peers and share folders)? (y/n)")
+  consent=${ context::get "syncthing.join" --default false --coerce boolean \
+    --prompt "Join the Syncthing mesh now (add peers and share folders)? (y/n)"; }
   [ "$consent" = "true" ]
 }
 
@@ -321,7 +378,7 @@ syncthing::_join_consented() {
 # it. No folders = nothing that could ever conflict, so nothing to install.
 syncthing::_install_conflict_notifier() {
   local folders
-  folders=$(syncthing::_folders)
+  folders=${ syncthing::_folders; }
   [ -n "$folders" ] || return 0
   syncthing::_write_conflict_manifest "$folders"
   syncthing::_install_conflict_scan_script
@@ -359,28 +416,28 @@ syncthing::_install_conflict_scan_script() {
 # job.
 syncthing::_install_conflict_service() {
   service::install_interval \
-    syncthing-conflicts \
+    "$_SYNCTHING_CONFLICT_SERVICE_LABEL" \
     "$(syncthing::_conflict_scan_script_path)" \
-    "$(syncthing::_conflict_interval)" \
+    "${ syncthing::_conflict_interval; }" \
     "MK_SYNCTHING_CONFLICT_MANIFEST=$(syncthing::_conflict_manifest_path)" \
-    "MK_SYNCTHING_CONFLICT_NOTIFY=$(syncthing::_conflict_notify)"
+    "MK_SYNCTHING_CONFLICT_NOTIFY=${ syncthing::_conflict_notify; }"
 }
 
 # --- config accessors ---
 
-# Array-of-tables; `|| true` so an unset key is an empty result (no folders is a
-# valid single-machine config), not a set -e failure.
+# Each folder's key is its Syncthing folder id unless the entry sets one. Empty
+# when none are configured (no folders is a valid single-machine config).
 syncthing::_folders() {
-  config::get "module.syncthing.folders" || true
+  config::entries "module.syncthing.folders" id
 }
 
 syncthing::_peers() {
-  config::get "module.syncthing.peers" || true
+  config::entries "module.syncthing.peers"
 }
 
 # A hub absorbs joiners (accepts pending devices) instead of pre-listing them.
 syncthing::_is_hub() {
-  [ "$(config::get "module.syncthing.hub" --default false --coerce boolean)" = "true" ]
+  [ "${ config::get "module.syncthing.hub" --default false --coerce boolean; }" = "true" ]
 }
 
 # Whether this machine joined the mesh on this apply. install records the consent
@@ -401,7 +458,7 @@ syncthing::_discovery_preset() {
 # addresses; default emits nothing, leaving Syncthing's settings untouched.
 syncthing::_discovery_options() {
   local preset
-  preset=$(syncthing::_discovery_preset)
+  preset=${ syncthing::_discovery_preset; }
   case "$preset" in
     tailnet)
       printf '%s\n' \
@@ -428,11 +485,11 @@ syncthing::_conflict_interval() {
 # --- conflict notifier paths ---
 
 syncthing::_conflict_manifest_path() {
-  printf '%s\n' "${XDG_DATA_HOME:-$HOME/.local/share}/machinekit/syncthing/conflict_manifest.txt"
+  printf '%s\n' "${ artifacts::module_data_dir syncthing; }/conflict_manifest.txt"
 }
 
 syncthing::_conflict_scan_script_path() {
-  printf '%s\n' "${XDG_DATA_HOME:-$HOME/.local/share}/machinekit/syncthing/conflict_scan.sh"
+  printf '%s\n' "${ artifacts::module_data_dir syncthing; }/conflict_scan.sh"
 }
 
 # --- external command seam (syncthing 2.x surface; isolated for easy correction) ---
@@ -448,6 +505,14 @@ syncthing::_generate() {
 
 syncthing::_own_device_id() {
   syncthing device-id
+}
+
+syncthing::_cli_folder_ids() {
+  syncthing cli config folders list
+}
+
+syncthing::_cli_delete_folder() {
+  syncthing cli config folders "$1" delete
 }
 
 # Device IDs awaiting approval (one per line): clients that connected knowing our

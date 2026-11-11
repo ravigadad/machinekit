@@ -13,10 +13,9 @@
 #
 # A blueprint declares one or more repositories, each with its own paths:
 #
-#   [[module.offsite_backup.repositories]]
-#   name = "b2"
+#   [module.offsite_backup.repositories.database_dumps]
 #   repository = "s3:…"
-#   [[module.offsite_backup.repositories.paths]]
+#   [module.offsite_backup.repositories.database_dumps.paths.dumps]
 #   path = "~/postgres-dumps"
 #
 # Several paths in ONE repository is the common shape and needs no nesting:
@@ -72,7 +71,9 @@ _OFFSITE_BACKUP_DEFAULT_KEEP_MONTHLY="12"
 # secrets, which are themselves empty when no repositories are configured — so an
 # activated-but-unconfigured module adds no edge.
 offsite_backup::requires() {
-  offsite_backup::declared_secrets | secrets::declared_backend_requirements
+  local declared_secrets
+  declared_secrets=${ offsite_backup::declared_secrets; }
+  secrets::declared_backend_requirements <<< "$declared_secrets"
 }
 
 # Two secrets per repository. The password is mandatory — restic cannot open a
@@ -82,7 +83,7 @@ offsite_backup::requires() {
 # optional, since a local or sftp repository needs none.
 offsite_backup::declared_secrets() {
   local repositories name
-  repositories=$(offsite_backup::_repositories)
+  repositories=${ offsite_backup::_repositories; }
   [ -n "$repositories" ] || return 0
   while IFS= read -r name; do
     [ -n "$name" ] || continue
@@ -95,7 +96,7 @@ offsite_backup::declared_secrets() {
 # install — or, worse, silently at 3am. No repositories = nothing to validate.
 offsite_backup::preflight() {
   local repositories entry
-  repositories=$(offsite_backup::_repositories)
+  repositories=${ offsite_backup::_repositories; }
   [ -n "$repositories" ] || return 0
   offsite_backup::_validate_repositories "$repositories"
   while IFS= read -r entry; do
@@ -107,11 +108,46 @@ offsite_backup::preflight() {
 # Everything about one repository that can be wrong independently of the set:
 # its paths, the secret that opens it, and its two schedules.
 offsite_backup::_validate_repository() {
-  local entry="$1"
-  offsite_backup::_validate_paths "$(offsite_backup::_paths "$entry")"
-  offsite_backup::_validate_secrets "$(offsite_backup::_name "$entry")"
-  service::validate_cron "$(offsite_backup::_schedule "$entry")"
-  service::validate_cron "$(offsite_backup::_check_schedule "$entry")"
+  local entry="$1" name paths
+  name=$(offsite_backup::_name "$entry")
+  paths=${ offsite_backup::_paths "$entry"; }
+  offsite_backup::_validate_paths "$paths" "$name"
+  offsite_backup::_validate_secrets "$name"
+  service::validate_cron "${ offsite_backup::_schedule "$entry"; }"
+  service::validate_cron "${ offsite_backup::_check_schedule "$entry"; }"
+}
+
+# The names of every file install may put in this module's own dirs, whatever the
+# config, so an apply with no record of past installs can find them.
+offsite_backup::installed_file_patterns() {
+  printf '%s\n' \
+    $'data\trestic_run.sh' \
+    $'data\tmanifest-*.tsv' \
+    $'config\t*/repository_password' \
+    $'config\t*/credentials'
+}
+
+# What install puts on this machine for the current config, so an apply can stop
+# and remove a dropped repository's services, which would otherwise keep pruning
+# it. restic itself stays installed. No repositories = nothing.
+offsite_backup::installed_artifacts() {
+  local repositories entry
+  repositories=${ offsite_backup::_repositories; }
+  [ -n "$repositories" ] || return 0
+  printf 'file\t%s\n' "$(offsite_backup::_run_script_path)"
+  while IFS= read -r entry; do
+    [ -n "$entry" ] || continue
+    offsite_backup::_repository_artifacts "$entry"
+  done < <(printf '%s' "$repositories" | jq -c '.[]')
+}
+
+offsite_backup::_repository_artifacts() {
+  local entry="$1" name
+  name=$(offsite_backup::_name "$entry")
+  printf 'service\t%s\n' "$(offsite_backup::_service_label "$name")" "$(offsite_backup::_check_service_label "$name")"
+  printf 'file\t%s\n' "$(offsite_backup::_manifest_path "$name")" "$(offsite_backup::_password_file_path "$name")"
+  offsite_backup::_has_credentials "$name" || return 0
+  printf 'file\t%s\n' "$(offsite_backup::_credentials_file_path "$name")"
 }
 
 # Install restic and the run script once, then wire each repository. No
@@ -119,7 +155,7 @@ offsite_backup::_validate_repository() {
 offsite_backup::install() {
   logging::step "offsite_backup install"
   local repositories entry
-  repositories=$(offsite_backup::_repositories)
+  repositories=${ offsite_backup::_repositories; }
   if [ -z "$repositories" ]; then
     logging::debug "offsite_backup: no repositories configured; nothing to back up"
     return 0
@@ -141,12 +177,13 @@ offsite_backup::install() {
 }
 
 offsite_backup::_install_repository() {
-  local entry="$1" name
+  local entry="$1" name paths
   name=$(offsite_backup::_name "$entry")
+  paths=${ offsite_backup::_paths "$entry"; }
   # Order is the contract: creating the repository drives the run script with
   # this repository's secret files, so those must be on disk first.
   offsite_backup::_install_secret_files "$name"
-  offsite_backup::_write_manifest "$name" "$(offsite_backup::_paths "$entry")"
+  offsite_backup::_write_manifest "$name" "$paths"
   offsite_backup::_ensure_repository "$entry"
   offsite_backup::_install_backup_service "$entry"
   offsite_backup::_install_check_service "$entry"
@@ -155,24 +192,25 @@ offsite_backup::_install_repository() {
 # postflight: what leaves this machine, where to, and — because it is what deletes
 # remote history — the retention actually in force for each destination.
 offsite_backup::postflight_info() {
-  local repositories entry name repository path
-  repositories=$(offsite_backup::_repositories)
+  local repositories entry name repository paths path
+  repositories=${ offsite_backup::_repositories; }
   [ -n "$repositories" ] || return 0
   while IFS= read -r entry; do
     [ -n "$entry" ] || continue
     name=$(offsite_backup::_name "$entry")
     repository=$(offsite_backup::_repository "$entry")
+    paths=${ offsite_backup::_paths "$entry"; }
     while IFS= read -r path; do
       [ -n "$path" ] || continue
       printf 'Backing up %s to %s (%s) on schedule "%s".\n' \
-        "$path" "$name" "$repository" "$(offsite_backup::_schedule "$entry")"
-    done < <(printf '%s' "$entry" | jq -r '.paths[]?.path // empty')
+        "$path" "$name" "$repository" "${ offsite_backup::_schedule "$entry"; }"
+    done < <(printf '%s' "$paths" | jq -r '.[].path')
     printf 'Repository %s: keeping %s daily, %s weekly, %s monthly snapshots; verified on schedule "%s".\n' \
       "$name" \
-      "$(offsite_backup::_keep_daily "$entry")" \
-      "$(offsite_backup::_keep_weekly "$entry")" \
-      "$(offsite_backup::_keep_monthly "$entry")" \
-      "$(offsite_backup::_check_schedule "$entry")"
+      "${ offsite_backup::_keep_daily "$entry"; }" \
+      "${ offsite_backup::_keep_weekly "$entry"; }" \
+      "${ offsite_backup::_keep_monthly "$entry"; }" \
+      "${ offsite_backup::_check_schedule "$entry"; }"
   done < <(printf '%s' "$repositories" | jq -c '.[]')
 }
 
@@ -181,12 +219,13 @@ offsite_backup::postflight_info() {
 # scheduled runs fail until it exists — so say so rather than letting it surface
 # at 3am.
 offsite_backup::postflight_instructions() {
-  local repositories entry
-  repositories=$(offsite_backup::_repositories)
+  local repositories entry name
+  repositories=${ offsite_backup::_repositories; }
   [ -n "$repositories" ] || return 0
   while IFS= read -r entry; do
     [ -n "$entry" ] || continue
-    [ "$(offsite_backup::_repository_ready "$(offsite_backup::_name "$entry")")" = "true" ] && continue
+    name=${ offsite_backup::_name "$entry"; }
+    [ "${ offsite_backup::_repository_ready "$name"; }" = "true" ] && continue
     printf 'The restic repository %s does not exist yet — re-apply with MACHINEKIT_OFFSITE_BACKUP_INIT_REPOSITORY=1 to create it, or run restic init yourself (see docs/modules.md).\n' \
       "$(offsite_backup::_repository "$entry")"
   done < <(printf '%s' "$repositories" | jq -c '.[]')
@@ -205,25 +244,25 @@ offsite_backup::_validate_repositories() {
 offsite_backup::_repositories_shape_error() {
   printf '%s' "$1" | jq -r '
     if   any(.[]; (.name // "") == "") then
-      "every [[module.offsite_backup.repositories]] entry needs a name"
+      "every [module.offsite_backup.repositories.<key>] entry needs a name (the name defaults to the key)"
     elif any(.[]; ((.name | tostring) | test("^[a-z0-9_]+$") | not)) then
       "a repository name must be lowercase letters, digits, and underscores (it names secrets, files, and service units)"
-    elif ([.[].name] | length) != ([.[].name] | unique | length) then
-      "a repository name appears more than once"
     elif any(.[]; (.repository // "") == "") then
       "every repository entry needs a repository string (e.g. s3:…)"
-    elif any(.[]; ((.paths // []) | length) == 0) then
-      "every repository needs at least one [[module.offsite_backup.repositories.paths]] entry"
     else empty end'
 }
 
-# Every path entry needs a path, and a staleness deadline (when given) has to be a
-# number of hours; fail loudly rather than writing a half-usable manifest.
+# A repository needs at least one enabled path, every path entry needs a path, and
+# a staleness deadline (when given) has to be a number of hours; fail loudly
+# rather than writing a half-usable manifest. The paths arrive with disabled
+# entries already dropped, so "none" here covers a path a machine type turned off.
 offsite_backup::_validate_paths() {
-  local paths="$1" shape_error
+  local paths="$1" name="$2" shape_error
+  [ -n "$paths" ] || lifecycle::fail \
+    "offsite_backup: repository '$name' needs at least one [module.offsite_backup.repositories.<key>.paths.<key>] entry."
   shape_error=$(printf '%s' "$paths" | jq -r '
     if   any(.[]; (.path // "") == "") then
-      "every [[module.offsite_backup.repositories.paths]] entry needs a path"
+      "every [module.offsite_backup.repositories.<key>.paths.<key>] entry needs a path"
     elif any(.[]; (.max_age_hours != null) and ((.max_age_hours | tostring | test("^[0-9]+$")) | not)) then
       "max_age_hours must be a whole number of hours"
     else empty end')
@@ -245,8 +284,8 @@ offsite_backup::_install_secret_files() {
   password_secret=$(offsite_backup::_secret_name "$name" repository_password)
   offsite_backup::_write_secret_file "$(offsite_backup::_password_file_path "$name")" "$password_secret" \
     || lifecycle::fail "offsite_backup: no value resolved for the repository password secret $password_secret."
+  offsite_backup::_has_credentials "$name" || return 0
   credentials_secret=$(offsite_backup::_secret_name "$name" credentials)
-  secrets::present "$credentials_secret" || return 0
   offsite_backup::_write_secret_file "$(offsite_backup::_credentials_file_path "$name")" "$credentials_secret" \
     || lifecycle::fail "offsite_backup: the credentials secret $credentials_secret is declared but resolved to nothing."
 }
@@ -323,8 +362,8 @@ offsite_backup::_ensure_repository() {
 # an interactive yes is not answered blind.
 offsite_backup::_init_consented() {
   local repository="$1" consent
-  consent=$(context::get "offsite_backup.init_repository" --default false --coerce boolean \
-    --prompt "Create any declared restic repository that does not exist yet, starting with $repository? (y/n)")
+  consent=${ context::get "offsite_backup.init_repository" --default false --coerce boolean \
+    --prompt "Create any declared restic repository that does not exist yet, starting with $repository? (y/n)"; }
   [ "$consent" = "true" ]
 }
 
@@ -344,8 +383,10 @@ offsite_backup::_initialize_repository() {
 # environment that repository's service units are given.
 offsite_backup::_run_script_mode() {
   local mode="$1" entry="$2"
+  local common_env
   local -a repository_env
-  mapfile -t repository_env < <(offsite_backup::_common_service_env "$entry")
+  common_env=${ offsite_backup::_common_service_env "$entry"; }
+  mapfile -t repository_env <<< "$common_env"
   env "MK_OFFSITE_BACKUP_MODE=$mode" "${repository_env[@]}" "$(offsite_backup::_run_script_path)"
 }
 
@@ -357,7 +398,7 @@ offsite_backup::_common_service_env() {
   local entry="$1" name
   name=$(offsite_backup::_name "$entry")
   printf '%s\n' \
-    "MK_OFFSITE_BACKUP_NOTIFY=$(offsite_backup::_notify "$entry")" \
+    "MK_OFFSITE_BACKUP_NOTIFY=${ offsite_backup::_notify "$entry"; }" \
     "MK_OFFSITE_BACKUP_RESTIC=$(offsite_backup::_restic_path)" \
     "MK_OFFSITE_BACKUP_REPOSITORY=$(offsite_backup::_repository "$entry")" \
     "MK_OFFSITE_BACKUP_PASSWORD_FILE=$(offsite_backup::_password_file_path "$name")" \
@@ -367,18 +408,20 @@ offsite_backup::_common_service_env() {
 offsite_backup::_install_backup_service() {
   local entry="$1" name
   name=$(offsite_backup::_name "$entry")
+  local common_env
   local -a repository_env
-  mapfile -t repository_env < <(offsite_backup::_common_service_env "$entry")
+  common_env=${ offsite_backup::_common_service_env "$entry"; }
+  mapfile -t repository_env <<< "$common_env"
   service::install_calendar \
     "$(offsite_backup::_service_label "$name")" \
     "$(offsite_backup::_run_script_path)" \
-    "$(offsite_backup::_schedule "$entry")" \
+    "${ offsite_backup::_schedule "$entry"; }" \
     "MK_OFFSITE_BACKUP_MODE=backup" \
     "${repository_env[@]}" \
     "MK_OFFSITE_BACKUP_MANIFEST=$(offsite_backup::_manifest_path "$name")" \
-    "MK_OFFSITE_BACKUP_KEEP_DAILY=$(offsite_backup::_keep_daily "$entry")" \
-    "MK_OFFSITE_BACKUP_KEEP_WEEKLY=$(offsite_backup::_keep_weekly "$entry")" \
-    "MK_OFFSITE_BACKUP_KEEP_MONTHLY=$(offsite_backup::_keep_monthly "$entry")"
+    "MK_OFFSITE_BACKUP_KEEP_DAILY=${ offsite_backup::_keep_daily "$entry"; }" \
+    "MK_OFFSITE_BACKUP_KEEP_WEEKLY=${ offsite_backup::_keep_weekly "$entry"; }" \
+    "MK_OFFSITE_BACKUP_KEEP_MONTHLY=${ offsite_backup::_keep_monthly "$entry"; }"
 }
 
 # The same script on a rarer cadence: verification re-reads the repository, which
@@ -386,23 +429,25 @@ offsite_backup::_install_backup_service() {
 offsite_backup::_install_check_service() {
   local entry="$1" name
   name=$(offsite_backup::_name "$entry")
+  local common_env
   local -a repository_env
-  mapfile -t repository_env < <(offsite_backup::_common_service_env "$entry")
+  common_env=${ offsite_backup::_common_service_env "$entry"; }
+  mapfile -t repository_env <<< "$common_env"
   service::install_calendar \
-    "$(offsite_backup::_service_label "$name")-check" \
+    "$(offsite_backup::_check_service_label "$name")" \
     "$(offsite_backup::_run_script_path)" \
-    "$(offsite_backup::_check_schedule "$entry")" \
+    "${ offsite_backup::_check_schedule "$entry"; }" \
     "MK_OFFSITE_BACKUP_MODE=check" \
     "${repository_env[@]}" \
-    "MK_OFFSITE_BACKUP_READ_DATA=$(offsite_backup::_check_read_data "$entry")"
+    "MK_OFFSITE_BACKUP_READ_DATA=${ offsite_backup::_check_read_data "$entry"; }"
 }
 
 # --- config: the repository set and each entry's own fields ---
 
-# Array-of-tables; `|| true` so an unset key is an empty result (no repositories
-# is a valid no-op config), not a set -e failure.
+# Each repository's key is its name unless it sets `name`. Empty when none are
+# configured (no repositories is a valid no-op config).
 offsite_backup::_repositories() {
-  config::get "module.offsite_backup.repositories" || true
+  config::entries "module.offsite_backup.repositories" name
 }
 
 offsite_backup::_name() {
@@ -413,8 +458,13 @@ offsite_backup::_repository() {
   printf '%s' "$1" | jq -r '.repository'
 }
 
+# The repository's enabled paths, from the keyed collection nested inside it. Each
+# key is only a handle; `path` stays a field, since a filesystem path is not a
+# usable TOML key.
 offsite_backup::_paths() {
-  printf '%s' "$1" | jq -c '.paths // []'
+  local entry="$1"
+  config::entries_from_json "$(printf '%s' "$entry" | jq -c '.paths // {}')" \
+    "offsite_backup repository '$(offsite_backup::_name "$entry")' paths"
 }
 
 # --- config: settings, each cascading repository over module default ---
@@ -430,40 +480,40 @@ offsite_backup::_repository_setting() {
 
 offsite_backup::_schedule() {
   offsite_backup::_repository_setting "$1" schedule \
-    "$(config::get "module.offsite_backup.schedule" --default "$_OFFSITE_BACKUP_DEFAULT_SCHEDULE")"
+    "${ config::get "module.offsite_backup.schedule" --default "$_OFFSITE_BACKUP_DEFAULT_SCHEDULE"; }"
 }
 
 offsite_backup::_check_schedule() {
   offsite_backup::_repository_setting "$1" check_schedule \
-    "$(config::get "module.offsite_backup.check_schedule" --default "$_OFFSITE_BACKUP_DEFAULT_CHECK_SCHEDULE")"
+    "${ config::get "module.offsite_backup.check_schedule" --default "$_OFFSITE_BACKUP_DEFAULT_CHECK_SCHEDULE"; }"
 }
 
 offsite_backup::_keep_daily() {
   offsite_backup::_repository_setting "$1" keep_daily \
-    "$(config::get "module.offsite_backup.keep_daily" --default "$_OFFSITE_BACKUP_DEFAULT_KEEP_DAILY")"
+    "${ config::get "module.offsite_backup.keep_daily" --default "$_OFFSITE_BACKUP_DEFAULT_KEEP_DAILY"; }"
 }
 
 offsite_backup::_keep_weekly() {
   offsite_backup::_repository_setting "$1" keep_weekly \
-    "$(config::get "module.offsite_backup.keep_weekly" --default "$_OFFSITE_BACKUP_DEFAULT_KEEP_WEEKLY")"
+    "${ config::get "module.offsite_backup.keep_weekly" --default "$_OFFSITE_BACKUP_DEFAULT_KEEP_WEEKLY"; }"
 }
 
 offsite_backup::_keep_monthly() {
   offsite_backup::_repository_setting "$1" keep_monthly \
-    "$(config::get "module.offsite_backup.keep_monthly" --default "$_OFFSITE_BACKUP_DEFAULT_KEEP_MONTHLY")"
+    "${ config::get "module.offsite_backup.keep_monthly" --default "$_OFFSITE_BACKUP_DEFAULT_KEEP_MONTHLY"; }"
 }
 
 # Off by default: --read-data re-downloads every pack, so it is both slow and the
 # one operation with real egress cost on a paid-egress backend.
 offsite_backup::_check_read_data() {
   offsite_backup::_repository_setting "$1" check_read_data \
-    "$(config::get "module.offsite_backup.check_read_data" --default false --coerce boolean)"
+    "${ config::get "module.offsite_backup.check_read_data" --default false --coerce boolean; }"
 }
 
 # Optional notify command; empty lets the run script fall back to logger/journald.
 offsite_backup::_notify() {
   offsite_backup::_repository_setting "$1" notify \
-    "$(config::get "module.offsite_backup.notify" --default "")"
+    "${ config::get "module.offsite_backup.notify" --default ""; }"
 }
 
 # Whether install found or created this repository. Recorded by _ensure_repository
@@ -488,6 +538,16 @@ offsite_backup::_service_label() {
   printf 'offsite-backup-%s\n' "${1//_/-}"
 }
 
+# A backend that needs credentials has a credentials secret; a local or sftp
+# repository has none, and gets no credentials file.
+offsite_backup::_has_credentials() {
+  secrets::present "$(offsite_backup::_secret_name "$1" credentials)"
+}
+
+offsite_backup::_check_service_label() {
+  printf '%s-check\n' "$(offsite_backup::_service_label "$1")"
+}
+
 # The restic binary the service units pin. This module installs it, so apply's
 # PATH (brew-prepended) resolves it; the detached daemon's minimal PATH would not,
 # hence pinning the absolute path.
@@ -496,17 +556,17 @@ offsite_backup::_restic_path() {
 }
 
 offsite_backup::_password_file_path() {
-  printf '%s\n' "${XDG_CONFIG_HOME:-$HOME/.config}/machinekit/offsite_backup/$1/repository_password"
+  printf '%s\n' "${ artifacts::module_config_dir offsite_backup; }/$1/repository_password"
 }
 
 offsite_backup::_credentials_file_path() {
-  printf '%s\n' "${XDG_CONFIG_HOME:-$HOME/.config}/machinekit/offsite_backup/$1/credentials"
+  printf '%s\n' "${ artifacts::module_config_dir offsite_backup; }/$1/credentials"
 }
 
 offsite_backup::_manifest_path() {
-  printf '%s\n' "${XDG_DATA_HOME:-$HOME/.local/share}/machinekit/offsite_backup/manifest-$1.tsv"
+  printf '%s\n' "${ artifacts::module_data_dir offsite_backup; }/manifest-$1.tsv"
 }
 
 offsite_backup::_run_script_path() {
-  printf '%s\n' "${XDG_DATA_HOME:-$HOME/.local/share}/machinekit/offsite_backup/restic_run.sh"
+  printf '%s\n' "${ artifacts::module_data_dir offsite_backup; }/restic_run.sh"
 }
