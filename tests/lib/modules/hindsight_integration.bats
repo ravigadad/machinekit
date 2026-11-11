@@ -941,9 +941,8 @@ setup() {
   [ "$output" = '{"music":{"retain_mission":"m"}}' ]
 }
 
-@test "_configured_bank_names lists banks in blueprint order, not sorted" {
-  # Keys deliberately non-alphabetical so the test distinguishes keys_unsorted
-  # (blueprint order) from keys (sorted would be coding, music, personal).
+@test "_configured_bank_names lists the bank names in the order the bank configs give them" {
+  # Out of alphabetical order, so the test fails if the function sorts the names.
   STUB_OUTPUT='{"personal":{},"music":{},"coding":{}}' mktest::stub_function hindsight_integration::_bank_configs_json
   run hindsight_integration::_configured_bank_names
   [ "${lines[0]}" = "personal" ]
