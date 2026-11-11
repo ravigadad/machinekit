@@ -25,6 +25,14 @@ lifecycle::run_cleanup() {
   done
 }
 
+# Replace this process with COMMAND. exec keeps the PID and skips the EXIT trap, so
+# without running the cleanup chain first the new process would find this run's
+# lock (holding its own PID) and its context store still in place.
+lifecycle::exec() {
+  lifecycle::run_cleanup
+  exec "$@"
+}
+
 # Module-level state shared between acquire and release across the cleanup trap boundary.
 _MK_LOCK_DIR=""
 

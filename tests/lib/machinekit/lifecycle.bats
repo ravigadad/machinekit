@@ -135,6 +135,22 @@ setup() {
 
 # --- lifecycle::fail ---
 
+# --- lifecycle::exec ---
+
+@test "exec runs the cleanup chain, then replaces the process with the command" {
+  # In a bash process of its own, because exec would otherwise replace the test.
+  run "$BASH" -c '
+    source "$1/lib/machinekit/lifecycle.sh"
+    cleanup_marker="$2"
+    _mk_test_cleanup() { printf "cleaned\n" > "$cleanup_marker"; }
+    lifecycle::register_cleanup _mk_test_cleanup
+    lifecycle::exec printf "fake-command-ran"
+  ' _ "$MACHINEKIT_DIR" "$BATS_TEST_TMPDIR/cleaned"
+  [ "$status" -eq 0 ]
+  [ "$output" = "fake-command-ran" ]
+  [ "$(cat "$BATS_TEST_TMPDIR/cleaned")" = "cleaned" ]
+}
+
 @test "fail exits 1 and reports the message via logging::fail" {
   mktest::stub_function logging::fail
   run ! lifecycle::fail "something went wrong"
