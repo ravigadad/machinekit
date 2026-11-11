@@ -185,7 +185,7 @@ Shipped: turning off or deleting an entry, or dropping a module, makes the next 
 
 ### Updating machinekit itself
 
-Shipped: `machinekit update` moves machinekit's clone to its newest release, or to the tip of `main` with `update.track = "main"`, and refuses when the clone has local changes unless given `--reset`. `machinekit apply` warns when machinekit isn't on its target, and with `--auto-update` updates first. See [architecture.md § Updating machinekit](./architecture.md#updating-machinekit).
+Shipped: `machinekit update` moves machinekit's clone to its newest release, or to the tip of `main` with `update.track = "main"`, and refuses when the clone has local changes unless given `--reset`. Releases are `X.Y.Z` tags cut by `scripts/release`. `machinekit apply` warns when machinekit isn't on its target, and with `--auto-update` updates first. See [architecture.md § Updating machinekit](./architecture.md#updating-machinekit).
 
 The roadmap stops being prescriptive here. The architecture supports incremental addition; what gets added is a function of what the framework actually needs in use.
 

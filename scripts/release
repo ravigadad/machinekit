@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# Cut a machinekit release: set VERSION, commit, tag X.Y.Z and push main with the
+# tag. `machinekit update` moves machines to the highest X.Y.Z tag, so a merge to
+# main reaches them only once it is released.
+#
+# Usage: scripts/release X.Y.Z
+
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$REPO_ROOT"
+
+fail() {
+  printf 'release: %s\n' "$*" >&2
+  exit 1
+}
+
+version="${1:-}"
+[[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "give the version as X.Y.Z (got '$version')."
+
+[ "$(git branch --show-current)" = "main" ] || fail "releases are cut from main."
+[ -z "$(git status --porcelain --untracked-files=no)" ] || fail "the working tree has changes; commit or discard them first."
+
+git fetch --quiet --tags origin
+[ "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)" ] || fail "main is not the same as origin/main; pull or push first."
+
+latest_release="$(git tag --list --sort=-version:refname | grep -m 1 -E '^[0-9]+\.[0-9]+\.[0-9]+$' || true)"
+if [ -n "$latest_release" ]; then
+  highest="$(printf '%s\n%s\n' "$latest_release" "$version" | sort -V | tail -n 1)"
+  [ "$version" != "$latest_release" ] && [ "$highest" = "$version" ] \
+    || fail "$version is not higher than the latest release, $latest_release."
+fi
+
+printf '%s\n' "$version" > VERSION
+if ! git diff --quiet -- VERSION; then
+  git commit --quiet -m "Release $version" -m "Set VERSION to $version, the release machinekit update moves machines to." -- VERSION
+fi
+git tag --annotate "$version" --message "machinekit $version"
+git push --quiet --atomic origin main "$version"
+printf 'release: %s is tagged and pushed.\n' "$version" >&2

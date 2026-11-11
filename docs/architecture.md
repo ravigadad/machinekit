@@ -160,7 +160,7 @@ Once preflight verifies sudo, machinekit forks a background keep-alive that re-v
 
 ### Updating machinekit
 
-machinekit's own code is a git clone, by default at `~/.local/share/machinekit/framework`. `machinekit update` moves that clone to its **update target**: the highest `X.Y.Z` release tag, or the tip of `origin/main` when `update.track = "main"` (an input like any other, so `MACHINEKIT_UPDATE_TRACK` or the per-user defaults file sets it). The clone sits detached at its target, and an update fetches tags and checks the new target out.
+machinekit's own code is a git clone, by default at `~/.local/share/machinekit/framework`. `machinekit update` moves that clone to its **update target**: the highest `X.Y.Z` release tag, or the tip of `origin/main` when `update.track = "main"` (an input like any other, so `MACHINEKIT_UPDATE_TRACK` or the per-user defaults file sets it). A release is cut by `scripts/release X.Y.Z`, which sets `VERSION`, commits, tags and pushes, so a merge to `main` reaches machines on the release track only once it is released. The clone sits detached at its target, and an update fetches tags and checks the new target out.
 
 An update refuses when the clone has changes to tracked files or commits that origin has under no branch or tag, and lists them. `--reset` discards the changes and checks the target out anyway; untracked files and local branches stay.
 
