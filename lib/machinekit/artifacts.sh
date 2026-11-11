@@ -78,14 +78,14 @@ artifacts::record_path() {
 artifacts::_declared() {
   local defining_modules mod declarations line lines=""
   defining_modules=${ modules::active_defining installed_artifacts; }
-  while IFS= read -r mod; do
+  while IFS= read -u 3 -r mod; do
     [ -n "$mod" ] || continue
     declarations=${ set -e; "${mod}::installed_artifacts"; }
-    while IFS= read -r line; do
+    while IFS= read -u 4 -r line; do
       [ -n "$line" ] || continue
       lines+="$mod"$'\t'"$line"$'\n'
-    done <<< "$declarations"
-  done <<< "$defining_modules"
+    done 4<<< "$declarations"
+  done 3<<< "$defining_modules"
   artifacts::_items_json "${lines%$'\n'}"
 }
 
@@ -116,10 +116,10 @@ artifacts::_leftovers() {
 artifacts::_leftover_services() {
   local labels label lines=""
   labels=${ service::installed_labels; }
-  while IFS= read -r label; do
+  while IFS= read -u 3 -r label; do
     [ -n "$label" ] || continue
     lines+=$'\t'"service"$'\t'"$label"$'\n'
-  done <<< "$labels"
+  done 3<<< "$labels"
   artifacts::_items_json "${lines%$'\n'}"
 }
 
@@ -130,10 +130,10 @@ artifacts::_leftover_services() {
 artifacts::_leftover_files() {
   local defining_modules mod patterns where pattern module_dir path lines=""
   defining_modules=${ modules::defining installed_file_patterns; }
-  while IFS= read -r mod; do
+  while IFS= read -u 3 -r mod; do
     [ -n "$mod" ] || continue
     patterns=${ "${mod}::installed_file_patterns"; }
-    while IFS=$'\t' read -r where pattern; do
+    while IFS=$'\t' read -u 4 -r where pattern; do
       [ -n "$pattern" ] || continue
       case "$where" in
         data) module_dir=${ artifacts::module_data_dir "$mod"; } ;;
@@ -146,8 +146,8 @@ artifacts::_leftover_files() {
         [ -f "$path" ] || continue
         lines+="$mod"$'\t'"file"$'\t'"$path"$'\n'
       done
-    done <<< "$patterns"
-  done <<< "$defining_modules"
+    done 4<<< "$patterns"
+  done 3<<< "$defining_modules"
   artifacts::_items_json "${lines%$'\n'}"
 }
 
@@ -168,10 +168,10 @@ artifacts::_report_stale() {
   local stale="$1" item
   [ "$stale" = "[]" ] && return 0
   logging::info "Installed but no longer configured (removal asks first):"
-  while IFS= read -r item; do
+  while IFS= read -u 3 -r item; do
     [ -n "$item" ] || continue
     logging::info "  ${ artifacts::_describe "$item"; }"
-  done <<< "$(jq -c '.[]' <<< "$stale")"
+  done 3<<< "$(jq -c '.[]' <<< "$stale")"
 }
 
 artifacts::_describe() {
@@ -184,7 +184,7 @@ artifacts::_describe() {
 # A removal's own output goes to stderr so it can't end up in that list.
 artifacts::_remove_each() {
   local stale="$1" item kept=""
-  while IFS= read -r item; do
+  while IFS= read -u 3 -r item; do
     [ -n "$item" ] || continue
     if artifacts::_remove "$item" >&2; then
       logging::success "removed ${ artifacts::_describe "$item"; }"
@@ -192,7 +192,7 @@ artifacts::_remove_each() {
       logging::warn "could not remove ${ artifacts::_describe "$item"; }; it is kept and offered again on the next apply."
       kept+="$item"$'\n'
     fi
-  done <<< "$(jq -c '.[]' <<< "$stale")"
+  done 3<<< "$(jq -c '.[]' <<< "$stale")"
   jq -sc . <<< "$kept"
 }
 

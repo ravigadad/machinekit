@@ -64,7 +64,7 @@ home::dry_run::_show_interactive_diff() {
 home::dry_run::_generate_diff() {
   local tmp_out="$1"
   local out_path rel_path dest_path
-  while IFS= read -r out_path; do
+  while IFS= read -u 3 -r out_path; do
     rel_path="${out_path#"$tmp_out"/}"
     # The preview mirrors the absolute destination with the leading slash
     # stripped; re-add it to recover the real path.
@@ -74,7 +74,7 @@ home::dry_run::_generate_diff() {
     elif ! diff -q "$out_path" "$dest_path" >/dev/null 2>&1; then
       git diff --no-index --color=always "$dest_path" "$out_path" 2>/dev/null || true
     fi
-  done < <(find "$tmp_out" -type f | sort)
+  done 3< <(find "$tmp_out" -type f | sort)
 }
 
 home::dry_run::_page_diff() {
@@ -88,7 +88,7 @@ home::dry_run::_page_diff() {
 home::dry_run::_show_plain_diff() {
   local tmp_out="$1"
   local has_changes=0 out_path rel_path dest_path
-  while IFS= read -r out_path; do
+  while IFS= read -u 3 -r out_path; do
     rel_path="${out_path#"$tmp_out"/}"
     # The preview mirrors the absolute destination with the leading slash
     # stripped; re-add it to recover the real path.
@@ -100,7 +100,7 @@ home::dry_run::_show_plain_diff() {
       git diff --no-index --no-color "$dest_path" "$out_path" 2>/dev/null || true
       has_changes=1
     fi
-  done < <(find "$tmp_out" -type f | sort)
+  done 3< <(find "$tmp_out" -type f | sort)
   if [ "$has_changes" = "0" ]; then
     logging::info "No changes to home files."
   fi

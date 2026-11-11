@@ -61,10 +61,10 @@ git_backup::preflight() {
 git_backup::declared_secrets() {
   local name key_names
   key_names=${ git_backup::_referenced_key_names; }
-  while IFS= read -r name; do
+  while IFS= read -u 3 -r name; do
     [ -n "$name" ] || continue
     printf '%s\ttrue\tfalse\n' "$(git_backup::_secret_name "$name")"
-  done <<< "$key_names"
+  done 3<<< "$key_names"
 }
 
 # The names of every file install may put in this module's own dirs, whatever the
@@ -85,10 +85,10 @@ git_backup::installed_artifacts() {
   printf 'service\t%s\n' "$_GIT_BACKUP_SERVICE_LABEL"
   printf 'file\t%s\n' "$(git_backup::_manifest_path)" "$(git_backup::_push_script_path)"
   key_names=${ git_backup::_referenced_key_names; }
-  while IFS= read -r name; do
+  while IFS= read -u 3 -r name; do
     [ -n "$name" ] || continue
     printf 'file\t%s\n' "$(git_backup::_key_path "$name")"
-  done <<< "$key_names"
+  done 3<<< "$key_names"
 }
 
 # Install the keys, write the manifest, lay down the push script, and schedule the
@@ -122,12 +122,12 @@ git_backup::postflight_info() {
   [ -n "$folders" ] || return 0
   interval=${ git_backup::_interval; }
   cadence=$(git_backup::_human_interval "$interval")
-  while IFS= read -r folder; do
+  while IFS= read -u 3 -r folder; do
     [ -n "$folder" ] || continue
     path=$(printf '%s' "$folder" | jq -r '.path')
     remote=$(printf '%s' "$folder" | jq -r '.remote')
     printf 'Backing up %s → %s every %s.\n' "$path" "$remote" "$cadence"
-  done < <(printf '%s' "$folders" | jq -c '.[]')
+  done 3< <(printf '%s' "$folders" | jq -c '.[]')
 }
 
 # Render an interval in seconds as a friendly whole unit (3600 → 1h, 1800 → 30m,
@@ -161,7 +161,7 @@ git_backup::_validate_folders() {
 # rather than mid-install.
 git_backup::_validate_ignores() {
   local folders="$1" folder path manage add_defaults patterns pattern_count
-  while IFS= read -r folder; do
+  while IFS= read -u 3 -r folder; do
     [ -n "$folder" ] || continue
     path=$(printf '%s' "$folder" | jq -r '.path // "?"')
     manage=$(printf '%s' "$folder" | jq -r 'if .manage_gitignore == null then true else .manage_gitignore end')
@@ -174,7 +174,7 @@ git_backup::_validate_ignores() {
     if [ "$manage" = "true" ] && [ "$add_defaults" != "true" ] && [ "$pattern_count" -eq 0 ]; then
       logging::warn "git_backup: folder '$path' manages .gitignore with no defaults and no ignore patterns — only an empty managed block will be written."
     fi
-  done < <(printf '%s' "$folders" | jq -c '.[]')
+  done 3< <(printf '%s' "$folders" | jq -c '.[]')
   return 0
 }
 
@@ -183,21 +183,21 @@ git_backup::_validate_ignores() {
 git_backup::_validate_keys() {
   local name key_names
   key_names=${ git_backup::_referenced_key_names; }
-  while IFS= read -r name; do
+  while IFS= read -u 3 -r name; do
     [ -n "$name" ] || continue
     secrets::present "$(git_backup::_secret_name "$name")" || lifecycle::fail \
       "git_backup: ssh_key '$name' is configured but no secret named $(git_backup::_secret_name "$name") — see docs/modules.md (git_backup)."
-  done <<< "$key_names"
+  done 3<<< "$key_names"
   return 0
 }
 
 git_backup::_install_keys() {
   local name key_names
   key_names=${ git_backup::_referenced_key_names; }
-  while IFS= read -r name; do
+  while IFS= read -u 3 -r name; do
     [ -n "$name" ] || continue
     git_backup::_install_key "$name"
-  done <<< "$key_names"
+  done 3<<< "$key_names"
 }
 
 # Resolve one named ssh key to a private (600) file under a private (700) dir,
@@ -224,10 +224,10 @@ git_backup::_write_manifest() {
   folders=${ git_backup::_folders; }
   [ -n "$folders" ] || return 0
   default_ssh_key=${ git_backup::_default_ssh_key; }
-  while IFS= read -r folder; do
+  while IFS= read -u 3 -r folder; do
     [ -n "$folder" ] || continue
     git_backup::_manifest_row "$folder" "$default_ssh_key" >> "$manifest"
-  done < <(printf '%s' "$folders" | jq -c '.[]')
+  done 3< <(printf '%s' "$folders" | jq -c '.[]')
 }
 
 # One manifest row (path<TAB>remote<TAB>ssh_key_path) for a folder. ssh_key falls
@@ -246,12 +246,12 @@ git_backup::_apply_gitignores() {
   local folders folder path
   folders=${ git_backup::_folders; }
   [ -n "$folders" ] || return 0
-  while IFS= read -r folder; do
+  while IFS= read -u 3 -r folder; do
     [ -n "$folder" ] || continue
     path=$(printf '%s' "$folder" | jq -r '.path')
     path=${path/#\~/$HOME}
     git_backup::_apply_gitignore "$folder" "$path"
-  done < <(printf '%s' "$folders" | jq -c '.[]')
+  done 3< <(printf '%s' "$folders" | jq -c '.[]')
 }
 
 # Reconcile a folder's .gitignore — but only if the folder already exists, since

@@ -177,7 +177,7 @@ infisical::_verify_explicit_references() {
     key_sets_by_project_env_path["$default_project_id/$default_environment//"]="$_INFISICAL_SECRET_NAMES"
   fi
   references=${ infisical::_configured_references; }
-  while IFS= read -r reference; do
+  while IFS= read -u 3 -r reference; do
     [ -n "$reference" ] || continue
     infisical::_reference_wellformed "$reference" \
       || lifecycle::fail "infisical: malformed reference '$reference' in [secrets.manager_refs] — expected infisical://<projectId>/<env>/[<path>/]<name>."
@@ -189,7 +189,7 @@ infisical::_verify_explicit_references() {
     if grep -Fxq -- "$name" <<< "${key_sets_by_project_env_path[$cache_key]}"; then
       _INFISICAL_VERIFIED_REFERENCES+="${_INFISICAL_VERIFIED_REFERENCES:+$'\n'}$reference"
     fi
-  done <<< "$references"
+  done 3<<< "$references"
 }
 
 # The explicit infisical:// references configured in [secrets.manager_refs], one

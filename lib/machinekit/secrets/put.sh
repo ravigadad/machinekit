@@ -118,13 +118,13 @@ secrets::put::_pick() {
   [ -n "$rows" ] || lifecycle::fail "secrets: no declared secrets to choose from — give a <name> argument."
   local -a names=()
   local count=0 name state
-  while IFS=$'\t' read -r name _ _ state; do
+  while IFS=$'\t' read -u 3 -r name _ _ state; do
     [ -n "$name" ] || continue
     # The age key is manager-/file-sourced, never pool-filed — don't offer it.
     [ "$name" = "$_MK_SECRETS_AGE_KEY_NAME" ] && continue
     count=$((count + 1)); names+=("$name")
     printf '%3d) %s  [%s]\n' "$count" "$name" "$state" >&2
-  done <<< "$rows"
+  done 3<<< "$rows"
   [ "$count" -gt 0 ] || lifecycle::fail "secrets: no pool-fileable secrets to choose from — give a <name> argument."
   local choice
   printf 'Select a secret to provide [1-%d]: ' "$count" >&2

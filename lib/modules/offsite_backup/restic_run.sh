@@ -81,14 +81,14 @@ restic_run::export_credentials() {
 # no trailing newline.
 restic_run::export_key_value_file() {
   local file="$1" line key value
-  while IFS= read -r line || [ -n "$line" ]; do
+  while IFS= read -u 3 -r line || [ -n "$line" ]; do
     case "$line" in ''|'#'*) continue ;; esac
     key=${line%%=*}
     value=${line#*=}
     [ "$key" != "$line" ] || continue
     [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
     export "${key}=${value}"
-  done < "$file"
+  done 3< "$file"
 }
 
 restic_run::restic() {
@@ -106,10 +106,10 @@ restic_run::backup_path() {
 restic_run::forget() {
   local -a keep_options=()
   local option
-  while IFS= read -r option; do
+  while IFS= read -u 3 -r option; do
     [ -n "$option" ] || continue
     keep_options+=("$option")
-  done < <(restic_run::keep_options)
+  done 3< <(restic_run::keep_options)
   [ "${#keep_options[@]}" -gt 0 ] || return 0
   restic_run::restic forget --tag "$_RESTIC_RUN_TAG" --prune "${keep_options[@]}"
 }
@@ -148,14 +148,14 @@ restic_run::has_recent_file() {
 restic_run::backup_all() {
   local manifest="${MK_OFFSITE_BACKUP_MANIFEST:?MK_OFFSITE_BACKUP_MANIFEST required}"
   local path max_age_hours failures=0
-  while IFS=$'\t' read -r path max_age_hours; do
+  while IFS=$'\t' read -u 3 -r path max_age_hours; do
     [ -n "$path" ] || continue
     restic_run::backup_path "$path" || {
       restic_run::notify "offsite_backup: backup failed for $path."
       failures=$((failures + 1))
     }
     restic_run::warn_if_stale "$path" "$max_age_hours" || failures=$((failures + 1))
-  done < "$manifest"
+  done 3< "$manifest"
   restic_run::forget || {
     restic_run::notify "offsite_backup: prune failed; snapshots outside the keep policy are still there."
     failures=$((failures + 1))

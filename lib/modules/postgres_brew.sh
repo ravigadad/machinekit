@@ -104,7 +104,7 @@ postgres_brew::_install_default() {
 postgres_brew::_assert_compatible_with_installed() {
   local requested="$1" installed_versions v requested_port actual_port
   installed_versions=${ postgres_brew::introspect::installed_versions; }
-  while IFS= read -r v; do
+  while IFS= read -u 3 -r v; do
     [ -n "$v" ] || continue
     requested_port="$(printf '%s' "$requested" | jq -r --arg v "$v" \
       '.[] | select((.version|tostring) == $v) | (.port|tostring)')"
@@ -115,19 +115,19 @@ postgres_brew::_assert_compatible_with_installed() {
     actual_port=${ postgres_brew::introspect::configured_port "$v"; }
     [ "$requested_port" = "$actual_port" ] || lifecycle::fail \
       "postgres: postgresql@$v is on port $actual_port; machinekit will not change an installed cluster's port to the requested $requested_port."
-  done <<< "$installed_versions"
+  done 3<<< "$installed_versions"
 }
 
 postgres_brew::_ensure_requested() {
   local requested="$1" v port
-  while IFS=$'\t' read -r v port; do
+  while IFS=$'\t' read -u 3 -r v port; do
     [ -n "$v" ] || continue
     if postgres_brew::introspect::is_installed "$v"; then
       postgres_brew::_ensure_running "$v"
     else
       postgres_brew::_install_on_port "$v" "$port"
     fi
-  done < <(postgres::_requested_version_rows "$requested")
+  done 3< <(postgres::_requested_version_rows "$requested")
 }
 
 # A freshly brew-installed cluster defaults to 5432 (commented). For any other
@@ -157,11 +157,11 @@ postgres_brew::_assert_port_not_foreign() {
 postgres_brew::_port_is_my_cluster() {
   local port="$1" installed_versions major data_dir
   installed_versions=${ postgres_brew::introspect::installed_versions; }
-  while IFS= read -r major; do
+  while IFS= read -u 3 -r major; do
     [ -n "$major" ] || continue
     data_dir=${ postgres_brew::introspect::data_dir "$major"; }
     [ "${ postgres::_datadir_port "$data_dir"; }" = "$port" ] && return 0
-  done <<< "$installed_versions"
+  done 3<<< "$installed_versions"
   return 1
 }
 

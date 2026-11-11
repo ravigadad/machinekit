@@ -105,13 +105,13 @@ secrets::backend_for() {
 # before any module installs.
 secrets::backend_requirements() {
   local name needs_age=0 needs_manager=0
-  while IFS= read -r name; do
+  while IFS= read -u 3 -r name; do
     [ -n "$name" ] || continue
     case "${ secrets::_local_signal "$name"; }" in
       ref)  needs_manager=1 ;;
       pool) needs_age=1 ;;
     esac
-  done
+  done 3<&0 </dev/null
   [ "$needs_age" = 1 ] && printf 'age\n'
   [ "$needs_manager" = 1 ] && printf 'secrets_manager\n'
   return 0
@@ -176,9 +176,9 @@ secrets::in_pool() {
   blueprint_dir=${ blueprints::dir; }
   pool_dir="$blueprint_dir/$_MK_SECRETS_POOL_REL"
   [ -d "$pool_dir" ] || return 0
-  while IFS= read -r file; do
+  while IFS= read -u 3 -r file; do
     printf '%s\n' "${file#"$blueprint_dir"/}"
-  done < <(find "$pool_dir" -type f -name '*.age' | sort)
+  done 3< <(find "$pool_dir" -type f -name '*.age' | sort)
 }
 
 # secrets::needed — every named secret the active modules declare they will use,
@@ -202,19 +202,19 @@ secrets::inventory() {
   local name req gen state needed sorted_names
   needed=${ secrets::needed; }
 
-  while IFS=$'\t' read -r name req gen; do
+  while IFS=$'\t' read -u 3 -r name req gen; do
     [ -n "$name" ] || continue
     required["$name"]="$req"
     can_be_generated["$name"]="$gen"
-  done <<< "$needed"
+  done 3<<< "$needed"
 
   sorted_names=${ printf '%s\n' "${!required[@]}" | sort; }
-  while IFS= read -r name; do
+  while IFS= read -u 3 -r name; do
     [ -n "$name" ] || continue
     state=${ secrets::backend_for "$name"; }
     [ "$state" = "none" ] && state="missing"
     printf '%s\t%s\t%s\t%s\n' "$name" "${required[$name]}" "${can_be_generated[$name]}" "$state"
-  done <<< "$sorted_names"
+  done 3<<< "$sorted_names"
 }
 
 # secrets::orphans — pool files no active module's declared name accounts for,
@@ -225,17 +225,17 @@ secrets::orphans() {
   local -A declared=()
   local name path bare needed pool_paths
   needed=${ secrets::needed; }
-  while IFS=$'\t' read -r name _; do
+  while IFS=$'\t' read -u 3 -r name _; do
     [ -n "$name" ] || continue
     declared["$name"]=1
-  done <<< "$needed"
+  done 3<<< "$needed"
   pool_paths=${ secrets::in_pool; }
-  while IFS= read -r path; do
+  while IFS= read -u 3 -r path; do
     [ -n "$path" ] || continue
     bare="${path#"$_MK_SECRETS_POOL_REL"/}"
     bare="${bare%.age}"
     [ -n "${declared[$bare]:-}" ] || printf '%s\n' "$path"
-  done <<< "$pool_paths"
+  done 3<<< "$pool_paths"
 }
 
 # secrets::blueprints_dir — the local blueprint working tree `secrets put` writes

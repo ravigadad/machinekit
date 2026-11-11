@@ -62,15 +62,15 @@ home::transforms::register() {
 home::transforms::register_from_modules() {
   local defining_modules mod line fields
   defining_modules=${ modules::active_defining file_transforms; }
-  while IFS= read -r mod; do
+  while IFS= read -u 3 -r mod; do
     [ -z "$mod" ] && continue
-    while IFS= read -r line; do
+    while IFS= read -u 4 -r line; do
       [ -z "$line" ] && continue
       read -r -a fields <<< "$line"
       [ "${#fields[@]}" -eq 3 ] || lifecycle::fail "home::transforms: ${mod}::file_transforms emitted a malformed line (expected 'ext tier fn'): '$line'"
       home::transforms::register "${fields[0]}" "${fields[1]}" "${fields[2]}"
-    done < <("${mod}::file_transforms")
-  done <<< "$defining_modules"
+    done 4< <("${mod}::file_transforms")
+  done 3<<< "$defining_modules"
 }
 
 # lookup EXT — print "TIER FN" for a registered extension; nonzero if unknown.

@@ -21,22 +21,22 @@ agents_config_harnesses::openclaw::requires() {
 agents_config_harnesses::openclaw::project() {
   local agents_config_dir="$1" workspace entry source
   workspace="$(agents_config_harnesses::openclaw::_workspace_dir)"
-  while IFS= read -r entry; do
+  while IFS= read -u 3 -r entry; do
     source="$agents_config_dir/$entry"
     [ -e "$source" ] || continue
     agents_config_harnesses::_ensure_link "$workspace/$entry" "$source"
-  done < <(agents_config_harnesses::openclaw::_projected_entries)
+  done 3< <(agents_config_harnesses::openclaw::_projected_entries)
 }
 
 agents_config_harnesses::openclaw::projection_present() {
   local agents_config_dir="$1" workspace entry source
   workspace="$(agents_config_harnesses::openclaw::_workspace_dir)"
   [ -d "$workspace" ] || return 0
-  while IFS= read -r entry; do
+  while IFS= read -u 3 -r entry; do
     source="$agents_config_dir/$entry"
     [ -e "$source" ] || continue
     agents_config_harnesses::_link_present "$workspace/$entry" "$source" || return 1
-  done < <(agents_config_harnesses::openclaw::_projected_entries)
+  done 3< <(agents_config_harnesses::openclaw::_projected_entries)
   return 0
 }
 

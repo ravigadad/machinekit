@@ -62,7 +62,7 @@ postflight::_module_group() {
   local hook="$1" heading="$2" module_color="$3"
   local defining_modules module facts line heading_printed=0
   defining_modules=${ modules::active_defining "$hook"; }
-  while IFS= read -r module; do
+  while IFS= read -u 3 -r module; do
     [ -n "$module" ] || continue
     facts=${ "${module}::${hook}"; }
     [ -n "$facts" ] || continue
@@ -71,10 +71,10 @@ postflight::_module_group() {
       heading_printed=1
     fi
     logging::info "${module_color}${module}${MK_COLOR_RESET}"
-    while IFS= read -r line; do
+    while IFS= read -u 4 -r line; do
       logging::info "  $line"
-    done <<< "$facts"
-  done <<< "$defining_modules"
+    done 4<<< "$facts"
+  done 3<<< "$defining_modules"
 }
 
 postflight::_print_exec_hint() {

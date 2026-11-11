@@ -31,21 +31,21 @@ managed_block::ensure() {
 
   if [ -f "$file" ]; then
     number=0
-    while IFS= read -r line || [ -n "$line" ]; do
+    while IFS= read -u 3 -r line || [ -n "$line" ]; do
       number=$((number + 1))
       if [ "$begin_line" -eq 0 ] && [ "$line" = "$begin" ]; then
         begin_line=$number
       elif [ "$begin_line" -ne 0 ] && [ "$end_line" -eq 0 ] && [ "$line" = "$end" ]; then
         end_line=$number
       fi
-    done < "$file"
+    done 3< "$file"
   fi
   [ "$begin_line" -ne 0 ] && [ "$end_line" -ne 0 ] && has_region=1
 
   tmp=$(mktemp "${TMPDIR:-/tmp}/machinekit-managed-block.XXXXXX")
   if [ -f "$file" ]; then
     number=0
-    while IFS= read -r line || [ -n "$line" ]; do
+    while IFS= read -u 3 -r line || [ -n "$line" ]; do
       number=$((number + 1))
       if [ "$has_region" -eq 1 ] && [ "$number" -ge "$begin_line" ] && [ "$number" -le "$end_line" ]; then
         [ "$number" -eq "$begin_line" ] && managed_block::_emit "$begin" "$body" "$end" >> "$tmp"
@@ -55,7 +55,7 @@ managed_block::ensure() {
         continue
       fi
       printf '%s\n' "$line" >> "$tmp"
-    done < "$file"
+    done 3< "$file"
   fi
   [ "$has_region" -eq 0 ] && managed_block::_emit "$begin" "$body" "$end" >> "$tmp"
 

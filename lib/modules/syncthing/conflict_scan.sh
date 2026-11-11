@@ -39,10 +39,10 @@ conflict_scan::find_in_folder() {
 conflict_scan::main() {
   local manifest="${MK_SYNCTHING_CONFLICT_MANIFEST:?MK_SYNCTHING_CONFLICT_MANIFEST required}"
   local folder conflicts=""
-  while IFS= read -r folder; do
+  while IFS= read -u 3 -r folder; do
     [ -n "$folder" ] || continue
     conflicts+="$(conflict_scan::find_in_folder "$folder")"$'\n'
-  done < "$manifest"
+  done 3< "$manifest"
   conflicts=$(printf '%s' "$conflicts" | awk 'NF')
   [ -n "$conflicts" ] || return 0
   conflict_scan::notify "syncthing: unresolved sync-conflict files:

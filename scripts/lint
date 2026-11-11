@@ -27,3 +27,17 @@ shellcheck \
 # call a logging helper with no args.
 shellcheck --exclude=SC2030,SC2031,SC2119 \
   tests/**/*.bats
+
+# A while-read loop reads its items from a descriptor of its own (`read -u 3`,
+# `done 3<<< …`), never from stdin. Every command in the loop body inherits
+# stdin, so one that reads it would swallow the remaining items and end the loop
+# early without an error.
+loops_on_stdin="$(git ls-files 'bin/*' 'libexec/*' 'lib/*.sh' 'scripts/*' install.sh \
+  | grep -v '/templates/' \
+  | xargs grep -nE '^[^#]*\bwhile[[:space:]][^#]*\bread[[:space:]]' \
+  | grep -vE '\bread\b[^;]*-u [0-9]' || true)"
+if [ -n "$loops_on_stdin" ]; then
+  printf '%s\n' "$loops_on_stdin" >&2
+  echo "lint: these while-read loops read stdin; read with 'read -u N' from the loop's own descriptor instead." >&2
+  exit 1
+fi

@@ -98,12 +98,12 @@ hindsight_integration::claude_code::_retain_config_json() {
 hindsight_integration::claude_code::_register_mcp_servers() {
   local url="$1" token="$2" tools_banks="$3" bank base
   base="${url%/}"
-  while IFS= read -r bank; do
+  while IFS= read -u 3 -r bank; do
     [ -n "$bank" ] || continue
     hindsight_integration::claude_code::_mcp_server_present "$bank" && continue
     claude mcp add -s user -t http "hindsight-$bank" "$base/mcp/$bank/" \
       --header "Authorization: Bearer $token"
-  done <<< "$tools_banks"
+  done 3<<< "$tools_banks"
 }
 
 hindsight_integration::claude_code::_mcp_server_present() {
