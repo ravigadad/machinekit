@@ -11,36 +11,39 @@ if ! command -v shellcheck >/dev/null 2>&1; then
   exit 1
 fi
 
-# Without globstar, ** matches one directory level only.
-shopt -s globstar
+# Without globstar, ** matches one directory level only. nullglob drops a
+# pattern that matches nothing instead of passing it on as a literal path.
+shopt -s globstar nullglob
 
 # Production code and shared test infra are linted strictly (default severity).
-shellcheck \
-  bin/* \
-  libexec/* \
-  install.sh \
-  lib/**/*.sh \
-  scripts/* \
-  tests/**/*.sh \
-  tests/vm/cases/* \
-  tests/vm/run \
+strict_files=(
+  bin/*
+  libexec/*
+  install.sh
+  lib/**/*.sh
+  scripts/*
+  tests/**/*.sh
+  tests/vm/cases/*
+  tests/vm/run
   tests/test_helper.bash
+)
+bats_files=(tests/**/*.bats)
+
+shellcheck "${strict_files[@]}"
 
 # bats runs each @test in its own subshell, so SC2030/SC2031 ("modification in
 # subshell might be lost") are inherent false positives in test files — the
 # scoping is the point. SC2119 likewise fires on fixtures that intentionally
 # call a logging helper with no args, and SC2329 ("never invoked") on stub
 # functions the code under test calls.
-shellcheck --exclude=SC2030,SC2031,SC2119,SC2329 \
-  tests/**/*.bats
+shellcheck --exclude=SC2030,SC2031,SC2119,SC2329 "${bats_files[@]}"
 
 # A while-read loop reads its items from a descriptor of its own (`read -u 3`,
 # `done 3<<< …`), never from stdin. Every command in the loop body inherits
 # stdin, so one that reads it would swallow the remaining items and end the loop
 # early without an error.
-loops_on_stdin="$(git ls-files 'bin/*' 'libexec/*' 'lib/*.sh' 'scripts/*' install.sh \
-  | grep -v '/templates/' \
-  | xargs grep -nE '^[^#]*\bwhile[[:space:]][^#]*\bread[[:space:]]' \
+loops_on_stdin="$(grep -nE '^[^#]*\bwhile[[:space:]][^#]*\bread[[:space:]]' \
+    "${strict_files[@]}" "${bats_files[@]}" \
   | grep -vE '\bread\b[^;]*-u [0-9]' || true)"
 if [ -n "$loops_on_stdin" ]; then
   printf '%s\n' "$loops_on_stdin" >&2
