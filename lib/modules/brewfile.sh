@@ -46,7 +46,7 @@ brewfile::_diff() {
   installed_formulae=${ brew::_installed formula; }
   installed_casks=${ brew::_installed cask; }
 
-  while IFS= read -r line; do
+  while IFS= read -u 3 -r line; do
     line="${line%%#*}"
     [[ "$line" =~ [^[:space:]] ]] || continue
 
@@ -55,7 +55,7 @@ brewfile::_diff() {
     elif [[ "$line" =~ ^[[:space:]]*cask[[:space:]]+[\"\']([^\"\']+)[\"\'] ]]; then
       brewfile::_report_entry "cask" "${BASH_REMATCH[1]}" "$installed_casks"
     fi
-  done < "$brewfile"
+  done 3< "$brewfile"
 }
 
 brewfile::_report_entry() {

@@ -331,6 +331,8 @@ setup() {
 }
 
 @test "_manifest_row expands a leading ~ in the module default directory" {
+  # A literal ~, as a blueprint writes it, for the code under test to expand.
+  # shellcheck disable=SC2088
   run postgres_dump::_manifest_row '{"name":"somedb"}' "~/dumps" "7"
   [ "$output" = "$(printf 'somedb\t%s/dumps\t7' "$HOME")" ]
 }

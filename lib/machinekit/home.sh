@@ -82,7 +82,7 @@ home::_build_plan() {
 
   local records src src_rel dest key private suppressed
   records=${
-    while IFS= read -r src; do
+    while IFS= read -u 3 -r src; do
       src_rel="${src#"$staging"/}"
       home::_decode_path "$src_rel"
       home::transforms::resolve "$_MK_HOME_DEST_PATH"
@@ -103,7 +103,7 @@ home::_build_plan() {
         --argjson suppressed "$suppressed" \
         '{src:$src, src_rel:$src_rel, dest:$dest, key:$key, private:$private, suppressed:$suppressed, pipeline:$ARGS.positional}' \
         --args "${_MK_HOME_TRANSFORM_PIPELINE[@]}"
-    done < <(find "$staging" -type f | sort)
+    done 3< <(find "$staging" -type f | sort)
   }
   jq -s '.' <<<"$records"
 }
@@ -121,12 +121,12 @@ home::_each_planned_file() {
 
   local src src_rel dest key private suppressed pipeline_str
   local -a pipeline
-  while IFS=$'\t' read -r src src_rel dest key private suppressed pipeline_str; do
+  while IFS=$'\t' read -u 3 -r src src_rel dest key private suppressed pipeline_str; do
     # Pipeline elements are handler function names (space-free), so the plan's
     # join(" ") and this split round-trip losslessly.
     IFS=' ' read -ra pipeline <<< "$pipeline_str"
     "$callback" "$@" "$src" "$src_rel" "$dest" "$key" "$private" "$suppressed" "${pipeline[@]}"
-  done < <(jq -r '.[] | [.src, .src_rel, .dest, .key, (if .private then "1" else "0" end), (.suppressed | tostring), (.pipeline | join(" "))] | @tsv' <<<"$plan")
+  done 3< <(jq -r '.[] | [.src, .src_rel, .dest, .key, (if .private then "1" else "0" end), (.suppressed | tostring), (.pipeline | join(" "))] | @tsv' <<<"$plan")
 }
 
 # --- _apply and helpers ---

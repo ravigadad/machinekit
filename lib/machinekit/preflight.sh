@@ -59,16 +59,16 @@ preflight::resolve_active_modules() {
   local requested=("${MK_BASE_MODULES[@]}") mod config_json module_list
   config_json=${ config::get_json "" "{}"; }
   module_list=${ config::extended_list "$config_json" modules after "machinekit.toml"; }
-  while IFS= read -r mod; do
+  while IFS= read -u 3 -r mod; do
     [ -n "$mod" ] || continue
     requested+=("$mod")
-  done < <(printf '%s' "$module_list" | jq -r '.[]')
+  done 3< <(printf '%s' "$module_list" | jq -r '.[]')
 
   local ordered=() resolved
   resolved=${ resolver::resolve "${requested[@]}"; }
-  while IFS= read -r mod; do
+  while IFS= read -u 3 -r mod; do
     ordered+=("$mod")
-  done <<< "$resolved"
+  done 3<<< "$resolved"
 
   context::set_array "modules.active" "${ordered[@]}"
   logging::info "Active modules: $(IFS=', '; printf '%s' "${ordered[*]}")"

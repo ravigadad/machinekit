@@ -68,12 +68,12 @@ postgres_brew::introspect::is_running() {
 postgres_brew::introspect::instance_version() {
   local installed_versions v
   installed_versions=${ postgres_brew::introspect::installed_versions; }
-  while IFS= read -r v; do
+  while IFS= read -u 3 -r v; do
     [ -n "$v" ] || continue
     if postgres_brew::introspect::is_initialized "$v" && [ "${ postgres_brew::introspect::configured_port "$v"; }" = "5432" ]; then
       printf '%s\n' "$v"
       return 0
     fi
-  done <<< "$installed_versions"
+  done 3<<< "$installed_versions"
   return 1
 }

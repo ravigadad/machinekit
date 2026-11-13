@@ -94,9 +94,9 @@ push::anchor_to_origin() {
 # working tree actually modified are not "deleted", so they're left as-is — the local
 # edit still wins; working-tree-only files stay as additions.
 push::restore_origin_only_files() {
-  push::git ls-files -z --deleted | while IFS= read -r -d '' path; do
+  push::git ls-files -z --deleted | while IFS= read -u 3 -r -d '' path; do
     push::git checkout -q -- "$path"
-  done
+  done 3<&0 </dev/null
 }
 
 # Origin's default branch, read from its HEAD symref. The authority for which branch
@@ -171,10 +171,10 @@ push::backup_folder() {
 push::main() {
   local manifest="${MK_GIT_BACKUP_MANIFEST:?MK_GIT_BACKUP_MANIFEST required}"
   local path remote ssh_key failures=0
-  while IFS=$'\t' read -r path remote ssh_key; do
+  while IFS=$'\t' read -u 3 -r path remote ssh_key; do
     [ -n "$path" ] || continue
     ( push::backup_folder "$path" "$remote" "$ssh_key" ) || failures=$((failures + 1))
-  done < "$manifest"
+  done 3< "$manifest"
   [ "$failures" -eq 0 ] || exit 1
 }
 

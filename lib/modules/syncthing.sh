@@ -169,7 +169,7 @@ syncthing::_validate_folder_types() {
 # rather than mid-install.
 syncthing::_validate_ignores() {
   local folders="$1" folder id manage add_defaults patterns pattern_count
-  while IFS= read -r folder; do
+  while IFS= read -u 3 -r folder; do
     [ -n "$folder" ] || continue
     id=$(printf '%s' "$folder" | jq -r '.id // "?"')
     manage=$(printf '%s' "$folder" | jq -r 'if .manage_stignore == null then true else .manage_stignore end')
@@ -182,7 +182,7 @@ syncthing::_validate_ignores() {
     if [ "$manage" = "true" ] && [ "$add_defaults" != "true" ] && [ "$pattern_count" -eq 0 ]; then
       logging::warn "syncthing: folder '$id' manages .stignore with no defaults and no ignore patterns — only an empty managed block will be written."
     fi
-  done < <(printf '%s' "$folders" | jq -c '.[]')
+  done 3< <(printf '%s' "$folders" | jq -c '.[]')
   return 0
 }
 
@@ -230,10 +230,10 @@ syncthing::_ensure_folders() {
   local share_with="$1" folder folders
   folders=${ syncthing::_folders; }
   [ -n "$folders" ] || return 0
-  while IFS= read -r folder; do
+  while IFS= read -u 3 -r folder; do
     [ -n "$folder" ] || continue
     syncthing::_ensure_folder "$folder" "$share_with"
-  done < <(printf '%s' "$folders" | jq -c '.[]')
+  done 3< <(printf '%s' "$folders" | jq -c '.[]')
 }
 
 # Create and register one folder: make its dir, reconcile its .stignore, upsert
@@ -323,11 +323,11 @@ syncthing::_accept_pending() {
   local device_id pending
   pending=$(syncthing::_cli_pending_devices)
   [ -n "$pending" ] || return 0
-  while IFS= read -r device_id; do
+  while IFS= read -u 3 -r device_id; do
     [ -n "$device_id" ] || continue
     syncthing::_cli_add_device "$device_id" "dynamic" "$device_id" "false" >&2
     printf '%s\n' "$device_id"
-  done <<< "$pending"
+  done 3<<< "$pending"
 }
 
 # Add each configured peer device, returning their device IDs (one per line) so
@@ -337,10 +337,10 @@ syncthing::_ensure_peers() {
   local peer peers
   peers=${ syncthing::_peers; }
   [ -n "$peers" ] || return 0
-  while IFS= read -r peer; do
+  while IFS= read -u 3 -r peer; do
     [ -n "$peer" ] || continue
     syncthing::_ensure_peer "$peer"
-  done < <(printf '%s' "$peers" | jq -c '.[]')
+  done 3< <(printf '%s' "$peers" | jq -c '.[]')
 }
 
 # Add one configured peer device, echoing its device ID (one line) so the folder
@@ -360,10 +360,10 @@ syncthing::_ensure_peer() {
 syncthing::_apply_discovery() {
   local options option value
   options=${ syncthing::_discovery_options; }
-  while read -r option value; do
+  while read -u 3 -r option value; do
     [ -n "$option" ] || continue
     syncthing::_cli_set_option "$option" "$value"
-  done <<< "$options"
+  done 3<<< "$options"
 }
 
 syncthing::_join_consented() {
@@ -393,12 +393,12 @@ syncthing::_write_conflict_manifest() {
   manifest=$(syncthing::_conflict_manifest_path)
   mkdir -p "$(dirname "$manifest")"
   : > "$manifest"
-  while IFS= read -r folder; do
+  while IFS= read -u 3 -r folder; do
     [ -n "$folder" ] || continue
     path=$(printf '%s' "$folder" | jq -r '.path')
     path=${path/#\~/$HOME}
     printf '%s\n' "$path" >> "$manifest"
-  done < <(printf '%s' "$folders" | jq -c '.[]')
+  done 3< <(printf '%s' "$folders" | jq -c '.[]')
 }
 
 syncthing::_install_conflict_scan_script() {

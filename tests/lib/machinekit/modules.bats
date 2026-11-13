@@ -101,6 +101,15 @@ setup() {
   [ "$output" = $'foo_output\nbar_output' ]
 }
 
+@test "_call_function_per_module runs every module even when one reads all of its standard input" {
+  # A brew cask upgrade can run a script that reads stdin, as OrbStack's did.
+  foo_module::test() { cat > /dev/null; printf 'foo_ran\n'; }
+  STUB_OUTPUT="bar_ran" mktest::stub_function bar_module::test
+  STUB_OUTPUT=$'foo_module\nbar_module' mktest::stub_function modules::active_defining "test"
+  run modules::_call_function_per_module "test" < /dev/null
+  [ "$output" = $'foo_ran\nbar_ran' ]
+}
+
 @test "_call_function_per_module stops when listing the active modules fails" {
   STUB_EXIT=97 mktest::stub_function modules::active_defining "test"
   run modules::_call_function_per_module "test"

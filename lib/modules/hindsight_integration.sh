@@ -49,11 +49,11 @@ hindsight_integration::requires() {
   secrets::declared_backend_requirements <<< "$declared_secrets"
   local integrations integration
   integrations=${ hindsight_integration::_integrations; }
-  while IFS= read -r integration; do
+  while IFS= read -u 3 -r integration; do
     [ -n "$integration" ] || continue
     declare -F "hindsight_integration::${integration}::requires" >/dev/null 2>&1 \
       && "hindsight_integration::${integration}::requires"
-  done <<< "$integrations"
+  done 3<<< "$integrations"
   # Pin success: the loop's exit status (non-zero when the last integration has
   # no optional requires — declare -F misses) would otherwise become this
   # function's return and silently trip the set -e caller.
@@ -84,13 +84,13 @@ hindsight_integration::preflight() {
   hindsight_integration::_validate_retain_settings
   local integrations integration
   integrations=${ hindsight_integration::_integrations; }
-  while IFS= read -r integration; do
+  while IFS= read -u 3 -r integration; do
     [ -n "$integration" ] || continue
     hindsight_integration::_is_available "$integration" || lifecycle::fail \
       "hindsight_integration: unknown integration '$integration'. Available: $(hindsight_integration::_available | paste -sd ' ' -)."
     declare -F "hindsight_integration::${integration}::preflight" >/dev/null 2>&1 \
       && "hindsight_integration::${integration}::preflight"
-  done <<< "$integrations"
+  done 3<<< "$integrations"
   # Pin success (see requires): the loop's exit status must not become this
   # function's return, or a missing optional preflight silently trips set -e.
   return 0
@@ -108,10 +108,10 @@ hindsight_integration::install() {
   logging::step "hindsight_integration install"
   local integrations integration
   integrations=${ hindsight_integration::_integrations; }
-  while IFS= read -r integration; do
+  while IFS= read -u 3 -r integration; do
     [ -n "$integration" ] || continue
     "hindsight_integration::${integration}::install"
-  done <<< "$integrations"
+  done 3<<< "$integrations"
   hindsight_integration::_ensure_configs
 }
 
@@ -124,10 +124,10 @@ hindsight_integration::install() {
 hindsight_integration::_ensure_configs() {
   local integrations pending=() integration
   integrations=${ hindsight_integration::_integrations; }
-  while IFS= read -r integration; do
+  while IFS= read -u 3 -r integration; do
     [ -n "$integration" ] || continue
     "hindsight_integration::${integration}::config_present" || pending+=("$integration")
-  done <<< "$integrations"
+  done 3<<< "$integrations"
   [ "${#pending[@]}" -gt 0 ] || return 0
 
   if input::is_dry_run; then
@@ -193,12 +193,12 @@ hindsight_integration::_configure_banks() {
   token=${ hindsight::secrets::resolve tenant_api_key; }
   tenant=${ hindsight_integration::_bank_config_tenant; }
   bank_names=${ hindsight_integration::_configured_bank_names; }
-  while IFS= read -r bank; do
+  while IFS= read -u 3 -r bank; do
     [ -n "$bank" ] || continue
     body=${ hindsight_integration::_bank_config_json "$bank"; }
     logging::info "hindsight_integration: configuring bank '$bank'..."
     hindsight::banks::configure "$url" "$token" "$tenant" "$bank" "$body"
-  done <<< "$bank_names"
+  done 3<<< "$bank_names"
   context::set "hindsight_integration.bank_config" applied
   logging::success "hindsight_integration: applied bank config to the Hindsight tenant."
 }
@@ -208,10 +208,10 @@ hindsight_integration::_configure_banks() {
 hindsight_integration::postflight_info() {
   local integrations wired="" integration api_url
   integrations=${ hindsight_integration::_integrations; }
-  while IFS= read -r integration; do
+  while IFS= read -u 3 -r integration; do
     [ -n "$integration" ] || continue
     wired="${wired:+$wired, }$integration"
-  done <<< "$integrations"
+  done 3<<< "$integrations"
   [ -n "$wired" ] || return 0
   api_url=${ hindsight_integration::_api_url; }
   printf 'Wired %s to the Hindsight server at %s.\n' "$wired" "$api_url"

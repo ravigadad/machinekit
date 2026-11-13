@@ -506,7 +506,7 @@ setup() {
 @test "_removal_consented is false when consent resolves false" {
   STUB_OUTPUT="false" mktest::stub_function context::get "remove_unconfigured" \
     --default false --coerce boolean --prompt "$_ARTIFACTS_REMOVAL_PROMPT"
-  ! artifacts::_removal_consented
+  run ! artifacts::_removal_consented
 }
 
 @test "_removal_consented stops when reading consent fails" {

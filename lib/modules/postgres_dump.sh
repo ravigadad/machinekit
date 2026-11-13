@@ -87,13 +87,13 @@ postgres_dump::postflight_info() {
   [ -n "$databases" ] || return 0
   default_directory=${ postgres_dump::_directory; }
   schedule=${ postgres_dump::_schedule; }
-  while IFS= read -r database; do
+  while IFS= read -u 3 -r database; do
     [ -n "$database" ] || continue
     name=$(printf '%s' "$database" | jq -r '.name')
     directory=$(printf '%s' "$database" \
       | jq -r --arg default "$default_directory" '.directory // $default')
     printf 'Dumping database %s to %s on schedule "%s".\n' "$name" "$directory" "$schedule"
-  done < <(printf '%s' "$databases" | jq -c '.[]')
+  done 3< <(printf '%s' "$databases" | jq -c '.[]')
 }
 
 # Fail loudly on a malformed database set rather than writing a half-usable
@@ -132,10 +132,10 @@ postgres_dump::_write_manifest() {
   [ -n "$databases" ] || return 0
   default_directory=${ postgres_dump::_directory; }
   default_retain_count=${ postgres_dump::_retain_count; }
-  while IFS= read -r database; do
+  while IFS= read -u 3 -r database; do
     [ -n "$database" ] || continue
     postgres_dump::_manifest_row "$database" "$default_directory" "$default_retain_count" >> "$manifest"
-  done < <(printf '%s' "$databases" | jq -c '.[]')
+  done 3< <(printf '%s' "$databases" | jq -c '.[]')
 }
 
 # One manifest row (name<TAB>directory<TAB>retain_count) for a database, each

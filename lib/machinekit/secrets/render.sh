@@ -40,16 +40,16 @@ secrets::render::_table() {
   fi
 
   local secret_width=6 # len("SECRET")
-  while IFS=$'\t' read -r name _; do
+  while IFS=$'\t' read -u 3 -r name _; do
     [ "${#name}" -gt "$secret_width" ] && secret_width="${#name}"
-  done <<< "$rows"
+  done 3<<< "$rows"
 
   printf '\n'
   printf -v line '%-*s  %-7s  %-8s  %-19s' \
     "$secret_width" SECRET "SOURCE" REQUIRED "GENERATE IF MISSING"
   printf '%s%s%s\n' "$bold" "$line" "$reset"
 
-  while IFS=$'\t' read -r name required can_be_generated state; do
+  while IFS=$'\t' read -u 3 -r name required can_be_generated state; do
     [ -n "$name" ] || continue
     if [ "$required" = true ]; then req_col=yes; else req_col=no; fi
     if [ "$can_be_generated" = true ]; then gen_col=yes; else gen_col=no; fi
@@ -68,7 +68,7 @@ secrets::render::_table() {
     printf -v line '%-*s  %-7s  %-8s  %-19s' \
       "$secret_width" "$name" "$state" "$req_col" "$gen_col"
     printf '%s%s%s\n' "$color" "$line" "$reset"
-  done <<< "$rows"
+  done 3<<< "$rows"
 }
 
 # The strays: pool files no active module claims. Not a table — a flagged list,
@@ -78,10 +78,10 @@ secrets::render::_orphans() {
   if secrets::render::_color_enabled; then yellow=$'\033[33m'; reset=$'\033[0m'; fi
   printf '\n%sUnrecognized secrets in the pool — not used by any active module.%s\n' "$yellow" "$reset"
   printf 'Check each for a typo or a stale entry:\n'
-  while IFS= read -r path; do
+  while IFS= read -u 3 -r path; do
     [ -n "$path" ] || continue
     printf '  %s\n' "$path"
-  done <<< "$orphans"
+  done 3<<< "$orphans"
 }
 
 # True when stdout is a color-capable TTY (so piping the table into a pager or

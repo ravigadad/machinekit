@@ -20,10 +20,10 @@ home::staging::build() {
 
   local active_modules module
   active_modules=${ context::get_array "modules.active" || true; }
-  while IFS= read -r module; do
+  while IFS= read -u 3 -r module; do
     [ -z "$module" ] && continue
     home::staging::_layer_dir "$(modules::dir)/$module/templates" "$module templates"
-  done <<< "$active_modules"
+  done 3<<< "$active_modules"
 
   home::staging::_layer_dir "$blueprints_dir/common/home" "blueprint common/home"
 

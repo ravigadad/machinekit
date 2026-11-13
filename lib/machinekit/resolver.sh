@@ -76,10 +76,10 @@ resolver::_visit() {
   if [ "$skip_requires" -eq 0 ] && declare -f "${mod}::requires" > /dev/null 2>&1; then
     local dep dependencies
     dependencies=${ "${mod}::requires"; }
-    while IFS= read -r dep; do
+    while IFS= read -u 3 -r dep; do
       [ -n "$dep" ] || continue
       resolver::_visit "$dep"
-    done <<< "$dependencies"
+    done 3<<< "$dependencies"
   fi
 
   # after edges, pass 2 only. Gating on the active set is what makes after
@@ -87,12 +87,12 @@ resolver::_visit() {
   if [ "$_resolver_apply_after" -eq 1 ] && declare -f "${mod}::after" > /dev/null 2>&1; then
     local after_target after_targets
     after_targets=${ "${mod}::after"; }
-    while IFS= read -r after_target; do
+    while IFS= read -u 3 -r after_target; do
       [ -n "$after_target" ] || continue
       case " $_resolver_active " in
         *" $after_target "*) resolver::_visit "$after_target" ;;
       esac
-    done <<< "$after_targets"
+    done 3<<< "$after_targets"
   fi
 
   _resolver_in_progress="${_resolver_in_progress/ $mod/}"
@@ -106,9 +106,9 @@ resolver::_find_explicit_satisfier() {
   local capability="$1" req provided
   for req in "${_resolver_requested[@]}"; do
     declare -f "${req}::provides" > /dev/null 2>&1 || continue
-    while IFS= read -r provided; do
+    while IFS= read -u 3 -r provided; do
       [ "$provided" = "$capability" ] && printf '%s\n' "$req" && return 0
-    done < <("${req}::provides")
+    done 3< <("${req}::provides")
   done
   # "No explicit satisfier" is a normal answer, signalled by empty stdout — not a
   # failure. Return success explicitly so the loop's trailing nonzero (a false
@@ -124,10 +124,10 @@ resolver::_check_conflicts() {
 
   for mod in "${_resolver_result[@]}"; do
     declare -f "${mod}::provides" > /dev/null 2>&1 || continue
-    while IFS= read -r provided; do
+    while IFS= read -u 3 -r provided; do
       [ -n "$provided" ] || continue
       all_provided="$all_provided $provided"
-    done < <("${mod}::provides")
+    done 3< <("${mod}::provides")
   done
 
   for cap in $all_provided; do
@@ -138,12 +138,12 @@ resolver::_check_conflicts() {
     satisfier_names=""
     for mod in "${_resolver_result[@]}"; do
       declare -f "${mod}::provides" > /dev/null 2>&1 || continue
-      while IFS= read -r provided; do
+      while IFS= read -u 3 -r provided; do
         [ "$provided" = "$cap" ] || continue
         count=$((count + 1))
         satisfier_names="$satisfier_names $mod"
         break
-      done < <("${mod}::provides")
+      done 3< <("${mod}::provides")
     done
 
     if [ "$count" -ge 2 ]; then

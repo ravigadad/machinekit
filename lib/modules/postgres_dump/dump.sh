@@ -105,10 +105,10 @@ dump::verify() {
 dump::prune() {
   local name="$1" directory="$2" retain_count="$3" stale
   [ "$retain_count" -gt 0 ] 2>/dev/null || return 0
-  while IFS= read -r stale; do
+  while IFS= read -u 3 -r stale; do
     [ -n "$stale" ] || continue
     rm -f "$stale"
-  done < <(dump::stale_generations "$name" "$directory" "$retain_count")
+  done 3< <(dump::stale_generations "$name" "$directory" "$retain_count")
 }
 
 # The generations of NAME beyond the newest RETAIN_COUNT, one path per line. The
@@ -135,10 +135,10 @@ dump::generations() {
 dump::main() {
   local manifest="${MK_POSTGRES_DUMP_MANIFEST:?MK_POSTGRES_DUMP_MANIFEST required}"
   local name directory retain_count failures=0
-  while IFS=$'\t' read -r name directory retain_count; do
+  while IFS=$'\t' read -u 3 -r name directory retain_count; do
     [ -n "$name" ] || continue
     ( dump::dump_database "$name" "$directory" "$retain_count" ) || failures=$((failures + 1))
-  done < "$manifest"
+  done 3< "$manifest"
   [ "$failures" -eq 0 ] || exit 1
 }
 

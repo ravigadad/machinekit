@@ -85,11 +85,11 @@ offsite_backup::declared_secrets() {
   local repositories name
   repositories=${ offsite_backup::_repositories; }
   [ -n "$repositories" ] || return 0
-  while IFS= read -r name; do
+  while IFS= read -u 3 -r name; do
     [ -n "$name" ] || continue
     printf '%s\ttrue\tfalse\n'  "$(offsite_backup::_secret_name "$name" repository_password)"
     printf '%s\tfalse\tfalse\n' "$(offsite_backup::_secret_name "$name" credentials)"
-  done < <(printf '%s' "$repositories" | jq -r '.[].name // empty')
+  done 3< <(printf '%s' "$repositories" | jq -r '.[].name // empty')
 }
 
 # Fail early on a misconfigured repository set rather than partway through
@@ -99,10 +99,10 @@ offsite_backup::preflight() {
   repositories=${ offsite_backup::_repositories; }
   [ -n "$repositories" ] || return 0
   offsite_backup::_validate_repositories "$repositories"
-  while IFS= read -r entry; do
+  while IFS= read -u 3 -r entry; do
     [ -n "$entry" ] || continue
     offsite_backup::_validate_repository "$entry"
-  done < <(printf '%s' "$repositories" | jq -c '.[]')
+  done 3< <(printf '%s' "$repositories" | jq -c '.[]')
 }
 
 # Everything about one repository that can be wrong independently of the set:
@@ -135,10 +135,10 @@ offsite_backup::installed_artifacts() {
   repositories=${ offsite_backup::_repositories; }
   [ -n "$repositories" ] || return 0
   printf 'file\t%s\n' "$(offsite_backup::_run_script_path)"
-  while IFS= read -r entry; do
+  while IFS= read -u 3 -r entry; do
     [ -n "$entry" ] || continue
     offsite_backup::_repository_artifacts "$entry"
-  done < <(printf '%s' "$repositories" | jq -c '.[]')
+  done 3< <(printf '%s' "$repositories" | jq -c '.[]')
 }
 
 offsite_backup::_repository_artifacts() {
@@ -169,10 +169,10 @@ offsite_backup::install() {
   # in the service units' environment — so it is laid down once, and before any
   # repository, since the create step drives it.
   offsite_backup::_install_run_script
-  while IFS= read -r entry; do
+  while IFS= read -u 3 -r entry; do
     [ -n "$entry" ] || continue
     offsite_backup::_install_repository "$entry"
-  done < <(printf '%s' "$repositories" | jq -c '.[]')
+  done 3< <(printf '%s' "$repositories" | jq -c '.[]')
   logging::success "offsite_backup: backup and check services installed."
 }
 
@@ -195,23 +195,23 @@ offsite_backup::postflight_info() {
   local repositories entry name repository paths path
   repositories=${ offsite_backup::_repositories; }
   [ -n "$repositories" ] || return 0
-  while IFS= read -r entry; do
+  while IFS= read -u 3 -r entry; do
     [ -n "$entry" ] || continue
     name=$(offsite_backup::_name "$entry")
     repository=$(offsite_backup::_repository "$entry")
     paths=${ offsite_backup::_paths "$entry"; }
-    while IFS= read -r path; do
+    while IFS= read -u 4 -r path; do
       [ -n "$path" ] || continue
       printf 'Backing up %s to %s (%s) on schedule "%s".\n' \
         "$path" "$name" "$repository" "${ offsite_backup::_schedule "$entry"; }"
-    done < <(printf '%s' "$paths" | jq -r '.[].path')
+    done 4< <(printf '%s' "$paths" | jq -r '.[].path')
     printf 'Repository %s: keeping %s daily, %s weekly, %s monthly snapshots; verified on schedule "%s".\n' \
       "$name" \
       "${ offsite_backup::_keep_daily "$entry"; }" \
       "${ offsite_backup::_keep_weekly "$entry"; }" \
       "${ offsite_backup::_keep_monthly "$entry"; }" \
       "${ offsite_backup::_check_schedule "$entry"; }"
-  done < <(printf '%s' "$repositories" | jq -c '.[]')
+  done 3< <(printf '%s' "$repositories" | jq -c '.[]')
 }
 
 # postflight: the step still on the operator, named per repository and only when
@@ -222,13 +222,13 @@ offsite_backup::postflight_instructions() {
   local repositories entry name
   repositories=${ offsite_backup::_repositories; }
   [ -n "$repositories" ] || return 0
-  while IFS= read -r entry; do
+  while IFS= read -u 3 -r entry; do
     [ -n "$entry" ] || continue
     name=${ offsite_backup::_name "$entry"; }
     [ "${ offsite_backup::_repository_ready "$name"; }" = "true" ] && continue
     printf 'The restic repository %s does not exist yet — re-apply with MACHINEKIT_OFFSITE_BACKUP_INIT_REPOSITORY=1 to create it, or run restic init yourself (see docs/modules.md).\n' \
       "$(offsite_backup::_repository "$entry")"
-  done < <(printf '%s' "$repositories" | jq -c '.[]')
+  done 3< <(printf '%s' "$repositories" | jq -c '.[]')
 }
 
 offsite_backup::_validate_repositories() {
@@ -309,10 +309,10 @@ offsite_backup::_write_manifest() {
   manifest=$(offsite_backup::_manifest_path "$name")
   mkdir -p "$(dirname "$manifest")"
   : > "$manifest"
-  while IFS= read -r entry; do
+  while IFS= read -u 3 -r entry; do
     [ -n "$entry" ] || continue
     offsite_backup::_manifest_row "$entry" >> "$manifest"
-  done < <(printf '%s' "$paths" | jq -c '.[]')
+  done 3< <(printf '%s' "$paths" | jq -c '.[]')
 }
 
 # One manifest row (path<TAB>max_age_hours). An absent deadline stays empty; the

@@ -78,10 +78,10 @@ postgres_app::configure_container_access() {
 postgres_app::_check_requested() {
   local requested="$1" v port
   postgres::_assert_valid_request "$requested"
-  while IFS=$'\t' read -r v port; do
+  while IFS=$'\t' read -u 3 -r v port; do
     [ -n "$v" ] || continue
     postgres_app::_assert_server_on "$port" "$v"
-  done < <(postgres::_requested_version_rows "$requested")
+  done 3< <(postgres::_requested_version_rows "$requested")
 }
 
 postgres_app::_check_default() {

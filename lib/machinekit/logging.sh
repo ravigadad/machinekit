@@ -66,9 +66,9 @@ logging::banner() {
   local sep="========================================================"
   printf '\n' >&2
   logging::_emit "$color" "" "$sep"
-  while IFS= read -r line; do
+  while IFS= read -u 3 -r line; do
     logging::_emit "$color" "" "$line"
-  done <<< "$text"
+  done 3<<< "$text"
   logging::_emit "$color" "" "$sep"
   printf '\n' >&2
 }
