@@ -409,7 +409,7 @@ setup() {
   mktest::stub_function secrets::install_secret_file "$path" postgres_dump::_pgpass_line
   postgres_dump::_ensure_password_file
   mktest::assert_stub_called secrets::install_secret_file "$path" postgres_dump::_pgpass_line
-  [ "$(stat -f %Lp "$(dirname "$path")" 2>/dev/null || stat -c %a "$(dirname "$path")")" = "700" ]
+  [ "$(mktest::file_mode "$(dirname "$path")")" = "700" ]
 }
 
 @test "_ensure_password_file keeps an existing password file" {
