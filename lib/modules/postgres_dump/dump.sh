@@ -36,6 +36,9 @@
 #                                minimal PATH won't find them.
 #   MK_POSTGRES_DUMP_USER        role to connect as; optional (default: postgres)
 #   MK_POSTGRES_DUMP_PORT        port to connect to; optional (default: 5432)
+#   PGPASSFILE                   libpq's password file, read by pg_dump itself;
+#                                the service unit points it at the dump role's
+#                                password, so this script never handles it
 set -euo pipefail
 
 # A generation's filename is <name>-<timestamp>.dump. The pattern is the format's
@@ -43,6 +46,10 @@ set -euo pipefail
 # database whose name merely starts with this one (app vs app-staging).
 _DUMP_TIMESTAMP_FORMAT='%Y%m%dT%H%M%SZ'
 _DUMP_TIMESTAMP_PATTERN='[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]T[0-9][0-9][0-9][0-9][0-9][0-9]Z'
+
+# How many of a failed tool's last output lines go into the notification. The
+# tool's own error is normally its last line; the full output goes to the job log.
+_DUMP_NOTIFY_OUTPUT_LINES=3
 
 dump::notify() {
   local message="$1"
@@ -61,6 +68,27 @@ dump::fail() {
   exit 1
 }
 
+# Run a command, passing its output through to the job's log. When it fails,
+# notify MESSAGE followed by the last lines of that output, so the notification
+# says why (the connection refused, the archive unreadable), and return nonzero.
+dump::run_step() {
+  local message="$1" output
+  shift
+  if output=$("$@" 2>&1); then
+    [ -z "$output" ] || printf '%s\n' "$output"
+    return 0
+  fi
+  [ -z "$output" ] || printf '%s\n' "$output"
+  dump::notify "$message${output:+ $(dump::output_tail "$output")}"
+  return 1
+}
+
+# The last lines of OUTPUT joined onto one line, for a notification.
+dump::output_tail() {
+  printf '%s\n' "$1" | tail -n "$_DUMP_NOTIFY_OUTPUT_LINES" \
+    | awk 'NR > 1 { printf " | " } { printf "%s", $0 } END { print "" }'
+}
+
 # Dump one database, verify it, publish it, then prune. Runs entirely within a
 # subshell (see dump::main) so the EXIT trap and any dump::fail stay scoped to
 # this one database.
@@ -74,10 +102,10 @@ dump::dump_database() {
   # dump, a dump that won't verify, a signal. A leading dot keeps it out of the
   # *.dump glob meanwhile, so it can never be mistaken for a generation.
   trap 'rm -f "$partial"' EXIT
-  dump::pg_dump "$name" "$partial" \
-    || dump::fail "postgres_dump: dump failed for database '$name'."
-  dump::verify "$partial" \
-    || dump::fail "postgres_dump: dump of '$name' is unreadable (pg_restore --list failed); discarded, and older generations were kept."
+  dump::run_step "postgres_dump: dump failed for database '$name'." \
+    dump::pg_dump "$name" "$partial" || exit 1
+  dump::run_step "postgres_dump: dump of '$name' is unreadable (pg_restore --list failed); discarded, and older generations were kept." \
+    dump::verify "$partial" || exit 1
   mv "$partial" "$final"
   trap - EXIT
   dump::prune "$name" "$directory" "$retain_count"

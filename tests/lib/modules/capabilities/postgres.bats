@@ -93,13 +93,6 @@ setup() {
   mktest::assert_stub_called lifecycle::fail
 }
 
-# --- postgres::superuser ---
-
-@test "superuser is the predictable postgres role" {
-  run postgres::superuser
-  [ "$output" = "postgres" ]
-}
-
 # --- postgres::port ---
 
 @test "port is the port the resolved instance always serves" {
@@ -247,11 +240,70 @@ setup() {
   mktest::assert_stub_not_called logging::success
 }
 
+# --- postgres::grant_read_all_data ---
+
+@test "grant_read_all_data in dry-run reports without touching postgres" {
+  mktest::stub_function input::is_dry_run
+  mktest::stub_function postgres::_psql_exec
+  mktest::stub_function logging::dry_run
+  postgres::grant_read_all_data "someuser"
+  mktest::assert_stub_not_called postgres::_psql_exec
+  mktest::assert_stub_called logging::dry_run
+}
+
+@test "grant_read_all_data grants read on every table, then lets the role bypass row-level security" {
+  STUB_RETURN=1 mktest::stub_function input::is_dry_run
+  mktest::stub_function postgres::_psql_exec
+  postgres::grant_read_all_data "someuser"
+  mktest::assert_stub_called_in_order postgres::_psql_exec postgres -c 'GRANT pg_read_all_data TO "someuser"'
+  mktest::assert_stub_called_in_order postgres::_psql_exec postgres -c 'ALTER ROLE "someuser" BYPASSRLS'
+}
+
+@test "grant_read_all_data escapes a double quote in the role name so it can't break the identifier" {
+  STUB_RETURN=1 mktest::stub_function input::is_dry_run
+  mktest::stub_function postgres::_psql_exec
+  postgres::grant_read_all_data 'we"ird'
+  mktest::assert_stub_called postgres::_psql_exec postgres -c 'GRANT pg_read_all_data TO "we""ird"'
+  mktest::assert_stub_called postgres::_psql_exec postgres -c 'ALTER ROLE "we""ird" BYPASSRLS'
+}
+
+# --- postgres::require_password_login ---
+
+@test "require_password_login in dry-run reports without touching postgres or pg_hba.conf" {
+  mktest::stub_function input::is_dry_run
+  mktest::stub_function postgres::_ensure_password_login_rule
+  mktest::stub_function postgres::_psql_exec
+  mktest::stub_function logging::dry_run
+  postgres::require_password_login "someuser"
+  mktest::assert_stub_not_called postgres::_ensure_password_login_rule
+  mktest::assert_stub_not_called postgres::_psql_exec
+  mktest::assert_stub_called logging::dry_run
+}
+
+@test "require_password_login ensures the password rule, then makes the role a member of its group" {
+  STUB_RETURN=1 mktest::stub_function input::is_dry_run
+  mktest::stub_function postgres::_ensure_password_login_rule
+  mktest::stub_function postgres::_psql_exec
+  postgres::require_password_login "someuser"
+  mktest::assert_stub_called_in_order postgres::_ensure_password_login_rule
+  mktest::assert_stub_called_in_order postgres::_psql_exec postgres -c \
+    "GRANT \"$_POSTGRES_PASSWORD_LOGIN_GROUP\" TO \"someuser\""
+}
+
+@test "require_password_login escapes a double quote in the role name so it can't break the identifier" {
+  STUB_RETURN=1 mktest::stub_function input::is_dry_run
+  mktest::stub_function postgres::_ensure_password_login_rule
+  mktest::stub_function postgres::_psql_exec
+  postgres::require_password_login 'we"ird'
+  mktest::assert_stub_called postgres::_psql_exec postgres -c \
+    "GRANT \"$_POSTGRES_PASSWORD_LOGIN_GROUP\" TO \"we\"\"ird\""
+}
+
 # --- postgres::ensure_superuser ---
 
 @test "ensure_superuser creates the predictable postgres superuser" {
   STUB_RETURN=1 mktest::stub_function input::is_dry_run
-  STUB_OUTPUT="fake-superuser" mktest::stub_function postgres::superuser
+  STUB_OUTPUT="fake-superuser" mktest::stub_function postgres::_superuser
   STUB_OUTPUT="fake_createuser" mktest::stub_function postgres::_createuser_path
   mktest::stub_function fake_createuser "-s" "fake-superuser"
   postgres::ensure_superuser
@@ -269,7 +321,7 @@ setup() {
 
 @test "ensure_superuser stays quiet when the superuser already exists" {
   STUB_RETURN=1 mktest::stub_function input::is_dry_run
-  STUB_OUTPUT="fake-superuser" mktest::stub_function postgres::superuser
+  STUB_OUTPUT="fake-superuser" mktest::stub_function postgres::_superuser
   STUB_OUTPUT="fake_createuser" mktest::stub_function postgres::_createuser_path
   STUB_RETURN=1 mktest::stub_function fake_createuser "-s" "fake-superuser"
   postgres::ensure_superuser
@@ -278,7 +330,7 @@ setup() {
 
 @test "ensure_superuser stops when resolving createuser fails" {
   STUB_RETURN=1 mktest::stub_function input::is_dry_run
-  STUB_OUTPUT="fake-superuser" mktest::stub_function postgres::superuser
+  STUB_OUTPUT="fake-superuser" mktest::stub_function postgres::_superuser
   STUB_EXIT=97 mktest::stub_function postgres::_createuser_path
   run postgres::ensure_superuser
   [ "$status" -eq 97 ]
@@ -441,10 +493,120 @@ setup() {
   [ "$status" -eq 97 ]
 }
 
+# --- postgres::_ensure_password_login_rule ---
+
+@test "_ensure_password_login_rule creates the group, writes the rule, checks pg_hba.conf, then reloads" {
+  mktest::stub_function postgres::_ensure_password_login_group
+  mktest::stub_function postgres::_write_password_login_rule
+  mktest::stub_function postgres::_assert_hba_valid
+  mktest::stub_function postgres::_reload_config
+  postgres::_ensure_password_login_rule
+  mktest::assert_stub_called_in_order postgres::_ensure_password_login_group
+  mktest::assert_stub_called_in_order postgres::_write_password_login_rule
+  mktest::assert_stub_called_in_order postgres::_assert_hba_valid
+  mktest::assert_stub_called_in_order postgres::_reload_config
+}
+
+# --- postgres::_ensure_password_login_group ---
+
+@test "_ensure_password_login_group creates the group as a role that cannot log in" {
+  STUB_RETURN=1 mktest::stub_function postgres::_role_exists "$_POSTGRES_PASSWORD_LOGIN_GROUP"
+  mktest::stub_function postgres::_psql_exec
+  postgres::_ensure_password_login_group
+  mktest::assert_stub_called postgres::_psql_exec postgres -c \
+    "CREATE ROLE \"$_POSTGRES_PASSWORD_LOGIN_GROUP\" NOLOGIN"
+}
+
+@test "_ensure_password_login_group leaves an existing group alone" {
+  mktest::stub_function postgres::_role_exists "$_POSTGRES_PASSWORD_LOGIN_GROUP"
+  mktest::stub_function postgres::_psql_exec
+  postgres::_ensure_password_login_group
+  mktest::assert_stub_not_called postgres::_psql_exec
+}
+
+# --- postgres::_write_password_login_rule ---
+
+@test "_write_password_login_rule puts the group's scram rule in a block at the top of pg_hba.conf" {
+  STUB_OUTPUT="/fake/pg_hba.conf" mktest::stub_function postgres::_hba_file
+  managed_block::ensure() { printf '%s\n' "$*" > "$BATS_TEST_TMPDIR/args"; cat > "$BATS_TEST_TMPDIR/body"; }
+  postgres::_write_password_login_rule
+  run cat "$BATS_TEST_TMPDIR/args"
+  [ "$output" = "/fake/pg_hba.conf # top" ]
+  run cat "$BATS_TEST_TMPDIR/body"
+  [ "$output" = "local all +$_POSTGRES_PASSWORD_LOGIN_GROUP scram-sha-256" ]
+}
+
+@test "_write_password_login_rule fails rather than writing when pg_hba.conf can't be located" {
+  STUB_RETURN=1 mktest::stub_function postgres::_hba_file
+  mktest::stub_function managed_block::ensure
+  STUB_EXIT=1 mktest::stub_function lifecycle::fail
+  run postgres::_write_password_login_rule
+  [ "$status" -ne 0 ]
+  MATCH="pg_hba.conf" mktest::assert_stub_called lifecycle::fail
+  mktest::assert_stub_not_called managed_block::ensure
+}
+
+@test "_write_password_login_rule fails rather than writing when the server reports no pg_hba.conf path" {
+  STUB_OUTPUT="" mktest::stub_function postgres::_hba_file
+  mktest::stub_function managed_block::ensure
+  STUB_EXIT=1 mktest::stub_function lifecycle::fail
+  run postgres::_write_password_login_rule
+  [ "$status" -ne 0 ]
+  mktest::assert_stub_not_called managed_block::ensure
+}
+
+# --- postgres::_hba_file ---
+
+@test "_hba_file asks the running server where its pg_hba.conf is" {
+  STUB_OUTPUT="/fake/pg_hba.conf" mktest::stub_function postgres::_psql_exec postgres -tAc "SHOW hba_file"
+  run postgres::_hba_file
+  [ "$output" = "/fake/pg_hba.conf" ]
+}
+
+# --- postgres::_assert_hba_valid ---
+
+@test "_assert_hba_valid passes when the server reports no errors in pg_hba.conf" {
+  STUB_OUTPUT="" mktest::stub_function postgres::_psql_exec postgres -tAc "$_POSTGRES_HBA_ERRORS_QUERY"
+  STUB_EXIT=1 mktest::stub_function lifecycle::fail
+  postgres::_assert_hba_valid
+  mktest::assert_stub_not_called lifecycle::fail
+}
+
+@test "_assert_hba_valid fails with the server's reported errors" {
+  STUB_OUTPUT="line 3: fake error" mktest::stub_function postgres::_psql_exec postgres -tAc "$_POSTGRES_HBA_ERRORS_QUERY"
+  STUB_EXIT=1 mktest::stub_function lifecycle::fail
+  run postgres::_assert_hba_valid
+  [ "$status" -ne 0 ]
+  MATCH="line 3: fake error" mktest::assert_stub_called lifecycle::fail
+}
+
+@test "_assert_hba_valid fails when the server can't be asked about pg_hba.conf" {
+  STUB_RETURN=1 mktest::stub_function postgres::_psql_exec postgres -tAc "$_POSTGRES_HBA_ERRORS_QUERY"
+  STUB_EXIT=1 mktest::stub_function lifecycle::fail
+  run postgres::_assert_hba_valid
+  [ "$status" -ne 0 ]
+  MATCH="could not check" mktest::assert_stub_called lifecycle::fail
+}
+
+# --- postgres::_reload_config ---
+
+@test "_reload_config asks the running server to reload its configuration" {
+  mktest::stub_function postgres::_psql_exec postgres -tAc "SELECT pg_reload_conf()"
+  postgres::_reload_config
+  mktest::assert_stub_called postgres::_psql_exec postgres -tAc "SELECT pg_reload_conf()"
+}
+
+# --- postgres::_superuser ---
+
+@test "_superuser is the predictable postgres role" {
+  run postgres::_superuser
+  [ "$output" = "postgres" ]
+}
+
 # --- postgres::_psql_exec ---
 
 @test "_psql_exec runs psql with no rc file, quietly, as the postgres superuser" {
-  STUB_OUTPUT="fake-superuser" mktest::stub_function postgres::superuser
+  STUB_OUTPUT="fake-superuser" mktest::stub_function postgres::_superuser
   STUB_OUTPUT="fake_psql" mktest::stub_function postgres::_psql_path
   mktest::stub_function fake_psql
   postgres::_psql_exec "somedb" "-tAc" "some query"
@@ -452,7 +614,7 @@ setup() {
 }
 
 @test "_psql_exec stops when resolving psql fails" {
-  STUB_OUTPUT="fake-superuser" mktest::stub_function postgres::superuser
+  STUB_OUTPUT="fake-superuser" mktest::stub_function postgres::_superuser
   STUB_EXIT=97 mktest::stub_function postgres::_psql_path
   run postgres::_psql_exec "somedb" "-tAc" "some query"
   [ "$status" -eq 97 ]
@@ -461,7 +623,7 @@ setup() {
 # --- postgres::_psql_exec_stdin ---
 
 @test "_psql_exec_stdin runs psql with the statement on stdin (no -c), as the postgres superuser" {
-  STUB_OUTPUT="fake-superuser" mktest::stub_function postgres::superuser
+  STUB_OUTPUT="fake-superuser" mktest::stub_function postgres::_superuser
   STUB_OUTPUT="fake_psql" mktest::stub_function postgres::_psql_path
   fake_psql() { echo "$*" > "$BATS_TEST_TMPDIR/args"; cat > "$BATS_TEST_TMPDIR/in"; }
   printf 'SELECT 1' | postgres::_psql_exec_stdin somedb
@@ -472,7 +634,7 @@ setup() {
 }
 
 @test "_psql_exec_stdin stops when resolving psql fails" {
-  STUB_OUTPUT="fake-superuser" mktest::stub_function postgres::superuser
+  STUB_OUTPUT="fake-superuser" mktest::stub_function postgres::_superuser
   STUB_EXIT=97 mktest::stub_function postgres::_psql_path
   run postgres::_psql_exec_stdin somedb <<< "SELECT 1"
   [ "$status" -eq 97 ]

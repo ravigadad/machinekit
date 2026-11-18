@@ -81,6 +81,12 @@ advance_origin() {
   rm -rf "$clone"
 }
 
+# Make ORIGIN refuse every push, so git reports a real rejection error.
+reject_pushes() {
+  printf '#!/bin/sh\necho "fake push rejected" >&2\nexit 1\n' > "$ORIGIN/hooks/pre-receive"
+  chmod +x "$ORIGIN/hooks/pre-receive"
+}
+
 origin_has_file() {
   local file="$1" origin="${2:-$ORIGIN}" verify="$BATS_TEST_TMPDIR/verify-$RANDOM"
   tgit clone -q "$origin" "$verify"
@@ -173,6 +179,27 @@ origin_has_file() {
   local verify="$BATS_TEST_TMPDIR/verify"
   tgit clone -q "$ORIGIN" "$verify"
   grep -q "origin version" "$verify/base.txt"
+}
+
+# --- push failures ---
+
+@test "a rejected push notifies with git's own error and exits non-zero" {
+  seed_work
+  reject_pushes
+  printf 'local\n' > "$WORK/local.txt"
+  run_backup
+  [ "$status" -ne 0 ]
+  grep -q "push failed.*pre-receive hook declined" "$NOTIFY_LOG"
+  [[ "$output" == *"fake push rejected"* ]]
+}
+
+@test "a rejected first push notifies with git's own error and exits non-zero" {
+  mkdir -p "$WORK"
+  printf 'local\n' > "$WORK/local.txt"
+  reject_pushes
+  run_backup
+  [ "$status" -ne 0 ]
+  grep -q "initial push failed.*pre-receive hook declined" "$NOTIFY_LOG"
 }
 
 # --- reconstitution (.git stripped, e.g. by agents_config_setup) ---

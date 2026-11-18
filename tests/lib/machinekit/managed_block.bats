@@ -73,6 +73,41 @@ keep-after
 EOF
 }
 
+# --- top placement (for files where the first matching line wins) ---
+
+@test "top placement puts a new block above the existing content" {
+  printf '%s\n' "existing-rule" > "$FILE"
+  printf '%s\n' "a" | managed_block::ensure "$FILE" "#" top
+  diff "$FILE" - <<EOF
+# $_MK_MANAGED_BLOCK_BEGIN_MARKER
+a
+# $_MK_MANAGED_BLOCK_END_MARKER
+existing-rule
+EOF
+}
+
+@test "top placement moves an existing block back to the top" {
+  printf '%s\n' "existing-rule" "# $_MK_MANAGED_BLOCK_BEGIN_MARKER" "old" "# $_MK_MANAGED_BLOCK_END_MARKER" "after" > "$FILE"
+  printf '%s\n' "new" | managed_block::ensure "$FILE" "#" top
+  diff "$FILE" - <<EOF
+# $_MK_MANAGED_BLOCK_BEGIN_MARKER
+new
+# $_MK_MANAGED_BLOCK_END_MARKER
+existing-rule
+after
+EOF
+}
+
+@test "rejects an unknown placement and leaves the file untouched" {
+  printf '%s\n' "existing-rule" > "$FILE"
+  run managed_block::ensure "$FILE" "#" sideways <<< "a"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"sideways"* ]]
+  diff "$FILE" - <<EOF
+existing-rule
+EOF
+}
+
 # --- non-destructive on a malformed file ---
 
 @test "drops a stray begin marker rather than eating the content after it" {

@@ -88,21 +88,22 @@ setup() {
 
 # --- installed_file_patterns ---
 
-@test "installed_file_patterns names the manifest and the dump script" {
+@test "installed_file_patterns names the manifest, the dump script and the password file" {
   run postgres_dump::installed_file_patterns
   [ "$status" -eq 0 ]
-  [ "$output" = $'data\tmanifest.tsv\ndata\tdump.sh' ]
+  [ "$output" = $'data\tmanifest.tsv\ndata\tdump.sh\nconfig\tpgpass' ]
 }
 
 # --- installed_artifacts ---
 
-@test "installed_artifacts declares the service, its manifest and its dump script" {
+@test "installed_artifacts declares the service, its manifest, its dump script and the password file" {
   STUB_OUTPUT='[{"name":"the_db"}]' mktest::stub_function postgres_dump::_databases
   STUB_OUTPUT="/fake/manifest.tsv" mktest::stub_function postgres_dump::_manifest_path
   STUB_OUTPUT="/fake/dump.sh" mktest::stub_function postgres_dump::_dump_script_path
+  STUB_OUTPUT="/fake/pgpass" mktest::stub_function postgres_dump::_password_file_path
   run postgres_dump::installed_artifacts
   [ "$status" -eq 0 ]
-  [ "$output" = $'service\tpostgres-dump\nfile\t/fake/manifest.tsv\nfile\t/fake/dump.sh' ]
+  [ "$output" = $'service\tpostgres-dump\nfile\t/fake/manifest.tsv\nfile\t/fake/dump.sh\nfile\t/fake/pgpass' ]
 }
 
 @test "installed_artifacts declares nothing when no databases are configured" {
@@ -120,16 +121,18 @@ setup() {
 
 # --- install ---
 
-@test "install lays down the manifest, the dump script, and the service" {
+@test "install lays down the manifest and the dump script, provisions the dump role, then schedules the service" {
   STUB_OUTPUT='[{"name":"somedb"}]' mktest::stub_function postgres_dump::_databases
   STUB_RETURN=1 mktest::stub_function input::is_dry_run
   mktest::stub_function postgres_dump::_write_manifest
   mktest::stub_function postgres_dump::_install_dump_script
+  mktest::stub_function postgres_dump::_provision_role
   mktest::stub_function postgres_dump::_install_service
   postgres_dump::install
-  mktest::assert_stub_called postgres_dump::_write_manifest
-  mktest::assert_stub_called postgres_dump::_install_dump_script
-  mktest::assert_stub_called postgres_dump::_install_service
+  mktest::assert_stub_called_in_order postgres_dump::_write_manifest
+  mktest::assert_stub_called_in_order postgres_dump::_install_dump_script
+  mktest::assert_stub_called_in_order postgres_dump::_provision_role
+  mktest::assert_stub_called_in_order postgres_dump::_install_service
 }
 
 @test "install is a no-op when no databases are configured" {
@@ -356,17 +359,9 @@ setup() {
   STUB_OUTPUT="0 3 * * *" mktest::stub_function postgres_dump::_schedule
   STUB_OUTPUT="/b/pg_dump" mktest::stub_function postgres::pg_dump_path
   STUB_OUTPUT="/b/pg_restore" mktest::stub_function postgres::pg_restore_path
-  STUB_OUTPUT="fake-superuser" mktest::stub_function postgres::superuser
   STUB_OUTPUT="7777" mktest::stub_function postgres::port
-  # Exact-arg stub: only matches if every resolved part lands in its positional slot.
-  mktest::stub_function service::install_calendar \
-    "postgres-dump" "/s/dump.sh" "0 3 * * *" \
-    "MK_POSTGRES_DUMP_MANIFEST=/m/manifest.tsv" \
-    "MK_POSTGRES_DUMP_NOTIFY=/n/notify" \
-    "MK_POSTGRES_DUMP_PG_DUMP=/b/pg_dump" \
-    "MK_POSTGRES_DUMP_PG_RESTORE=/b/pg_restore" \
-    "MK_POSTGRES_DUMP_USER=fake-superuser" \
-    "MK_POSTGRES_DUMP_PORT=7777"
+  STUB_OUTPUT="/c/pgpass" mktest::stub_function postgres_dump::_password_file_path
+  mktest::stub_function service::install_calendar
   postgres_dump::_install_service
   mktest::assert_stub_called service::install_calendar \
     "postgres-dump" "/s/dump.sh" "0 3 * * *" \
@@ -374,8 +369,102 @@ setup() {
     "MK_POSTGRES_DUMP_NOTIFY=/n/notify" \
     "MK_POSTGRES_DUMP_PG_DUMP=/b/pg_dump" \
     "MK_POSTGRES_DUMP_PG_RESTORE=/b/pg_restore" \
-    "MK_POSTGRES_DUMP_USER=fake-superuser" \
-    "MK_POSTGRES_DUMP_PORT=7777"
+    "MK_POSTGRES_DUMP_USER=$_POSTGRES_DUMP_ROLE" \
+    "MK_POSTGRES_DUMP_PORT=7777" \
+    "PGPASSFILE=/c/pgpass"
+}
+
+# --- _provision_role ---
+
+@test "_provision_role sets the role's password from the password file, grants read access, then requires password login" {
+  mktest::stub_function postgres_dump::_ensure_password_file
+  STUB_OUTPUT="fake-password" mktest::stub_function postgres_dump::_password_from_file
+  mktest::stub_function postgres::ensure_role
+  mktest::stub_function postgres::grant_read_all_data
+  mktest::stub_function postgres::require_password_login
+  postgres_dump::_provision_role
+  mktest::assert_stub_called_in_order postgres_dump::_ensure_password_file
+  mktest::assert_stub_called_in_order postgres::ensure_role "$_POSTGRES_DUMP_ROLE" "fake-password"
+  mktest::assert_stub_called_in_order postgres::grant_read_all_data "$_POSTGRES_DUMP_ROLE"
+  mktest::assert_stub_called_in_order postgres::require_password_login "$_POSTGRES_DUMP_ROLE"
+}
+
+@test "_provision_role stops when the password can't be read" {
+  mktest::stub_function postgres_dump::_ensure_password_file
+  STUB_EXIT=97 mktest::stub_function postgres_dump::_password_from_file
+  mktest::stub_function postgres::ensure_role
+  mktest::stub_function postgres::grant_read_all_data
+  mktest::stub_function postgres::require_password_login
+  run postgres_dump::_provision_role
+  [ "$status" -eq 97 ]
+  mktest::assert_stub_not_called postgres::ensure_role
+}
+
+# --- _ensure_password_file ---
+
+@test "_ensure_password_file writes a new password file in a private directory" {
+  local path="$BATS_TEST_TMPDIR/config/postgres_dump/pgpass"
+  STUB_OUTPUT="$path" mktest::stub_function postgres_dump::_password_file_path
+  mktest::stub_function secrets::install_secret_file "$path" postgres_dump::_pgpass_line
+  postgres_dump::_ensure_password_file
+  mktest::assert_stub_called secrets::install_secret_file "$path" postgres_dump::_pgpass_line
+  [ "$(stat -f %Lp "$(dirname "$path")" 2>/dev/null || stat -c %a "$(dirname "$path")")" = "700" ]
+}
+
+@test "_ensure_password_file keeps an existing password file" {
+  local path="$BATS_TEST_TMPDIR/pgpass"
+  printf 'existing\n' > "$path"
+  STUB_OUTPUT="$path" mktest::stub_function postgres_dump::_password_file_path
+  mktest::stub_function secrets::install_secret_file
+  postgres_dump::_ensure_password_file
+  mktest::assert_stub_not_called secrets::install_secret_file
+}
+
+@test "_ensure_password_file fails when the file can't be written" {
+  local path="$BATS_TEST_TMPDIR/config/pgpass"
+  STUB_OUTPUT="$path" mktest::stub_function postgres_dump::_password_file_path
+  STUB_RETURN=1 mktest::stub_function secrets::install_secret_file
+  STUB_EXIT=1 mktest::stub_function lifecycle::fail
+  run postgres_dump::_ensure_password_file
+  [ "$status" -ne 0 ]
+  MATCH="$path" mktest::assert_stub_called lifecycle::fail
+}
+
+# --- _pgpass_line ---
+
+@test "_pgpass_line is a libpq password-file line for the dump role on the capability's port" {
+  STUB_OUTPUT="7777" mktest::stub_function postgres::port
+  STUB_OUTPUT="fake-password" mktest::stub_function postgres_dump::_generate_password
+  run postgres_dump::_pgpass_line
+  [ "$output" = "localhost:7777:*:$_POSTGRES_DUMP_ROLE:fake-password" ]
+}
+
+@test "_pgpass_line produces nothing when no password could be generated" {
+  STUB_OUTPUT="7777" mktest::stub_function postgres::port
+  STUB_OUTPUT="" mktest::stub_function postgres_dump::_generate_password
+  run postgres_dump::_pgpass_line
+  [ "$status" -ne 0 ]
+  [ -z "$output" ]
+}
+
+# --- _password_from_file ---
+
+@test "_password_from_file reads the password field of the password-file line" {
+  local path="$BATS_TEST_TMPDIR/pgpass"
+  printf 'localhost:7777:*:fake_role:fake-password\n' > "$path"
+  STUB_OUTPUT="$path" mktest::stub_function postgres_dump::_password_file_path
+  run postgres_dump::_password_from_file
+  [ "$output" = "fake-password" ]
+}
+
+@test "_password_from_file fails when the file holds no password" {
+  local path="$BATS_TEST_TMPDIR/pgpass"
+  printf 'localhost:7777:*:fake_role:\n' > "$path"
+  STUB_OUTPUT="$path" mktest::stub_function postgres_dump::_password_file_path
+  STUB_EXIT=1 mktest::stub_function lifecycle::fail
+  run postgres_dump::_password_from_file
+  [ "$status" -ne 0 ]
+  MATCH="$path" mktest::assert_stub_called lifecycle::fail
 }
 
 @test "_install_service stops when reading the schedule fails" {
@@ -385,8 +474,8 @@ setup() {
   STUB_OUTPUT="/n/notify" mktest::stub_function postgres_dump::_notify
   STUB_OUTPUT="/b/pg_dump" mktest::stub_function postgres::pg_dump_path
   STUB_OUTPUT="/b/pg_restore" mktest::stub_function postgres::pg_restore_path
-  STUB_OUTPUT="fake-superuser" mktest::stub_function postgres::superuser
   STUB_OUTPUT="7777" mktest::stub_function postgres::port
+  STUB_OUTPUT="/c/pgpass" mktest::stub_function postgres_dump::_password_file_path
   mktest::stub_function service::install_calendar
   run postgres_dump::_install_service
   [ "$status" -eq 97 ]
@@ -400,8 +489,8 @@ setup() {
   STUB_EXIT=97 mktest::stub_function postgres_dump::_notify
   STUB_OUTPUT="/b/pg_dump" mktest::stub_function postgres::pg_dump_path
   STUB_OUTPUT="/b/pg_restore" mktest::stub_function postgres::pg_restore_path
-  STUB_OUTPUT="fake-superuser" mktest::stub_function postgres::superuser
   STUB_OUTPUT="7777" mktest::stub_function postgres::port
+  STUB_OUTPUT="/c/pgpass" mktest::stub_function postgres_dump::_password_file_path
   mktest::stub_function service::install_calendar
   run postgres_dump::_install_service
   [ "$status" -eq 97 ]
@@ -415,8 +504,8 @@ setup() {
   STUB_OUTPUT="/n/notify" mktest::stub_function postgres_dump::_notify
   STUB_EXIT=97 mktest::stub_function postgres::pg_dump_path
   STUB_OUTPUT="/b/pg_restore" mktest::stub_function postgres::pg_restore_path
-  STUB_OUTPUT="fake-superuser" mktest::stub_function postgres::superuser
   STUB_OUTPUT="7777" mktest::stub_function postgres::port
+  STUB_OUTPUT="/c/pgpass" mktest::stub_function postgres_dump::_password_file_path
   mktest::stub_function service::install_calendar
   run postgres_dump::_install_service
   [ "$status" -eq 97 ]
@@ -430,8 +519,8 @@ setup() {
   STUB_OUTPUT="/n/notify" mktest::stub_function postgres_dump::_notify
   STUB_OUTPUT="/b/pg_dump" mktest::stub_function postgres::pg_dump_path
   STUB_EXIT=97 mktest::stub_function postgres::pg_restore_path
-  STUB_OUTPUT="fake-superuser" mktest::stub_function postgres::superuser
   STUB_OUTPUT="7777" mktest::stub_function postgres::port
+  STUB_OUTPUT="/c/pgpass" mktest::stub_function postgres_dump::_password_file_path
   mktest::stub_function service::install_calendar
   run postgres_dump::_install_service
   [ "$status" -eq 97 ]
@@ -477,6 +566,12 @@ setup() {
   STUB_OUTPUT="/fake/data/postgres_dump" mktest::stub_function artifacts::module_data_dir postgres_dump
   run postgres_dump::_manifest_path
   [ "$output" = "/fake/data/postgres_dump/manifest.tsv" ]
+}
+
+@test "_password_file_path places the password file in the module's own config dir" {
+  STUB_OUTPUT="/fake/config/postgres_dump" mktest::stub_function artifacts::module_config_dir postgres_dump
+  run postgres_dump::_password_file_path
+  [ "$output" = "/fake/config/postgres_dump/pgpass" ]
 }
 
 @test "_dump_script_path places the installed dump script in the module's own data dir" {

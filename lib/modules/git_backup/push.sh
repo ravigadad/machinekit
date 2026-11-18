@@ -24,6 +24,10 @@
 #                           installed, since the daemon's minimal PATH excludes it.
 set -euo pipefail
 
+# How many of a failed git command's last output lines go into the notification.
+# git prints its error last; the full output goes to the job log.
+_PUSH_NOTIFY_OUTPUT_LINES=3
+
 # Identity baked in so the headless service needs no global git config. The git
 # binary is taken from MK_GIT_BACKUP_GIT (the unit pins our installed git, since
 # the daemon's minimal PATH won't find it) and falls back to PATH for manual runs.
@@ -45,6 +49,27 @@ push::notify() {
 push::fail() {
   push::notify "$1"
   exit 1
+}
+
+# Run a command, passing its output through to the job's log. When it fails,
+# notify MESSAGE followed by the last lines of that output, so the notification
+# says why (auth refused, remote rejected), and return nonzero.
+push::run_step() {
+  local message="$1" output
+  shift
+  if output=$("$@" 2>&1); then
+    [ -z "$output" ] || printf '%s\n' "$output"
+    return 0
+  fi
+  [ -z "$output" ] || printf '%s\n' "$output"
+  push::notify "$message${output:+ $(push::output_tail "$output")}"
+  return 1
+}
+
+# The last lines of OUTPUT joined onto one line, for a notification.
+push::output_tail() {
+  printf '%s\n' "$1" | tail -n "$_PUSH_NOTIFY_OUTPUT_LINES" \
+    | awk 'NR > 1 { printf " | " } { printf "%s", $0 } END { print "" }'
 }
 
 # Make the dir a repo pointed at the remote. Cloned dirs already are; a dir that
@@ -131,20 +156,23 @@ push::push() {
   push::git fetch -q origin "$branch" 2>/dev/null || true
 
   if ! push::git rev-parse "origin/$branch" >/dev/null 2>&1; then
-    push::git push -q -u origin "$branch" || push::fail "git_backup: initial push failed ($(pwd))."
+    push::run_step "git_backup: initial push failed ($(pwd))." \
+      push::git push -q -u origin "$branch" || exit 1
     return 0
   fi
 
   if push::git merge-base --is-ancestor "origin/$branch" HEAD; then
     # Origin is an ancestor of HEAD → fast-forward; nothing to reconcile.
-    push::git push -q origin "$branch" || push::fail "git_backup: push failed ($(pwd); network/auth?)."
+    push::run_step "git_backup: push failed ($(pwd))." \
+      push::git push -q origin "$branch" || exit 1
     return 0
   fi
 
   # Diverged: origin carries commits we don't. Rebase onto it; abort + notify on
   # conflict, leaving both sides untouched rather than fanning a bad merge out.
   if push::git pull -q --rebase origin "$branch"; then
-    push::git push -q origin "$branch" || push::fail "git_backup: push after rebase failed ($(pwd))."
+    push::run_step "git_backup: push after rebase failed ($(pwd))." \
+      push::git push -q origin "$branch" || exit 1
   else
     push::git rebase --abort 2>/dev/null || true
     push::fail "git_backup: $(pwd) diverged and rebase conflicted; left untouched. Resolve manually."

@@ -50,6 +50,10 @@ set -euo pipefail
 # Only snapshots carrying this tag are ours to forget.
 _RESTIC_RUN_TAG="machinekit"
 
+# How many of a failed restic run's last output lines go into the notification.
+# restic prints its fatal error last; the full output goes to the job log.
+_RESTIC_RUN_NOTIFY_OUTPUT_LINES=3
+
 restic_run::notify() {
   local message="$1"
   if [ -n "${MK_OFFSITE_BACKUP_NOTIFY:-}" ]; then
@@ -57,6 +61,27 @@ restic_run::notify() {
   else
     logger -t machinekit-offsite-backup "$message" 2>/dev/null || printf '%s\n' "$message" >&2
   fi
+}
+
+# Run a command, passing its output through to the job's log. When it fails,
+# notify MESSAGE followed by the last lines of that output, so the notification
+# says why (credentials rejected, repository locked), and return nonzero.
+restic_run::run_step() {
+  local message="$1" output
+  shift
+  if output=$("$@" 2>&1); then
+    [ -z "$output" ] || printf '%s\n' "$output"
+    return 0
+  fi
+  [ -z "$output" ] || printf '%s\n' "$output"
+  restic_run::notify "$message${output:+ $(restic_run::output_tail "$output")}"
+  return 1
+}
+
+# The last lines of OUTPUT joined onto one line, for a notification.
+restic_run::output_tail() {
+  printf '%s\n' "$1" | tail -n "$_RESTIC_RUN_NOTIFY_OUTPUT_LINES" \
+    | awk 'NR > 1 { printf " | " } { printf "%s", $0 } END { print "" }'
 }
 
 # Put the repository, its password file, and the backend's credentials into the
@@ -150,16 +175,12 @@ restic_run::backup_all() {
   local path max_age_hours failures=0
   while IFS=$'\t' read -u 3 -r path max_age_hours; do
     [ -n "$path" ] || continue
-    restic_run::backup_path "$path" || {
-      restic_run::notify "offsite_backup: backup failed for $path."
-      failures=$((failures + 1))
-    }
+    restic_run::run_step "offsite_backup: backup failed for $path." \
+      restic_run::backup_path "$path" || failures=$((failures + 1))
     restic_run::warn_if_stale "$path" "$max_age_hours" || failures=$((failures + 1))
   done 3< "$manifest"
-  restic_run::forget || {
-    restic_run::notify "offsite_backup: prune failed; snapshots outside the keep policy are still there."
-    failures=$((failures + 1))
-  }
+  restic_run::run_step "offsite_backup: prune failed; snapshots outside the keep policy are still there." \
+    restic_run::forget || failures=$((failures + 1))
   [ "$failures" -eq 0 ] || exit 1
 }
 
@@ -175,22 +196,20 @@ restic_run::probe() {
 # Create the repository. Reached only once the operator has consented, and only
 # when probe has already said there is nothing there.
 restic_run::init() {
-  restic_run::restic init || {
-    restic_run::notify "offsite_backup: the repository could not be created — check the destination and the backend credentials."
-    exit 1
-  }
+  restic_run::run_step "offsite_backup: the repository could not be created — check the destination and the backend credentials." \
+    restic_run::restic init || exit 1
 }
 
 # Verify the repository. Structure only by default — --read-data re-downloads
 # every pack, so it stays opt-in and is the one operation with real egress cost
-# on a paid-egress backend.
+# on a paid-egress backend. The optional flag is appended to the whole command,
+# never kept in an array of its own: launchd runs this under macOS's bash 3.2,
+# where expanding an empty array under `set -u` aborts the script.
 restic_run::check() {
-  local -a options=()
-  [ "${MK_OFFSITE_BACKUP_READ_DATA:-false}" = "true" ] && options+=(--read-data)
-  restic_run::restic check "${options[@]}" || {
-    restic_run::notify "offsite_backup: repository check failed — the remote copy may not be restorable."
-    exit 1
-  }
+  local -a check_command=(restic_run::restic check)
+  [ "${MK_OFFSITE_BACKUP_READ_DATA:-false}" = "true" ] && check_command+=(--read-data)
+  restic_run::run_step "offsite_backup: repository check failed — the remote copy may not be restorable." \
+    "${check_command[@]}" || exit 1
 }
 
 restic_run::main() {

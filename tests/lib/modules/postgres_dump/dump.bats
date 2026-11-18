@@ -29,11 +29,14 @@ EOF
 # EXIT_STATUS. Writing the file even on the failure path is deliberate: it is what
 # a real pg_dump does when it dies partway, and it is what makes the partial-file
 # cleanup assertions meaningful.
+# STDERR_TEXT, when given, is printed to stderr first, as a real tool reports
+# why it failed.
 fake_pg_dump() {
-  local exit_status="$1"
+  local exit_status="$1" stderr_text="${2:-}"
   cat > "$PG_DUMP" <<EOF
 #!/usr/bin/env bash
 printf '%s\n' "\$*" >> "$PG_DUMP_ARGV"
+[ -z "$stderr_text" ] || printf '%b\n' "$stderr_text" >&2
 while [ \$# -gt 0 ]; do
   if [ "\$1" = "-f" ]; then printf 'dump-bytes\n' > "\$2"; fi
   shift
@@ -44,10 +47,11 @@ EOF
 }
 
 fake_pg_restore() {
-  local exit_status="$1"
+  local exit_status="$1" stderr_text="${2:-}"
   cat > "$PG_RESTORE" <<EOF
 #!/usr/bin/env bash
 printf '%s\n' "\$*" >> "$PG_RESTORE_ARGV"
+[ -z "$stderr_text" ] || printf '%b\n' "$stderr_text" >&2
 exit $exit_status
 EOF
   chmod +x "$PG_RESTORE"
@@ -140,6 +144,23 @@ generation_count() {
   [ -z "$(find "$DIRECTORY" -maxdepth 1 -name '.*partial')" ]
 }
 
+@test "a failed dump's notification carries pg_dump's own error, and its full output reaches the job log" {
+  fake_pg_dump 1 "pg_dump: error: fake connection refused"
+  run_dump
+  [ "$status" -ne 0 ]
+  grep -q "dump failed.*fake connection refused" "$NOTIFY_LOG"
+  [[ "$output" == *"fake connection refused"* ]]
+}
+
+@test "a failed dump's notification carries only the last lines of a long error" {
+  fake_pg_dump 1 "fake-line-1\\nfake-line-2\\nfake-line-3\\nfake-line-4\\nfake-line-5"
+  run_dump
+  [[ "$output" == *"fake-line-1"* ]]
+  grep -q "fake-line-5" "$NOTIFY_LOG"
+  run grep -q "fake-line-1" "$NOTIFY_LOG"
+  [ "$status" -ne 0 ]
+}
+
 @test "a failed dump never reaches the verify step" {
   fake_pg_dump 1
   run_dump
@@ -154,6 +175,13 @@ generation_count() {
   [ "$status" -ne 0 ]
   grep -q "unreadable" "$NOTIFY_LOG"
   [ "$(generation_count somedb)" -eq 0 ]
+}
+
+@test "an unreadable dump's notification carries pg_restore's own error" {
+  fake_pg_restore 1 "pg_restore: error: fake not a valid archive"
+  run_dump
+  [ "$status" -ne 0 ]
+  grep -q "unreadable.*fake not a valid archive" "$NOTIFY_LOG"
 }
 
 @test "an unreadable dump does not prune the good generations it would have replaced" {
