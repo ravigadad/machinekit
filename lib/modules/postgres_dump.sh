@@ -53,6 +53,7 @@ postgres_dump::installed_file_patterns() {
   printf '%s\n' \
     $'data\tmanifest.tsv' \
     $'data\tdump.sh' \
+    $'data\t'"${ service::job_library_name; }" \
     $'config\tpgpass'
 }
 
@@ -64,6 +65,7 @@ postgres_dump::installed_artifacts() {
   [ -n "$databases" ] || return 0
   printf 'service\t%s\n' "$_POSTGRES_DUMP_SERVICE_LABEL"
   printf 'file\t%s\n' "$(postgres_dump::_manifest_path)" "$(postgres_dump::_dump_script_path)" \
+    "${ service::job_library_path "$(postgres_dump::_dump_script_path)"; }" \
     "$(postgres_dump::_password_file_path)"
 }
 
@@ -163,11 +165,7 @@ postgres_dump::_manifest_row() {
 }
 
 postgres_dump::_install_dump_script() {
-  local dest
-  dest=$(postgres_dump::_dump_script_path)
-  mkdir -p "$(dirname "$dest")"
-  cp "$_POSTGRES_DUMP_DIR/postgres_dump/dump.sh" "$dest"
-  chmod 755 "$dest"
+  service::install_script "$_POSTGRES_DUMP_DIR/postgres_dump/dump.sh" "$(postgres_dump::_dump_script_path)"
 }
 
 # The role the dump connects as: its password set from the password file (which
@@ -225,9 +223,8 @@ postgres_dump::_password_from_file() {
 # Schedule the one service that runs the dump script for every database, pinning
 # the manifest, notify command, client-tool paths, and connection identity into
 # its environment. PGPASSFILE is libpq's own variable, so pg_dump reads the
-# password without the dump script handling it. The dump script is a
-# self-contained executable, so service::install_calendar runs it directly (its
-# shebang picks the interpreter); the launchd/systemd split is service.sh's job.
+# password without the dump script handling it. The launchd/systemd split, and
+# the bash the script runs under, are service.sh's job.
 postgres_dump::_install_service() {
   service::install_calendar \
     "$_POSTGRES_DUMP_SERVICE_LABEL" \

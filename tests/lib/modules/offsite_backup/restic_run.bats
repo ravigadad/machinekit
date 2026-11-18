@@ -8,6 +8,9 @@ load "${BATS_TEST_DIRNAME}/../../../test_helper"
 
 setup() {
   SCRIPT="$MACHINEKIT_DIR/lib/modules/offsite_backup/restic_run.sh"
+  # In this checkout the job library is not beside the script, as it is once
+  # installed, so point the script at it.
+  export MK_JOB_LIBRARY="$MACHINEKIT_DIR/lib/machinekit/service/job.sh"
   SOURCE_DIR="$BATS_TEST_TMPDIR/source"
   MANIFEST="$BATS_TEST_TMPDIR/manifest.tsv"
   NOTIFY_LOG="$BATS_TEST_TMPDIR/notify.log"
@@ -81,6 +84,18 @@ run_backup() {
 }
 
 # --- backup: the golden path ---
+
+@test "uses the job library installed beside it" {
+  local installed="$BATS_TEST_TMPDIR/installed"
+  mkdir -p "$installed"
+  cp "$SCRIPT" "$installed/restic_run.sh"
+  cp "$MK_JOB_LIBRARY" "$installed/job.sh"
+  SCRIPT="$installed/restic_run.sh"
+  unset MK_JOB_LIBRARY
+  run_backup
+  [ "$status" -eq 0 ]
+  grep -q "^backup .*$SOURCE_DIR" "$RESTIC_ARGV"
+}
 
 @test "backs up each configured path and prunes to the keep policy" {
   run_backup
@@ -303,4 +318,26 @@ run_backup() {
   run_mode bogus
   [ "$status" -ne 0 ]
   grep -q "unknown mode" "$NOTIFY_LOG"
+}
+
+# --- failures no step reports ---
+
+@test "a backup run missing its repository alerts that the run failed unexpectedly" {
+  printf '%s\t%s\n' "$SOURCE_DIR" "" > "$MANIFEST"
+  run_mode backup MK_OFFSITE_BACKUP_REPOSITORY=
+  [ "$status" -ne 0 ]
+  grep -q "offsite_backup: the backup run failed unexpectedly" "$NOTIFY_LOG"
+}
+
+@test "a check run missing its repository alerts that the check failed unexpectedly" {
+  run_mode check MK_OFFSITE_BACKUP_REPOSITORY=
+  [ "$status" -ne 0 ]
+  grep -q "offsite_backup: the repository check failed unexpectedly" "$NOTIFY_LOG"
+}
+
+@test "a failed backup path is alerted once, not again as an unexpected failure" {
+  fake_restic_failing_on "backup"
+  run_backup
+  [ "$status" -ne 0 ]
+  [ "$(wc -l < "$NOTIFY_LOG" | tr -d ' ')" = "1" ]
 }

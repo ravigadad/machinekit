@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Standalone scan for Syncthing's *.sync-conflict-* files. syncthing installs
-# this and schedules it on a service unit; it runs out-of-band, so it depends
-# on nothing but find and is self-contained (it sources no machinekit library).
+# Scheduled scan for Syncthing's *.sync-conflict-* files. syncthing installs this
+# and schedules it on a service unit; it runs out-of-band, so it depends on
+# nothing but find and the job library installed beside it
+# (lib/machinekit/service/job.sh), which reports what it finds and any trouble.
 #
 # Syncthing silently renames the losing side of a concurrent same-file edit to
 # *.sync-conflict-*; nothing else surfaces it. This scans every configured
@@ -11,22 +12,19 @@
 # than a one-time ping that could be missed.
 #
 # Folders come from a manifest, one path per line. A path that doesn't
-# currently exist is treated as having no conflicts, not an error.
+# currently exist is treated as having no conflicts, not an error. A scan that
+# fails alerts through the job library's exit handler.
 #
 # Config via env:
 #   MK_SYNCTHING_CONFLICT_MANIFEST  the manifest file (paths as above); required
 #   MK_SYNCTHING_CONFLICT_NOTIFY    command run with one message arg on trouble;
 #                                    optional (default: logger -t machinekit-syncthing-conflicts)
+#   MK_JOB_LIBRARY                  the job library; optional (default: job.sh beside
+#                                    this script, where it is installed)
 set -euo pipefail
 
-conflict_scan::notify() {
-  local message="$1"
-  if [ -n "${MK_SYNCTHING_CONFLICT_NOTIFY:-}" ]; then
-    "$MK_SYNCTHING_CONFLICT_NOTIFY" "$message" || true
-  else
-    logger -t machinekit-syncthing-conflicts "$message" 2>/dev/null || printf '%s\n' "$message" >&2
-  fi
-}
+# shellcheck source=../../machinekit/service/job.sh
+source "${MK_JOB_LIBRARY:-$(dirname "${BASH_SOURCE[0]}")/job.sh}"
 
 # Conflict file paths under one folder, one per line (empty if none, including
 # when the folder doesn't currently exist).
@@ -37,6 +35,8 @@ conflict_scan::find_in_folder() {
 }
 
 conflict_scan::main() {
+  job::configure machinekit-syncthing-conflicts "${MK_SYNCTHING_CONFLICT_NOTIFY:-}"
+  job::alert_on_unexpected_exit "syncthing: the conflict scan"
   local manifest="${MK_SYNCTHING_CONFLICT_MANIFEST:?MK_SYNCTHING_CONFLICT_MANIFEST required}"
   local folder conflicts=""
   while IFS= read -u 3 -r folder; do
@@ -45,7 +45,7 @@ conflict_scan::main() {
   done 3< "$manifest"
   conflicts=$(printf '%s' "$conflicts" | awk 'NF')
   [ -n "$conflicts" ] || return 0
-  conflict_scan::notify "syncthing: unresolved sync-conflict files:
+  job::notify "syncthing: unresolved sync-conflict files:
 $conflicts"
 }
 

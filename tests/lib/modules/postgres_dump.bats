@@ -88,22 +88,24 @@ setup() {
 
 # --- installed_file_patterns ---
 
-@test "installed_file_patterns names the manifest, the dump script and the password file" {
+@test "installed_file_patterns names the manifest, the dump script, its job library and the password file" {
+  STUB_OUTPUT="fake-library.sh" mktest::stub_function service::job_library_name
   run postgres_dump::installed_file_patterns
   [ "$status" -eq 0 ]
-  [ "$output" = $'data\tmanifest.tsv\ndata\tdump.sh\nconfig\tpgpass' ]
+  [ "$output" = $'data\tmanifest.tsv\ndata\tdump.sh\ndata\tfake-library.sh\nconfig\tpgpass' ]
 }
 
 # --- installed_artifacts ---
 
-@test "installed_artifacts declares the service, its manifest, its dump script and the password file" {
+@test "installed_artifacts declares the service, its manifest, its dump script and job library, and the password file" {
   STUB_OUTPUT='[{"name":"the_db"}]' mktest::stub_function postgres_dump::_databases
   STUB_OUTPUT="/fake/manifest.tsv" mktest::stub_function postgres_dump::_manifest_path
   STUB_OUTPUT="/fake/dump.sh" mktest::stub_function postgres_dump::_dump_script_path
+  STUB_OUTPUT="/fake/job.sh" mktest::stub_function service::job_library_path "/fake/dump.sh"
   STUB_OUTPUT="/fake/pgpass" mktest::stub_function postgres_dump::_password_file_path
   run postgres_dump::installed_artifacts
   [ "$status" -eq 0 ]
-  [ "$output" = $'service\tpostgres-dump\nfile\t/fake/manifest.tsv\nfile\t/fake/dump.sh\nfile\t/fake/pgpass' ]
+  [ "$output" = $'service\tpostgres-dump\nfile\t/fake/manifest.tsv\nfile\t/fake/dump.sh\nfile\t/fake/job.sh\nfile\t/fake/pgpass' ]
 }
 
 @test "installed_artifacts declares nothing when no databases are configured" {
@@ -342,12 +344,11 @@ setup() {
 
 # --- _install_dump_script ---
 
-@test "_install_dump_script installs the real script as executable" {
-  local dest="$BATS_TEST_TMPDIR/install/dump.sh"
-  STUB_OUTPUT="$dest" mktest::stub_function postgres_dump::_dump_script_path
+@test "_install_dump_script installs the module's script at its installed path" {
+  STUB_OUTPUT="/fake/script.sh" mktest::stub_function postgres_dump::_dump_script_path
+  mktest::stub_function service::install_script "$_POSTGRES_DUMP_DIR/postgres_dump/dump.sh" "/fake/script.sh"
   postgres_dump::_install_dump_script
-  [ -x "$dest" ]
-  grep -q "pg_restore --list" "$dest"
+  mktest::assert_stub_called service::install_script "$_POSTGRES_DUMP_DIR/postgres_dump/dump.sh" "/fake/script.sh"
 }
 
 # --- _install_service ---

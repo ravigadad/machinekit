@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Periodic push-only-with-abort git backup of one or more working dirs. git_backup
 # installs this and schedules it on a service unit; it runs out-of-band, so it
-# depends on nothing but git and is self-contained (it sources no machinekit
-# library).
+# depends on nothing but git and the job library installed beside it
+# (lib/machinekit/service/job.sh), which reports trouble.
 #
 # Each folder is single-writer by contract: exactly one machine should back a
 # given folder up. The remote is treated as downstream-only — the 99% path is
@@ -13,7 +13,8 @@
 # Folders come from a tab-separated manifest, one row per folder:
 #   <path>\t<remote>\t<ssh_key_path>   (empty ssh_key_path = use ambient SSH)
 # A folder's failure is notified and the run moves on to the next; the script
-# exits non-zero if any folder failed.
+# exits non-zero if any folder failed. A failure no step reports, in the run or
+# in one folder, still alerts through the job library's exit handler.
 #
 # Config via env:
 #   MK_GIT_BACKUP_MANIFEST  the manifest file (rows as above); required
@@ -22,54 +23,18 @@
 #   MK_GIT_BACKUP_GIT       the git binary to use; optional (default: git on PATH).
 #                           The service unit pins this to the git machinekit
 #                           installed, since the daemon's minimal PATH excludes it.
+#   MK_JOB_LIBRARY          the job library; optional (default: job.sh beside this
+#                           script, where it is installed)
 set -euo pipefail
 
-# How many of a failed git command's last output lines go into the notification.
-# git prints its error last; the full output goes to the job log.
-_PUSH_NOTIFY_OUTPUT_LINES=3
+# shellcheck source=../../machinekit/service/job.sh
+source "${MK_JOB_LIBRARY:-$(dirname "${BASH_SOURCE[0]}")/job.sh}"
 
 # Identity baked in so the headless service needs no global git config. The git
 # binary is taken from MK_GIT_BACKUP_GIT (the unit pins our installed git, since
 # the daemon's minimal PATH won't find it) and falls back to PATH for manual runs.
 push::git() {
   "${MK_GIT_BACKUP_GIT:-git}" -c user.name=machinekit -c user.email=machinekit@localhost "$@"
-}
-
-push::notify() {
-  local message="$1"
-  if [ -n "${MK_GIT_BACKUP_NOTIFY:-}" ]; then
-    "$MK_GIT_BACKUP_NOTIFY" "$message" || true
-  else
-    logger -t machinekit-git-backup "$message" 2>/dev/null || printf '%s\n' "$message" >&2
-  fi
-}
-
-# Notify and exit. Called only inside a per-folder subshell (see push::main), so it
-# ends that one folder's backup without aborting the rest of the run.
-push::fail() {
-  push::notify "$1"
-  exit 1
-}
-
-# Run a command, passing its output through to the job's log. When it fails,
-# notify MESSAGE followed by the last lines of that output, so the notification
-# says why (auth refused, remote rejected), and return nonzero.
-push::run_step() {
-  local message="$1" output
-  shift
-  if output=$("$@" 2>&1); then
-    [ -z "$output" ] || printf '%s\n' "$output"
-    return 0
-  fi
-  [ -z "$output" ] || printf '%s\n' "$output"
-  push::notify "$message${output:+ $(push::output_tail "$output")}"
-  return 1
-}
-
-# The last lines of OUTPUT joined onto one line, for a notification.
-push::output_tail() {
-  printf '%s\n' "$1" | tail -n "$_PUSH_NOTIFY_OUTPUT_LINES" \
-    | awk 'NR > 1 { printf " | " } { printf "%s", $0 } END { print "" }'
 }
 
 # Make the dir a repo pointed at the remote. Cloned dirs already are; a dir that
@@ -156,35 +121,36 @@ push::push() {
   push::git fetch -q origin "$branch" 2>/dev/null || true
 
   if ! push::git rev-parse "origin/$branch" >/dev/null 2>&1; then
-    push::run_step "git_backup: initial push failed ($(pwd))." \
-      push::git push -q -u origin "$branch" || exit 1
+    job::run_step "git_backup: initial push failed ($(pwd))." \
+      push::git push -q -u origin "$branch" || job::exit_failed
     return 0
   fi
 
   if push::git merge-base --is-ancestor "origin/$branch" HEAD; then
     # Origin is an ancestor of HEAD → fast-forward; nothing to reconcile.
-    push::run_step "git_backup: push failed ($(pwd))." \
-      push::git push -q origin "$branch" || exit 1
+    job::run_step "git_backup: push failed ($(pwd))." \
+      push::git push -q origin "$branch" || job::exit_failed
     return 0
   fi
 
   # Diverged: origin carries commits we don't. Rebase onto it; abort + notify on
   # conflict, leaving both sides untouched rather than fanning a bad merge out.
   if push::git pull -q --rebase origin "$branch"; then
-    push::run_step "git_backup: push after rebase failed ($(pwd))." \
-      push::git push -q origin "$branch" || exit 1
+    job::run_step "git_backup: push after rebase failed ($(pwd))." \
+      push::git push -q origin "$branch" || job::exit_failed
   else
     push::git rebase --abort 2>/dev/null || true
-    push::fail "git_backup: $(pwd) diverged and rebase conflicted; left untouched. Resolve manually."
+    job::fail "git_backup: $(pwd) diverged and rebase conflicted; left untouched. Resolve manually."
   fi
 }
 
 # Back up a single folder. Runs entirely within a subshell (see push::main) so the
-# cd, the per-folder GIT_SSH_COMMAND, and any push::fail all stay scoped to this
-# one folder.
+# cd, the per-folder GIT_SSH_COMMAND, its exit handler and any job::fail all stay
+# scoped to this one folder.
 push::backup_folder() {
   local path="$1" remote="$2" ssh_key="$3"
-  cd "$path" 2>/dev/null || push::fail "git_backup: dir not found: $path"
+  job::alert_on_unexpected_exit "git_backup: backup of $path"
+  cd "$path" 2>/dev/null || job::fail "git_backup: dir not found: $path"
   # accept-new auto-trusts an unknown host key on first contact (the daemon has no
   # TTY to answer StrictHostKeyChecking=ask) while still refusing a changed key.
   [ -n "$ssh_key" ] && export GIT_SSH_COMMAND="ssh -i $ssh_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
@@ -197,13 +163,15 @@ push::backup_folder() {
 # notified inside its subshell and the loop continues; the run exits non-zero if
 # any folder failed, so the service log records the trouble.
 push::main() {
+  job::configure machinekit-git-backup "${MK_GIT_BACKUP_NOTIFY:-}"
+  job::alert_on_unexpected_exit "git_backup: the backup run"
   local manifest="${MK_GIT_BACKUP_MANIFEST:?MK_GIT_BACKUP_MANIFEST required}"
-  local path remote ssh_key failures=0
+  local path remote ssh_key
   while IFS=$'\t' read -u 3 -r path remote ssh_key; do
     [ -n "$path" ] || continue
-    ( push::backup_folder "$path" "$remote" "$ssh_key" ) || failures=$((failures + 1))
+    job::run_item push::backup_folder "$path" "$remote" "$ssh_key"
   done 3< "$manifest"
-  [ "$failures" -eq 0 ] || exit 1
+  job::exit_failed_if_items_failed
 }
 
 # Run only when executed, not when sourced (so tests can exercise functions).

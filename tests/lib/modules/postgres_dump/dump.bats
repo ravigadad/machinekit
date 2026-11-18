@@ -8,6 +8,9 @@ load "${BATS_TEST_DIRNAME}/../../../test_helper"
 
 setup() {
   SCRIPT="$MACHINEKIT_DIR/lib/modules/postgres_dump/dump.sh"
+  # In this checkout the job library is not beside the script, as it is once
+  # installed, so point the script at it.
+  export MK_JOB_LIBRARY="$MACHINEKIT_DIR/lib/machinekit/service/job.sh"
   DIRECTORY="$BATS_TEST_TMPDIR/dumps"
   MANIFEST="$BATS_TEST_TMPDIR/manifest.tsv"
   NOTIFY_LOG="$BATS_TEST_TMPDIR/notify.log"
@@ -93,6 +96,19 @@ generation_count() {
 }
 
 # --- the golden path ---
+
+@test "uses the job library installed beside it" {
+  local installed="$BATS_TEST_TMPDIR/installed"
+  mkdir -p "$installed"
+  cp "$SCRIPT" "$installed/dump.sh"
+  cp "$MK_JOB_LIBRARY" "$installed/job.sh"
+  printf '%s\t%s\t%s\n' "somedb" "$DIRECTORY" "3" > "$MANIFEST"
+  SCRIPT="$installed/dump.sh"
+  unset MK_JOB_LIBRARY
+  run_manifest
+  [ "$status" -eq 0 ]
+  [ "$(generation_count somedb)" -eq 1 ]
+}
 
 @test "dumps each database to a timestamped file in its directory" {
   run_dump
@@ -275,4 +291,37 @@ EOF
   grep -q "dump failed" "$NOTIFY_LOG"
   [ "$(generation_count somedb)" -eq 1 ]
   [ "$(generation_count faildb)" -eq 0 ]
+}
+
+# --- failures no step reports ---
+
+@test "a run whose manifest can't be read alerts that the run failed unexpectedly" {
+  MANIFEST="$BATS_TEST_TMPDIR/missing-manifest.tsv"
+  run_manifest
+  [ "$status" -ne 0 ]
+  grep -q "postgres_dump: the dump run failed unexpectedly" "$NOTIFY_LOG"
+}
+
+@test "a dump that can't be moved into place alerts for that database alone" {
+  # pg_dump succeeds, then the directory turns read-only, so publishing fails.
+  cat > "$PG_DUMP" <<EOF
+#!/usr/bin/env bash
+while [ \$# -gt 0 ]; do
+  if [ "\$1" = "-f" ]; then printf 'dump-bytes\n' > "\$2"; chmod 555 "\$(dirname "\$2")"; fi
+  shift
+done
+EOF
+  chmod +x "$PG_DUMP"
+  run_dump
+  chmod 755 "$DIRECTORY"
+  [ "$status" -ne 0 ]
+  [ "$(wc -l < "$NOTIFY_LOG" | tr -d ' ')" = "1" ]
+  grep -q "postgres_dump: dump of 'somedb' failed unexpectedly" "$NOTIFY_LOG"
+}
+
+@test "a failed dump is alerted once, not again as an unexpected failure" {
+  fake_pg_dump 1 "pg_dump: error: fake connection refused"
+  run_dump
+  [ "$status" -ne 0 ]
+  [ "$(wc -l < "$NOTIFY_LOG" | tr -d ' ')" = "1" ]
 }

@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Standalone, scheduled restic driver. offsite_backup installs this once and
-# schedules it twice — a frequent backup run and a rarer repository check — so it
-# runs out-of-band, depends on nothing but restic, and is self-contained (it
-# sources no machinekit library). Which of the two jobs a given service unit runs
-# is pinned in its environment, because the scheduler primitive takes an
-# executable and no arguments.
+# Scheduled restic driver. offsite_backup installs this once and schedules it
+# twice — a frequent backup run and a rarer repository check — so it runs
+# out-of-band and depends on nothing but restic and the job library installed
+# beside it (lib/machinekit/service/job.sh), which reports trouble. Which of the
+# two jobs a given service unit runs is pinned in its environment, because the
+# scheduler primitive takes a script and no arguments.
 #
 # Four modes, all sharing one credential setup. Two are scheduled: `backup` backs
 # each configured path up, notices a path whose contents have gone stale, then
@@ -25,7 +25,9 @@
 # Paths come from a tab-separated manifest, one row per path:
 #   <path>\t<max_age_hours>   (empty or 0 = no staleness deadline)
 # A path's failure is notified and the run moves on to the next; the script exits
-# non-zero if anything failed.
+# non-zero if anything failed. In the two scheduled modes, a failure no step
+# reports still alerts through the job library's exit handler. probe and init
+# report to the apply that runs them instead.
 #
 # Config via env:
 #   MK_OFFSITE_BACKUP_MODE              backup | check | probe | init; required
@@ -45,44 +47,15 @@
 #   MK_OFFSITE_BACKUP_READ_DATA         check mode: "true" re-downloads and re-reads
 #                                       every pack (expensive, and the one operation
 #                                       with real egress cost)
+#   MK_JOB_LIBRARY                      the job library; optional (default: job.sh
+#                                       beside this script, where it is installed)
 set -euo pipefail
+
+# shellcheck source=../../machinekit/service/job.sh
+source "${MK_JOB_LIBRARY:-$(dirname "${BASH_SOURCE[0]}")/job.sh}"
 
 # Only snapshots carrying this tag are ours to forget.
 _RESTIC_RUN_TAG="machinekit"
-
-# How many of a failed restic run's last output lines go into the notification.
-# restic prints its fatal error last; the full output goes to the job log.
-_RESTIC_RUN_NOTIFY_OUTPUT_LINES=3
-
-restic_run::notify() {
-  local message="$1"
-  if [ -n "${MK_OFFSITE_BACKUP_NOTIFY:-}" ]; then
-    "$MK_OFFSITE_BACKUP_NOTIFY" "$message" || true
-  else
-    logger -t machinekit-offsite-backup "$message" 2>/dev/null || printf '%s\n' "$message" >&2
-  fi
-}
-
-# Run a command, passing its output through to the job's log. When it fails,
-# notify MESSAGE followed by the last lines of that output, so the notification
-# says why (credentials rejected, repository locked), and return nonzero.
-restic_run::run_step() {
-  local message="$1" output
-  shift
-  if output=$("$@" 2>&1); then
-    [ -z "$output" ] || printf '%s\n' "$output"
-    return 0
-  fi
-  [ -z "$output" ] || printf '%s\n' "$output"
-  restic_run::notify "$message${output:+ $(restic_run::output_tail "$output")}"
-  return 1
-}
-
-# The last lines of OUTPUT joined onto one line, for a notification.
-restic_run::output_tail() {
-  printf '%s\n' "$1" | tail -n "$_RESTIC_RUN_NOTIFY_OUTPUT_LINES" \
-    | awk 'NR > 1 { printf " | " } { printf "%s", $0 } END { print "" }'
-}
 
 # Put the repository, its password file, and the backend's credentials into the
 # environment restic reads. The service unit pins the two secret *paths*, never
@@ -155,7 +128,7 @@ restic_run::warn_if_stale() {
   local path="$1" max_age_hours="$2"
   [ -n "$max_age_hours" ] && [ "$max_age_hours" -gt 0 ] 2>/dev/null || return 0
   restic_run::has_recent_file "$path" "$max_age_hours" && return 0
-  restic_run::notify "offsite_backup: nothing under $path has changed in ${max_age_hours}h — whatever writes there may have stopped."
+  job::notify "offsite_backup: nothing under $path has changed in ${max_age_hours}h — whatever writes there may have stopped."
   return 1
 }
 
@@ -175,13 +148,13 @@ restic_run::backup_all() {
   local path max_age_hours failures=0
   while IFS=$'\t' read -u 3 -r path max_age_hours; do
     [ -n "$path" ] || continue
-    restic_run::run_step "offsite_backup: backup failed for $path." \
+    job::run_step "offsite_backup: backup failed for $path." \
       restic_run::backup_path "$path" || failures=$((failures + 1))
     restic_run::warn_if_stale "$path" "$max_age_hours" || failures=$((failures + 1))
   done 3< "$manifest"
-  restic_run::run_step "offsite_backup: prune failed; snapshots outside the keep policy are still there." \
+  job::run_step "offsite_backup: prune failed; snapshots outside the keep policy are still there." \
     restic_run::forget || failures=$((failures + 1))
-  [ "$failures" -eq 0 ] || exit 1
+  [ "$failures" -eq 0 ] || job::exit_failed
 }
 
 # Answer whether the repository exists and opens with this password — reading its
@@ -196,24 +169,27 @@ restic_run::probe() {
 # Create the repository. Reached only once the operator has consented, and only
 # when probe has already said there is nothing there.
 restic_run::init() {
-  restic_run::run_step "offsite_backup: the repository could not be created — check the destination and the backend credentials." \
-    restic_run::restic init || exit 1
+  job::run_step "offsite_backup: the repository could not be created — check the destination and the backend credentials." \
+    restic_run::restic init || job::exit_failed
 }
 
 # Verify the repository. Structure only by default — --read-data re-downloads
 # every pack, so it stays opt-in and is the one operation with real egress cost
-# on a paid-egress backend. The optional flag is appended to the whole command,
-# never kept in an array of its own: launchd runs this under macOS's bash 3.2,
-# where expanding an empty array under `set -u` aborts the script.
+# on a paid-egress backend.
 restic_run::check() {
   local -a check_command=(restic_run::restic check)
   [ "${MK_OFFSITE_BACKUP_READ_DATA:-false}" = "true" ] && check_command+=(--read-data)
-  restic_run::run_step "offsite_backup: repository check failed — the remote copy may not be restorable." \
-    "${check_command[@]}" || exit 1
+  job::run_step "offsite_backup: repository check failed — the remote copy may not be restorable." \
+    "${check_command[@]}" || job::exit_failed
 }
 
 restic_run::main() {
   local mode="${MK_OFFSITE_BACKUP_MODE:?MK_OFFSITE_BACKUP_MODE required}"
+  job::configure machinekit-offsite-backup "${MK_OFFSITE_BACKUP_NOTIFY:-}"
+  case "$mode" in
+    backup) job::alert_on_unexpected_exit "offsite_backup: the backup run" ;;
+    check)  job::alert_on_unexpected_exit "offsite_backup: the repository check" ;;
+  esac
   restic_run::export_credentials
   case "$mode" in
     backup) restic_run::backup_all ;;
@@ -221,8 +197,7 @@ restic_run::main() {
     probe)  restic_run::probe ;;
     init)   restic_run::init ;;
     *)
-      restic_run::notify "offsite_backup: unknown mode '$mode' (expected backup, check, probe, or init)."
-      exit 1
+      job::fail "offsite_backup: unknown mode '$mode' (expected backup, check, probe, or init)."
       ;;
   esac
 }

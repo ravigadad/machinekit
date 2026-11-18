@@ -165,22 +165,24 @@ offsite_backup/second_repo/credentials\tfalse\tfalse' ]
 
 # --- installed_file_patterns ---
 
-@test "installed_file_patterns names the run script, each repository's manifest and each repository's secret files" {
+@test "installed_file_patterns names the run script, its job library, each repository's manifest and each repository's secret files" {
+  STUB_OUTPUT="fake-library.sh" mktest::stub_function service::job_library_name
   run offsite_backup::installed_file_patterns
   [ "$status" -eq 0 ]
-  [ "$output" = $'data\trestic_run.sh\ndata\tmanifest-*.tsv\nconfig\t*/repository_password\nconfig\t*/credentials' ]
+  [ "$output" = $'data\trestic_run.sh\ndata\tfake-library.sh\ndata\tmanifest-*.tsv\nconfig\t*/repository_password\nconfig\t*/credentials' ]
 }
 
 # --- installed_artifacts ---
 
-@test "installed_artifacts declares the shared run script, then each repository's artifacts" {
+@test "installed_artifacts declares the shared run script and its job library, then each repository's artifacts" {
   STUB_OUTPUT='[{"name":"one"},{"name":"two"}]' mktest::stub_function offsite_backup::_repositories
   STUB_OUTPUT="/fake/restic_run.sh" mktest::stub_function offsite_backup::_run_script_path
+  STUB_OUTPUT="/fake/job.sh" mktest::stub_function service::job_library_path "/fake/restic_run.sh"
   STUB_OUTPUT=$'service\tone' mktest::stub_function offsite_backup::_repository_artifacts '{"name":"one"}'
   STUB_OUTPUT=$'service\ttwo' mktest::stub_function offsite_backup::_repository_artifacts '{"name":"two"}'
   run offsite_backup::installed_artifacts
   [ "$status" -eq 0 ]
-  [ "$output" = $'file\t/fake/restic_run.sh\nservice\tone\nservice\ttwo' ]
+  [ "$output" = $'file\t/fake/restic_run.sh\nfile\t/fake/job.sh\nservice\tone\nservice\ttwo' ]
 }
 
 @test "installed_artifacts declares nothing when no repositories are configured" {
@@ -641,12 +643,11 @@ offsite_backup/second_repo/credentials\tfalse\tfalse' ]
 
 # --- _install_run_script ---
 
-@test "_install_run_script installs the real script as executable" {
-  local dest="$BATS_TEST_TMPDIR/install/restic_run.sh"
-  STUB_OUTPUT="$dest" mktest::stub_function offsite_backup::_run_script_path
+@test "_install_run_script installs the module's script at its installed path" {
+  STUB_OUTPUT="/fake/script.sh" mktest::stub_function offsite_backup::_run_script_path
+  mktest::stub_function service::install_script "$_OFFSITE_BACKUP_DIR/offsite_backup/restic_run.sh" "/fake/script.sh"
   offsite_backup::_install_run_script
-  [ -x "$dest" ]
-  grep -q "MK_OFFSITE_BACKUP_MODE" "$dest"
+  mktest::assert_stub_called service::install_script "$_OFFSITE_BACKUP_DIR/offsite_backup/restic_run.sh" "/fake/script.sh"
 }
 
 # --- _ensure_repository ---
@@ -724,18 +725,24 @@ offsite_backup/second_repo/credentials\tfalse\tfalse' ]
 
 # --- _run_script_mode ---
 
-@test "_run_script_mode runs the installed script with the mode and the repository's own env" {
-  local script="$BATS_TEST_TMPDIR/restic_run.sh"
-  cat > "$script" <<EOF
-#!/usr/bin/env bash
-printf '%s\n' "\$MK_OFFSITE_BACKUP_MODE" "\${FAKE_COMMON:-}"
-EOF
-  chmod +x "$script"
+@test "_run_script_mode runs the installed script under the job bash, with the mode and the repository's own env" {
+  local script="$BATS_TEST_TMPDIR/restic_run.sh" job_bash="$BATS_TEST_TMPDIR/job-bash"
+  # Not executable: only the job bash can run it.
+  cat > "$script" <<'SCRIPT'
+printf '%s\n' "$MK_OFFSITE_BACKUP_MODE" "${FAKE_COMMON:-}"
+SCRIPT
+  cat > "$job_bash" <<JOB_BASH
+#!/bin/sh
+echo "job bash ran"
+exec "$BASH" "\$@"
+JOB_BASH
+  chmod +x "$job_bash"
   STUB_OUTPUT="$script" mktest::stub_function offsite_backup::_run_script_path
+  STUB_OUTPUT="$job_bash" mktest::stub_function service::job_bash
   STUB_OUTPUT="FAKE_COMMON=common-value" mktest::stub_function offsite_backup::_common_service_env "$ENTRY"
   run offsite_backup::_run_script_mode "fake-mode" "$ENTRY"
   [ "$status" -eq 0 ]
-  [ "$output" = "$(printf 'fake-mode\ncommon-value')" ]
+  [ "$output" = "$(printf 'job bash ran\nfake-mode\ncommon-value')" ]
 }
 
 @test "_run_script_mode stops when building the repository's environment fails" {

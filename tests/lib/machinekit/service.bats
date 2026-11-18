@@ -92,6 +92,40 @@ setup() {
   [ "$status" -eq 97 ]
 }
 
+# --- install_script ---
+
+@test "install_script installs the script as an executable and the job library beside it" {
+  printf 'fake script\n' > "$BATS_TEST_TMPDIR/source.sh"
+  printf 'fake library\n' > "$BATS_TEST_TMPDIR/library.sh"
+  STUB_OUTPUT="$BATS_TEST_TMPDIR/library.sh" mktest::stub_function service::_job_library_source
+  local dest="$BATS_TEST_TMPDIR/data/module/script.sh"
+  STUB_OUTPUT="$BATS_TEST_TMPDIR/data/module/job.sh" mktest::stub_function service::job_library_path "$dest"
+  service::install_script "$BATS_TEST_TMPDIR/source.sh" "$dest"
+  [ "$(cat "$dest")" = "fake script" ]
+  [ "$(mktest::file_mode "$dest")" = "755" ]
+  [ "$(cat "$BATS_TEST_TMPDIR/data/module/job.sh")" = "fake library" ]
+}
+
+# --- job_library_path ---
+
+@test "job_library_path is the job library beside the script" {
+  STUB_OUTPUT="fake-library.sh" mktest::stub_function service::job_library_name
+  run service::job_library_path "/fake/data/module/script.sh"
+  [ "$output" = "/fake/data/module/fake-library.sh" ]
+}
+
+@test "job_library_name is the job library's file name" {
+  run service::job_library_name
+  [ "$output" = "job.sh" ]
+}
+
+# --- job_bash ---
+
+@test "job_bash is the bash running this apply" {
+  BASH=/fake/bash run service::job_bash
+  [ "$output" = "/fake/bash" ]
+}
+
 # --- _install_darwin ---
 
 @test "_install_darwin sets up the job's log, writes the system LaunchDaemon, threading the resolved parts, and reloads it" {
@@ -101,13 +135,14 @@ setup() {
   STUB_OUTPUT="ENVDICT" mktest::stub_function service::_launchd_env_dict "FOO=bar"
   STUB_OUTPUT="alice" mktest::stub_function service::_run_as_user
   STUB_OUTPUT="/fake/logs/svc.log" mktest::stub_function service::_launchd_log_path "svc"
+  STUB_OUTPUT="/fake/bash" mktest::stub_function service::job_bash
   mktest::stub_function service::_install_launchd_log
   # Exact-arg stub: only matches if every resolved part lands in its slot.
-  mktest::stub_function service::_plist_content "com.machinekit.svc" "/fake/exec" "alice" "STANZA" "ENVDICT" "/fake/logs/svc.log"
+  mktest::stub_function service::_plist_content "com.machinekit.svc" "/fake/bash" "/fake/exec" "alice" "STANZA" "ENVDICT" "/fake/logs/svc.log"
   mktest::stub_function sudo
   service::_install_darwin "svc" "/fake/exec" "somekind" "someval" "FOO=bar"
   local plist="/fake/daemons/com.machinekit.svc.plist"
-  mktest::assert_stub_called service::_plist_content "com.machinekit.svc" "/fake/exec" "alice" "STANZA" "ENVDICT" "/fake/logs/svc.log"
+  mktest::assert_stub_called service::_plist_content "com.machinekit.svc" "/fake/bash" "/fake/exec" "alice" "STANZA" "ENVDICT" "/fake/logs/svc.log"
   mktest::assert_stub_called_in_order service::_install_launchd_log "com.machinekit.svc" "/fake/logs/svc.log" "alice"
   mktest::assert_stub_called_in_order sudo "tee" "$plist"
   mktest::assert_stub_called_in_order sudo "launchctl" "bootout" "system" "$plist"
@@ -160,7 +195,8 @@ setup() {
   STUB_OUTPUT="machinekit-svc" mktest::stub_function service::_systemd_unit_name "svc"
   STUB_OUTPUT="ENVLINES" mktest::stub_function service::_systemd_env_lines "FOO=bar"
   STUB_OUTPUT="SCHEDLINES" mktest::stub_function service::_systemd_schedule_lines "somekind" "someval"
-  STUB_OUTPUT="SERVICE" mktest::stub_function service::_systemd_service_content "machinekit svc" "/fake/exec" "ENVLINES"
+  STUB_OUTPUT="/fake/bash" mktest::stub_function service::job_bash
+  STUB_OUTPUT="SERVICE" mktest::stub_function service::_systemd_service_content "machinekit svc" "/fake/bash" "/fake/exec" "ENVLINES"
   STUB_OUTPUT="TIMER" mktest::stub_function service::_systemd_timer_content "machinekit svc" "SCHEDLINES"
   mktest::stub_function sudo
   mktest::stub_function systemctl
@@ -292,10 +328,10 @@ setup() {
 
 # --- unit content generators (pure) ---
 
-@test "_plist_content embeds the label, exec, run-as user, schedule stanza, env dict, and log path" {
-  run service::_plist_content "com.machinekit.svc" "/fake/exec" "alice" "SCHEDULE_STANZA" "ENV_DICT" "/fake/svc.log"
+@test "_plist_content embeds the label, the script run by bash, run-as user, schedule stanza, env dict, and log path" {
+  run service::_plist_content "com.machinekit.svc" "/fake/bash" "/fake/exec" "alice" "SCHEDULE_STANZA" "ENV_DICT" "/fake/svc.log"
   [[ "$output" == *"<key>Label</key><string>com.machinekit.svc</string>"* ]]
-  [[ "$output" == *"<array><string>/fake/exec</string></array>"* ]]
+  [[ "$output" == *"<array><string>/fake/bash</string><string>/fake/exec</string></array>"* ]]
   [[ "$output" == *"<key>UserName</key><string>alice</string>"* ]]
   [[ "$output" == *"SCHEDULE_STANZA"* ]]
   [[ "$output" == *"ENV_DICT"* ]]
@@ -309,11 +345,11 @@ setup() {
 }
 
 @test "_systemd_service_content is a oneshot embedding the description, env lines, and ExecStart" {
-  run service::_systemd_service_content "machinekit svc" "/fake/exec" "ENV_LINES"
+  run service::_systemd_service_content "machinekit svc" "/fake/bash" "/fake/exec" "ENV_LINES"
   [[ "$output" == *"Description=machinekit svc"* ]]
   [[ "$output" == *"Type=oneshot"* ]]
   [[ "$output" == *"ENV_LINES"* ]]
-  [[ "$output" == *"ExecStart=/fake/exec"* ]]
+  [[ "$output" == *"ExecStart=/fake/bash /fake/exec"* ]]
 }
 
 @test "_systemd_timer_content embeds the description and schedule lines and installs to timers.target" {
@@ -620,6 +656,11 @@ setup() {
 @test "_systemd_user_unit_dir is the user unit dir under HOME" {
   HOME="/fake/home" run service::_systemd_user_unit_dir
   [ "$output" = "/fake/home/.config/systemd/user" ]
+}
+
+@test "_job_library_source is the job library in this checkout" {
+  run service::_job_library_source
+  [ "$output" = "$MACHINEKIT_DIR/lib/machinekit/service/job.sh" ]
 }
 
 @test "_newsyslog_dir is the system newsyslog rules dir" {
