@@ -6,6 +6,9 @@ load "${BATS_TEST_DIRNAME}/../../../test_helper"
 
 setup() {
   SCRIPT="$MACHINEKIT_DIR/lib/modules/git_backup/push.sh"
+  # In this checkout the job library is not beside the script, as it is once
+  # installed, so point the script at it.
+  export MK_JOB_LIBRARY="$MACHINEKIT_DIR/lib/machinekit/service/job.sh"
   ORIGIN="$BATS_TEST_TMPDIR/origin.git"
   WORK="$BATS_TEST_TMPDIR/work"
   MANIFEST="$BATS_TEST_TMPDIR/manifest.tsv"
@@ -79,6 +82,12 @@ advance_origin() {
   tgit -C "$clone" commit -q -m "origin change"
   tgit -C "$clone" push -q origin HEAD
   rm -rf "$clone"
+}
+
+# Make ORIGIN refuse every push, so git reports a real rejection error.
+reject_pushes() {
+  printf '#!/bin/sh\necho "fake push rejected" >&2\nexit 1\n' > "$ORIGIN/hooks/pre-receive"
+  chmod +x "$ORIGIN/hooks/pre-receive"
 }
 
 origin_has_file() {
@@ -173,6 +182,27 @@ origin_has_file() {
   local verify="$BATS_TEST_TMPDIR/verify"
   tgit clone -q "$ORIGIN" "$verify"
   grep -q "origin version" "$verify/base.txt"
+}
+
+# --- push failures ---
+
+@test "a rejected push notifies with git's own error and exits non-zero" {
+  seed_work
+  reject_pushes
+  printf 'local\n' > "$WORK/local.txt"
+  run_backup
+  [ "$status" -ne 0 ]
+  grep -q "push failed.*pre-receive hook declined" "$NOTIFY_LOG"
+  [[ "$output" == *"fake push rejected"* ]]
+}
+
+@test "a rejected first push notifies with git's own error and exits non-zero" {
+  mkdir -p "$WORK"
+  printf 'local\n' > "$WORK/local.txt"
+  reject_pushes
+  run_backup
+  [ "$status" -ne 0 ]
+  grep -q "initial push failed.*pre-receive hook declined" "$NOTIFY_LOG"
 }
 
 # --- reconstitution (.git stripped, e.g. by agents_config_setup) ---
@@ -283,4 +313,37 @@ origin_has_file() {
   [ "$status" -ne 0 ]
   grep -q "dir not found" "$NOTIFY_LOG"
   origin_has_file b.txt "$origin2"
+}
+
+# --- the job library and failures no step reports ---
+
+@test "uses the job library installed beside it" {
+  local installed="$BATS_TEST_TMPDIR/installed"
+  mkdir -p "$installed" "$WORK"
+  cp "$SCRIPT" "$installed/push.sh"
+  cp "$MK_JOB_LIBRARY" "$installed/job.sh"
+  printf 'hello\n' > "$WORK/file.txt"
+  SCRIPT="$installed/push.sh"
+  unset MK_JOB_LIBRARY
+  run_backup
+  [ "$status" -eq 0 ]
+  [ -n "$(git --git-dir="$ORIGIN" log --oneline 2>/dev/null)" ]
+}
+
+@test "a folder whose commit fails alerts for that folder" {
+  mkdir -p "$WORK"
+  tgit -C "$WORK" init -q
+  printf '#!/bin/sh\nexit 1\n' > "$WORK/.git/hooks/pre-commit"
+  chmod +x "$WORK/.git/hooks/pre-commit"
+  printf 'hello\n' > "$WORK/file.txt"
+  run_backup
+  [ "$status" -ne 0 ]
+  [ "$(wc -l < "$NOTIFY_LOG" | tr -d ' ')" = "1" ]
+  grep -q "git_backup: backup of $WORK failed unexpectedly" "$NOTIFY_LOG"
+}
+
+@test "a run with no manifest configured alerts that the run failed unexpectedly" {
+  run env MK_GIT_BACKUP_NOTIFY="$NOTIFY" bash "$SCRIPT"
+  [ "$status" -ne 0 ]
+  grep -q "git_backup: the backup run failed unexpectedly" "$NOTIFY_LOG"
 }

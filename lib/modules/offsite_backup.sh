@@ -122,6 +122,7 @@ offsite_backup::_validate_repository() {
 offsite_backup::installed_file_patterns() {
   printf '%s\n' \
     $'data\trestic_run.sh' \
+    $'data\t'"${ service::job_library_name; }" \
     $'data\tmanifest-*.tsv' \
     $'config\t*/repository_password' \
     $'config\t*/credentials'
@@ -134,7 +135,8 @@ offsite_backup::installed_artifacts() {
   local repositories entry
   repositories=${ offsite_backup::_repositories; }
   [ -n "$repositories" ] || return 0
-  printf 'file\t%s\n' "$(offsite_backup::_run_script_path)"
+  printf 'file\t%s\n' "$(offsite_backup::_run_script_path)" \
+    "${ service::job_library_path "$(offsite_backup::_run_script_path)"; }"
   while IFS= read -u 3 -r entry; do
     [ -n "$entry" ] || continue
     offsite_backup::_repository_artifacts "$entry"
@@ -326,11 +328,7 @@ offsite_backup::_manifest_row() {
 }
 
 offsite_backup::_install_run_script() {
-  local dest
-  dest=$(offsite_backup::_run_script_path)
-  mkdir -p "$(dirname "$dest")"
-  cp "$_OFFSITE_BACKUP_DIR/offsite_backup/restic_run.sh" "$dest"
-  chmod 755 "$dest"
+  service::install_script "$_OFFSITE_BACKUP_DIR/offsite_backup/restic_run.sh" "$(offsite_backup::_run_script_path)"
 }
 
 # Make sure there is a repository to back up into. Creating one writes to the
@@ -387,7 +385,8 @@ offsite_backup::_run_script_mode() {
   local -a repository_env
   common_env=${ offsite_backup::_common_service_env "$entry"; }
   mapfile -t repository_env <<< "$common_env"
-  env "MK_OFFSITE_BACKUP_MODE=$mode" "${repository_env[@]}" "$(offsite_backup::_run_script_path)"
+  env "MK_OFFSITE_BACKUP_MODE=$mode" "${repository_env[@]}" \
+    "${ service::job_bash; }" "$(offsite_backup::_run_script_path)"
 }
 
 # The environment both of a repository's services need: where it is, how to open

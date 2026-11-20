@@ -92,23 +92,87 @@ setup() {
   [ "$status" -eq 97 ]
 }
 
+# --- install_script ---
+
+@test "install_script installs the script as an executable and the job library beside it" {
+  printf 'fake script\n' > "$BATS_TEST_TMPDIR/source.sh"
+  printf 'fake library\n' > "$BATS_TEST_TMPDIR/library.sh"
+  STUB_OUTPUT="$BATS_TEST_TMPDIR/library.sh" mktest::stub_function service::_job_library_source
+  local dest="$BATS_TEST_TMPDIR/data/module/script.sh"
+  STUB_OUTPUT="$BATS_TEST_TMPDIR/data/module/job.sh" mktest::stub_function service::job_library_path "$dest"
+  service::install_script "$BATS_TEST_TMPDIR/source.sh" "$dest"
+  [ "$(cat "$dest")" = "fake script" ]
+  [ "$(mktest::file_mode "$dest")" = "755" ]
+  [ "$(cat "$BATS_TEST_TMPDIR/data/module/job.sh")" = "fake library" ]
+}
+
+# --- job_library_path ---
+
+@test "job_library_path is the job library beside the script" {
+  STUB_OUTPUT="fake-library.sh" mktest::stub_function service::job_library_name
+  run service::job_library_path "/fake/data/module/script.sh"
+  [ "$output" = "/fake/data/module/fake-library.sh" ]
+}
+
+@test "job_library_name is the job library's file name" {
+  run service::job_library_name
+  [ "$output" = "job.sh" ]
+}
+
+# --- job_bash ---
+
+@test "job_bash is the bash running this apply" {
+  BASH=/fake/bash run service::job_bash
+  [ "$output" = "/fake/bash" ]
+}
+
 # --- _install_darwin ---
 
-@test "_install_darwin writes the system LaunchDaemon, threading the resolved parts, and reloads it" {
+@test "_install_darwin sets up the job's log, writes the system LaunchDaemon, threading the resolved parts, and reloads it" {
   STUB_OUTPUT="/fake/daemons" mktest::stub_function service::_launchd_daemons_dir
   STUB_OUTPUT="com.machinekit.svc" mktest::stub_function service::_launchd_label "svc"
   STUB_OUTPUT="STANZA" mktest::stub_function service::_launchd_schedule_stanza "somekind" "someval"
   STUB_OUTPUT="ENVDICT" mktest::stub_function service::_launchd_env_dict "FOO=bar"
   STUB_OUTPUT="alice" mktest::stub_function service::_run_as_user
+  STUB_OUTPUT="/fake/logs/svc.log" mktest::stub_function service::_launchd_log_path "svc"
+  STUB_OUTPUT="/fake/bash" mktest::stub_function service::job_bash
+  mktest::stub_function service::_install_launchd_log
   # Exact-arg stub: only matches if every resolved part lands in its slot.
-  mktest::stub_function service::_plist_content "com.machinekit.svc" "/fake/exec" "alice" "STANZA" "ENVDICT"
+  mktest::stub_function service::_plist_content "com.machinekit.svc" "/fake/bash" "/fake/exec" "alice" "STANZA" "ENVDICT" "/fake/logs/svc.log"
   mktest::stub_function sudo
   service::_install_darwin "svc" "/fake/exec" "somekind" "someval" "FOO=bar"
   local plist="/fake/daemons/com.machinekit.svc.plist"
-  mktest::assert_stub_called service::_plist_content "com.machinekit.svc" "/fake/exec" "alice" "STANZA" "ENVDICT"
-  mktest::assert_stub_called sudo "tee" "$plist"
-  mktest::assert_stub_called sudo "launchctl" "bootout" "system" "$plist"
-  mktest::assert_stub_called sudo "launchctl" "bootstrap" "system" "$plist"
+  mktest::assert_stub_called service::_plist_content "com.machinekit.svc" "/fake/bash" "/fake/exec" "alice" "STANZA" "ENVDICT" "/fake/logs/svc.log"
+  mktest::assert_stub_called_in_order service::_install_launchd_log "com.machinekit.svc" "/fake/logs/svc.log" "alice"
+  mktest::assert_stub_called_in_order sudo "tee" "$plist"
+  mktest::assert_stub_called_in_order sudo "launchctl" "bootout" "system" "$plist"
+  mktest::assert_stub_called_in_order sudo "launchctl" "bootstrap" "system" "$plist"
+}
+
+# --- _install_launchd_log ---
+
+@test "_install_launchd_log creates the log file and installs its rotation rule" {
+  local log_path="$BATS_TEST_TMPDIR/Logs/machinekit/svc.log"
+  STUB_OUTPUT="fakegroup" mktest::stub_function service::_user_group "alice"
+  STUB_OUTPUT="ROTATION" mktest::stub_function service::_newsyslog_conf_content "$log_path" "alice" "fakegroup"
+  STUB_OUTPUT="/fake/newsyslog.d" mktest::stub_function service::_newsyslog_dir
+  # Hand-rolled capture: the rule reaches sudo tee on stdin.
+  sudo() { printf '%s\n' "$*" > "$BATS_TEST_TMPDIR/sudo.args"; cat > "$BATS_TEST_TMPDIR/sudo.stdin"; }
+  service::_install_launchd_log "com.machinekit.svc" "$log_path" "alice"
+  [ -f "$log_path" ]
+  [ "$(cat "$BATS_TEST_TMPDIR/sudo.args")" = "tee /fake/newsyslog.d/com.machinekit.svc.conf" ]
+  [ "$(cat "$BATS_TEST_TMPDIR/sudo.stdin")" = "ROTATION" ]
+}
+
+@test "_install_launchd_log keeps an existing log's contents" {
+  local log_path="$BATS_TEST_TMPDIR/svc.log"
+  printf 'earlier run\n' > "$log_path"
+  STUB_OUTPUT="fakegroup" mktest::stub_function service::_user_group "alice"
+  mktest::stub_function service::_newsyslog_conf_content
+  STUB_OUTPUT="/fake/newsyslog.d" mktest::stub_function service::_newsyslog_dir
+  sudo() { cat > /dev/null; }
+  service::_install_launchd_log "com.machinekit.svc" "$log_path" "alice"
+  [ "$(cat "$log_path")" = "earlier run" ]
 }
 
 @test "_install_darwin stops when rendering the schedule fails" {
@@ -131,7 +195,8 @@ setup() {
   STUB_OUTPUT="machinekit-svc" mktest::stub_function service::_systemd_unit_name "svc"
   STUB_OUTPUT="ENVLINES" mktest::stub_function service::_systemd_env_lines "FOO=bar"
   STUB_OUTPUT="SCHEDLINES" mktest::stub_function service::_systemd_schedule_lines "somekind" "someval"
-  STUB_OUTPUT="SERVICE" mktest::stub_function service::_systemd_service_content "machinekit svc" "/fake/exec" "ENVLINES"
+  STUB_OUTPUT="/fake/bash" mktest::stub_function service::job_bash
+  STUB_OUTPUT="SERVICE" mktest::stub_function service::_systemd_service_content "machinekit svc" "/fake/bash" "/fake/exec" "ENVLINES"
   STUB_OUTPUT="TIMER" mktest::stub_function service::_systemd_timer_content "machinekit svc" "SCHEDLINES"
   mktest::stub_function sudo
   mktest::stub_function systemctl
@@ -158,24 +223,27 @@ setup() {
 
 # --- _uninstall_darwin ---
 
-@test "_uninstall_darwin unloads the LaunchDaemon and deletes its plist" {
+@test "_uninstall_darwin unloads the LaunchDaemon and deletes its plist and log rotation rule" {
   STUB_OUTPUT="/fake/daemons" mktest::stub_function service::_launchd_daemons_dir
+  STUB_OUTPUT="/fake/newsyslog.d" mktest::stub_function service::_newsyslog_dir
   STUB_OUTPUT="com.machinekit.svc" mktest::stub_function service::_launchd_label "svc"
   mktest::stub_function sudo
   service::_uninstall_darwin "svc"
   local plist="/fake/daemons/com.machinekit.svc.plist"
   mktest::assert_stub_called_in_order sudo "launchctl" "bootout" "system" "$plist"
-  mktest::assert_stub_called_in_order sudo "rm" "-f" "--" "$plist"
+  mktest::assert_stub_called_in_order sudo "rm" "-f" "--" "$plist" "/fake/newsyslog.d/com.machinekit.svc.conf"
 }
 
 @test "_uninstall_darwin still deletes the plist when the daemon was not loaded" {
   STUB_OUTPUT="/fake/daemons" mktest::stub_function service::_launchd_daemons_dir
+  STUB_OUTPUT="/fake/newsyslog.d" mktest::stub_function service::_newsyslog_dir
   STUB_OUTPUT="com.machinekit.svc" mktest::stub_function service::_launchd_label "svc"
   local plist="/fake/daemons/com.machinekit.svc.plist"
+  local rotation_rule="/fake/newsyslog.d/com.machinekit.svc.conf"
   STUB_RETURN=5 mktest::stub_function sudo "launchctl" "bootout" "system" "$plist"
-  mktest::stub_function sudo "rm" "-f" "--" "$plist"
+  mktest::stub_function sudo "rm" "-f" "--" "$plist" "$rotation_rule"
   service::_uninstall_darwin "svc"
-  mktest::assert_stub_called sudo "rm" "-f" "--" "$plist"
+  mktest::assert_stub_called sudo "rm" "-f" "--" "$plist" "$rotation_rule"
 }
 
 # --- _uninstall_linux ---
@@ -260,21 +328,28 @@ setup() {
 
 # --- unit content generators (pure) ---
 
-@test "_plist_content embeds the label, exec, run-as user, schedule stanza, and env dict" {
-  run service::_plist_content "com.machinekit.svc" "/fake/exec" "alice" "SCHEDULE_STANZA" "ENV_DICT"
+@test "_plist_content embeds the label, the script run by bash, run-as user, schedule stanza, env dict, and log path" {
+  run service::_plist_content "com.machinekit.svc" "/fake/bash" "/fake/exec" "alice" "SCHEDULE_STANZA" "ENV_DICT" "/fake/svc.log"
   [[ "$output" == *"<key>Label</key><string>com.machinekit.svc</string>"* ]]
-  [[ "$output" == *"<array><string>/fake/exec</string></array>"* ]]
+  [[ "$output" == *"<array><string>/fake/bash</string><string>/fake/exec</string></array>"* ]]
   [[ "$output" == *"<key>UserName</key><string>alice</string>"* ]]
   [[ "$output" == *"SCHEDULE_STANZA"* ]]
   [[ "$output" == *"ENV_DICT"* ]]
+  [[ "$output" == *"<key>StandardOutPath</key><string>/fake/svc.log</string>"* ]]
+  [[ "$output" == *"<key>StandardErrorPath</key><string>/fake/svc.log</string>"* ]]
+}
+
+@test "_newsyslog_conf_content rotates the log by size, keeping compressed copies, owned by the run-as user" {
+  run service::_newsyslog_conf_content "/fake/svc.log" "alice" "fakegroup"
+  [ "$output" = "/fake/svc.log alice:fakegroup 644 $_SERVICE_LOG_KEEP_COUNT $_SERVICE_LOG_ROTATE_KB * NZ" ]
 }
 
 @test "_systemd_service_content is a oneshot embedding the description, env lines, and ExecStart" {
-  run service::_systemd_service_content "machinekit svc" "/fake/exec" "ENV_LINES"
+  run service::_systemd_service_content "machinekit svc" "/fake/bash" "/fake/exec" "ENV_LINES"
   [[ "$output" == *"Description=machinekit svc"* ]]
   [[ "$output" == *"Type=oneshot"* ]]
   [[ "$output" == *"ENV_LINES"* ]]
-  [[ "$output" == *"ExecStart=/fake/exec"* ]]
+  [[ "$output" == *"ExecStart=/fake/bash /fake/exec"* ]]
 }
 
 @test "_systemd_timer_content embeds the description and schedule lines and installs to timers.target" {
@@ -581,6 +656,27 @@ setup() {
 @test "_systemd_user_unit_dir is the user unit dir under HOME" {
   HOME="/fake/home" run service::_systemd_user_unit_dir
   [ "$output" = "/fake/home/.config/systemd/user" ]
+}
+
+@test "_job_library_source is the job library in this checkout" {
+  run service::_job_library_source
+  [ "$output" = "$MACHINEKIT_DIR/lib/machinekit/service/job.sh" ]
+}
+
+@test "_newsyslog_dir is the system newsyslog rules dir" {
+  run service::_newsyslog_dir
+  [ "$output" = "/etc/newsyslog.d" ]
+}
+
+@test "_launchd_log_path puts the job's log under the user's Logs folder" {
+  HOME=/fake/home
+  run service::_launchd_log_path "the-service-name"
+  [ "$output" = "/fake/home/Library/Logs/machinekit/the-service-name.log" ]
+}
+
+@test "_user_group is the user's primary group" {
+  run service::_user_group "$(id -un)"
+  [ "$output" = "$(id -gn)" ]
 }
 
 @test "_run_as_user prefers SUDO_USER (the real user behind a sudo'd apply)" {

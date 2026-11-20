@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # postgres — capability module for a PostgreSQL instance. The consumer-facing API
 # (ensure_database / ensure_role / ensure_extension / ensure_superuser,
-# connection_string, version) is satisfier-independent — pure SQL and libpq
-# strings — and runs through whichever satisfier is active: postgres_brew installs
-# and runs postgres itself; postgres_app provisions into an operator-run
-# Postgres.app. Consumers name the capability, never a satisfier.
+# grant_read_all_data / require_password_login, connection_string, version) is
+# satisfier-independent — pure SQL, libpq strings, and the pg_hba.conf the
+# running server reports — and runs through whichever satisfier is active:
+# postgres_brew installs and runs postgres itself; postgres_app provisions into an
+# operator-run Postgres.app. Consumers name the capability, never a satisfier.
 #
 # Four things vary by satisfier and are dispatched to the active one:
 #   bin_dir                    — where psql/createuser for the resolved instance live
@@ -20,6 +21,14 @@
 # helpers and the consumers that shell out to the client tools themselves.
 _POSTGRES_SUPERUSER="postgres"
 _POSTGRES_PORT="5432"
+
+# A role that must log in with its password is made a member of this group, and
+# one pg_hba.conf rule (`+group`, which matches any member) requires scram for the
+# whole group. Membership is the per-role switch, so the file holds one constant
+# rule however many roles need it.
+_POSTGRES_PASSWORD_LOGIN_GROUP="machinekit_password_login"
+
+_POSTGRES_HBA_ERRORS_QUERY="SELECT 'line ' || line_number || ': ' || error FROM pg_hba_file_rules WHERE error IS NOT NULL"
 
 postgres::is_capability() { return 0; }
 
@@ -66,14 +75,9 @@ postgres::connection_string() {
   printf 'postgresql://%s@%s:%s/%s\n' "$user" "$host" "$(postgres::port)" "$db"
 }
 
-# The role every admin operation connects as, and the port the resolved instance
-# serves. Public because a consumer that drives a postgres client tool itself
-# (postgres_dump running pg_dump out-of-band) needs the same two facts the SQL
-# helpers here use, and must not restate them.
-postgres::superuser() {
-  printf '%s\n' "$_POSTGRES_SUPERUSER"
-}
-
+# The port the resolved instance serves. Public because a consumer that drives a
+# postgres client tool itself (postgres_dump running pg_dump out-of-band) needs
+# the same fact the SQL helpers here use, and must not restate it.
 postgres::port() {
   printf '%s\n' "$_POSTGRES_PORT"
 }
@@ -136,6 +140,37 @@ postgres::ensure_role() {
   fi
 }
 
+# Lets ROLE read every table, view, and sequence in every database, for a client
+# that only reads, such as pg_dump. BYPASSRLS as well, because pg_dump refuses to
+# dump a table with row-level security enabled unless the role bypasses it.
+# Both statements are idempotent.
+postgres::grant_read_all_data() {
+  local name="$1" escaped_name
+  if input::is_dry_run; then
+    logging::dry_run "would grant role $name read access to all data"
+    return 0
+  fi
+  escaped_name="${name//\"/\"\"}"
+  postgres::_psql_exec postgres -c "GRANT pg_read_all_data TO \"$escaped_name\""
+  postgres::_psql_exec postgres -c "ALTER ROLE \"$escaped_name\" BYPASSRLS"
+}
+
+# Makes ROLE log in with its password even where pg_hba.conf otherwise trusts
+# local connections. A client that runs unattended needs this on Postgres.app,
+# which shows an "allow this app?" dialog whenever an unapproved program logs in
+# without a password, and nobody is there to answer it. Password logins skip that
+# check entirely.
+postgres::require_password_login() {
+  local name="$1" escaped_name
+  if input::is_dry_run; then
+    logging::dry_run "would require role $name to log in with its password"
+    return 0
+  fi
+  postgres::_ensure_password_login_rule
+  escaped_name="${name//\"/\"\"}"
+  postgres::_psql_exec postgres -c "GRANT \"$_POSTGRES_PASSWORD_LOGIN_GROUP\" TO \"$escaped_name\""
+}
+
 # Ensures the predictable `postgres` superuser exists so admin ops have a stable
 # identity to act as. brew names the bootstrap superuser after the installing OS
 # user (which scripts can't hardcode); Postgres.app already ships a `postgres`
@@ -148,7 +183,7 @@ postgres::ensure_superuser() {
     return 0
   fi
   local superuser
-  superuser=${ postgres::superuser; }
+  superuser=${ postgres::_superuser; }
   if "${ postgres::_createuser_path; }" -s "$superuser" 2>/dev/null; then
     logging::success "postgres: created superuser $superuser."
   else
@@ -242,12 +277,60 @@ postgres::_role_exists() {
   [ "${ postgres::_psql_exec postgres -tAc "SELECT 1 FROM pg_roles WHERE rolname = '$1'"; }" = "1" ]
 }
 
+# The group role, its pg_hba.conf rule, and a reload so the rule takes effect.
+# The file is checked before the reload: a reload ignores a pg_hba.conf with
+# errors and keeps the old rules, which would leave the rule silently inactive.
+postgres::_ensure_password_login_rule() {
+  postgres::_ensure_password_login_group
+  postgres::_write_password_login_rule
+  postgres::_assert_hba_valid
+  postgres::_reload_config
+}
+
+postgres::_ensure_password_login_group() {
+  postgres::_role_exists "$_POSTGRES_PASSWORD_LOGIN_GROUP" && return 0
+  postgres::_psql_exec postgres -c "CREATE ROLE \"$_POSTGRES_PASSWORD_LOGIN_GROUP\" NOLOGIN"
+}
+
+# At the top of the file, because the server uses the first rule that matches a
+# connection, and the default rules below it trust every local login.
+postgres::_write_password_login_rule() {
+  local hba_file
+  hba_file=${ postgres::_hba_file; } && [ -n "$hba_file" ] \
+    || lifecycle::fail "postgres: could not ask the server where its pg_hba.conf is."
+  printf 'local all +%s scram-sha-256\n' "$_POSTGRES_PASSWORD_LOGIN_GROUP" \
+    | managed_block::ensure "$hba_file" "#" top
+}
+
+# Asked of the server rather than derived per satisfier, so it is right for
+# brew's and Postgres.app's data directories alike.
+postgres::_hba_file() {
+  postgres::_psql_exec postgres -tAc "SHOW hba_file"
+}
+
+postgres::_assert_hba_valid() {
+  local errors
+  errors=${ postgres::_psql_exec postgres -tAc "$_POSTGRES_HBA_ERRORS_QUERY"; } \
+    || lifecycle::fail "postgres: could not check pg_hba.conf for errors after editing it."
+  [ -z "$errors" ] || lifecycle::fail \
+    "postgres: pg_hba.conf has errors after machinekit edited it, so the server would ignore it: $errors"
+}
+
+postgres::_reload_config() {
+  postgres::_psql_exec postgres -tAc "SELECT pg_reload_conf()" >/dev/null
+}
+
+# The role every admin operation connects as (see ensure_superuser).
+postgres::_superuser() {
+  printf '%s\n' "$_POSTGRES_SUPERUSER"
+}
+
 # -X skips any user psqlrc; -q keeps command tags off stdout so callers only see
 # query output; -U postgres is the predictable superuser identity (see above).
 postgres::_psql_exec() {
   local db="$1"
   shift
-  "${ postgres::_psql_path; }" -X -q -U "${ postgres::superuser; }" -d "$db" "$@"
+  "${ postgres::_psql_path; }" -X -q -U "${ postgres::_superuser; }" -d "$db" "$@"
 }
 
 # Like _psql_exec but reads the statement from stdin instead of an argv `-c`, so a
@@ -256,7 +339,7 @@ postgres::_psql_exec() {
 # role statements; the no-secret DDL and the SELECT checks stay on `-c`.
 postgres::_psql_exec_stdin() {
   local db="$1"
-  "${ postgres::_psql_path; }" -X -q -U "${ postgres::superuser; }" -d "$db"
+  "${ postgres::_psql_path; }" -X -q -U "${ postgres::_superuser; }" -d "$db"
 }
 
 postgres::_psql_path() {

@@ -9,9 +9,15 @@
 # One service runs for all databases; the dump script (postgres_dump/dump.sh)
 # iterates a manifest this module writes. The script runs out-of-band with a
 # minimal PATH, so the service unit pins the resolved instance's pg_dump and
-# pg_restore by absolute path, along with the superuser and port — all read
-# through the postgres capability, so postgres_brew and postgres_app both work
-# with no branching here.
+# pg_restore by absolute path, along with the port — all read through the
+# postgres capability, so postgres_brew and postgres_app both work with no
+# branching here.
+#
+# The dump connects as its own read-only role, with a password, never through
+# the local trust rule. Postgres.app shows an "allow this app?" dialog whenever an
+# unapproved program logs in without a password, and a dump at 3am has nobody to
+# answer it. The password is generated once into a libpq password file that the
+# service points pg_dump at.
 #
 # The scheduled-service mechanics — launchd/systemd unit generation and load —
 # live in lib/machinekit/service.sh; postgres_dump hands it the dump script, a
@@ -23,6 +29,7 @@ _POSTGRES_DUMP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 _POSTGRES_DUMP_DEFAULT_SCHEDULE="0 3 * * *"
 _POSTGRES_DUMP_DEFAULT_RETAIN_COUNT="7"
 _POSTGRES_DUMP_SERVICE_LABEL="postgres-dump"
+_POSTGRES_DUMP_ROLE="machinekit_dump"
 
 postgres_dump::requires() {
   printf 'postgres\n'
@@ -45,7 +52,9 @@ postgres_dump::preflight() {
 postgres_dump::installed_file_patterns() {
   printf '%s\n' \
     $'data\tmanifest.tsv' \
-    $'data\tdump.sh'
+    $'data\tdump.sh' \
+    $'data\t'"${ service::job_library_name; }" \
+    $'config\tpgpass'
 }
 
 # What install puts on this machine for the current config, so an apply can remove
@@ -55,7 +64,9 @@ postgres_dump::installed_artifacts() {
   databases=${ postgres_dump::_databases; }
   [ -n "$databases" ] || return 0
   printf 'service\t%s\n' "$_POSTGRES_DUMP_SERVICE_LABEL"
-  printf 'file\t%s\n' "$(postgres_dump::_manifest_path)" "$(postgres_dump::_dump_script_path)"
+  printf 'file\t%s\n' "$(postgres_dump::_manifest_path)" "$(postgres_dump::_dump_script_path)" \
+    "${ service::job_library_path "$(postgres_dump::_dump_script_path)"; }" \
+    "$(postgres_dump::_password_file_path)"
 }
 
 # Write the manifest, lay down the dump script, and schedule the one service that
@@ -74,6 +85,7 @@ postgres_dump::install() {
   fi
   postgres_dump::_write_manifest
   postgres_dump::_install_dump_script
+  postgres_dump::_provision_role
   postgres_dump::_install_service
   logging::success "postgres_dump: dump service installed."
 }
@@ -153,18 +165,66 @@ postgres_dump::_manifest_row() {
 }
 
 postgres_dump::_install_dump_script() {
-  local dest
-  dest=$(postgres_dump::_dump_script_path)
-  mkdir -p "$(dirname "$dest")"
-  cp "$_POSTGRES_DUMP_DIR/postgres_dump/dump.sh" "$dest"
-  chmod 755 "$dest"
+  service::install_script "$_POSTGRES_DUMP_DIR/postgres_dump/dump.sh" "$(postgres_dump::_dump_script_path)"
+}
+
+# The role the dump connects as: its password set from the password file (which
+# is created on first install), read access to everything, and a pg_hba.conf
+# rule that makes it log in with that password.
+postgres_dump::_provision_role() {
+  local password
+  postgres_dump::_ensure_password_file
+  password=${ postgres_dump::_password_from_file; }
+  postgres::ensure_role "$_POSTGRES_DUMP_ROLE" "$password"
+  postgres::grant_read_all_data "$_POSTGRES_DUMP_ROLE"
+  postgres::require_password_login "$_POSTGRES_DUMP_ROLE"
+}
+
+# Generated once and then kept, so a re-apply never changes a password the role
+# already has. To regenerate, delete the file and re-apply; ensure_role then sets
+# the role to the new password.
+postgres_dump::_ensure_password_file() {
+  local path dir
+  path=$(postgres_dump::_password_file_path)
+  [ -f "$path" ] && return 0
+  dir=$(dirname "$path")
+  mkdir -p "$dir"
+  chmod 700 "$dir"
+  secrets::install_secret_file "$path" postgres_dump::_pgpass_line \
+    || lifecycle::fail "postgres_dump: could not write the dump role's password file $path."
+}
+
+# One libpq password-file line (host:port:database:user:password). libpq matches
+# a `localhost` entry to Unix-socket connections too, which is how pg_dump
+# connects. Empty output when no password was generated, so install_secret_file
+# writes nothing rather than a line with a blank password.
+postgres_dump::_pgpass_line() {
+  local port password
+  port=$(postgres::port)
+  password=$(postgres_dump::_generate_password) && [ -n "$password" ] || return 1
+  printf 'localhost:%s:*:%s:%s\n' "$port" "$_POSTGRES_DUMP_ROLE" "$password"
+}
+
+# Hex, because a password-file line would need `:` and `\` escaped.
+postgres_dump::_generate_password() {
+  openssl rand -hex 32
+}
+
+postgres_dump::_password_from_file() {
+  local path line password
+  path=$(postgres_dump::_password_file_path)
+  IFS= read -r line < "$path" || [ -n "$line" ]
+  password=${line##*:}
+  [ -n "$password" ] || lifecycle::fail \
+    "postgres_dump: $path holds no password; delete it and re-apply to generate a new one."
+  printf '%s\n' "$password"
 }
 
 # Schedule the one service that runs the dump script for every database, pinning
 # the manifest, notify command, client-tool paths, and connection identity into
-# its environment. The dump script is a self-contained executable, so
-# service::install_calendar runs it directly (its shebang picks the interpreter);
-# the launchd/systemd split is service.sh's job.
+# its environment. PGPASSFILE is libpq's own variable, so pg_dump reads the
+# password without the dump script handling it. The launchd/systemd split, and
+# the bash the script runs under, are service.sh's job.
 postgres_dump::_install_service() {
   service::install_calendar \
     "$_POSTGRES_DUMP_SERVICE_LABEL" \
@@ -174,8 +234,9 @@ postgres_dump::_install_service() {
     "MK_POSTGRES_DUMP_NOTIFY=${ postgres_dump::_notify; }" \
     "MK_POSTGRES_DUMP_PG_DUMP=${ postgres::pg_dump_path; }" \
     "MK_POSTGRES_DUMP_PG_RESTORE=${ postgres::pg_restore_path; }" \
-    "MK_POSTGRES_DUMP_USER=$(postgres::superuser)" \
-    "MK_POSTGRES_DUMP_PORT=$(postgres::port)"
+    "MK_POSTGRES_DUMP_USER=$_POSTGRES_DUMP_ROLE" \
+    "MK_POSTGRES_DUMP_PORT=$(postgres::port)" \
+    "PGPASSFILE=$(postgres_dump::_password_file_path)"
 }
 
 # --- config accessors + paths ---
@@ -209,6 +270,10 @@ postgres_dump::_notify() {
 
 postgres_dump::_manifest_path() {
   printf '%s\n' "${ artifacts::module_data_dir postgres_dump; }/manifest.tsv"
+}
+
+postgres_dump::_password_file_path() {
+  printf '%s\n' "${ artifacts::module_config_dir postgres_dump; }/pgpass"
 }
 
 postgres_dump::_dump_script_path() {

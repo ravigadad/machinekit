@@ -8,6 +8,9 @@ load "${BATS_TEST_DIRNAME}/../../../test_helper"
 
 setup() {
   SCRIPT="$MACHINEKIT_DIR/lib/modules/offsite_backup/restic_run.sh"
+  # In this checkout the job library is not beside the script, as it is once
+  # installed, so point the script at it.
+  export MK_JOB_LIBRARY="$MACHINEKIT_DIR/lib/machinekit/service/job.sh"
   SOURCE_DIR="$BATS_TEST_TMPDIR/source"
   MANIFEST="$BATS_TEST_TMPDIR/manifest.tsv"
   NOTIFY_LOG="$BATS_TEST_TMPDIR/notify.log"
@@ -29,7 +32,8 @@ EOF
 }
 
 # A restic that records each invocation's argv and the repository/credential
-# environment it was handed, then exits with EXIT_STATUS.
+# environment it was handed, prints a line of output (and, when failing, an error
+# on stderr, as restic reports why), then exits with EXIT_STATUS.
 fake_restic() {
   local exit_status="$1"
   cat > "$RESTIC" <<EOF
@@ -40,6 +44,8 @@ printf '%s\n' "\$*" >> "$RESTIC_ARGV"
   printf 'FAKE_BACKEND_KEY=%s\n' "\${FAKE_BACKEND_KEY:-}"
   printf 'FAKE_BACKEND_SECRET=%s\n' "\${FAKE_BACKEND_SECRET:-}"
 } > "$RESTIC_ENV"
+printf 'fake restic output for: %s\n' "\$*"
+[ $exit_status -eq 0 ] || printf 'Fatal: fake restic error\n' >&2
 exit $exit_status
 EOF
   chmod +x "$RESTIC"
@@ -52,7 +58,7 @@ fake_restic_failing_on() {
   cat > "$RESTIC" <<EOF
 #!/usr/bin/env bash
 printf '%s\n' "\$*" >> "$RESTIC_ARGV"
-case "\$*" in *$pattern*) exit 1 ;; esac
+case "\$*" in *$pattern*) printf 'Fatal: fake restic error\n' >&2; exit 1 ;; esac
 exit 0
 EOF
   chmod +x "$RESTIC"
@@ -78,6 +84,18 @@ run_backup() {
 }
 
 # --- backup: the golden path ---
+
+@test "uses the job library installed beside it" {
+  local installed="$BATS_TEST_TMPDIR/installed"
+  mkdir -p "$installed"
+  cp "$SCRIPT" "$installed/restic_run.sh"
+  cp "$MK_JOB_LIBRARY" "$installed/job.sh"
+  SCRIPT="$installed/restic_run.sh"
+  unset MK_JOB_LIBRARY
+  run_backup
+  [ "$status" -eq 0 ]
+  grep -q "^backup .*$SOURCE_DIR" "$RESTIC_ARGV"
+}
 
 @test "backs up each configured path and prunes to the keep policy" {
   run_backup
@@ -164,11 +182,18 @@ run_backup() {
 
 # --- backup: failure handling ---
 
-@test "a failed path notifies and exits non-zero" {
+@test "a failed path notifies with restic's own error and exits non-zero" {
   fake_restic_failing_on "backup"
   run_backup
   [ "$status" -ne 0 ]
-  grep -q "backup failed" "$NOTIFY_LOG"
+  grep -q "backup failed.*fake restic error" "$NOTIFY_LOG"
+  [[ "$output" == *"fake restic error"* ]]
+}
+
+@test "a successful backup passes restic's output through to the job log" {
+  run_backup
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"fake restic output for: backup"* ]]
 }
 
 @test "isolates a failing path: the others still back up and the run exits non-zero" {
@@ -182,11 +207,11 @@ run_backup() {
   grep -q "^backup .*$other" "$RESTIC_ARGV"
 }
 
-@test "a failed prune notifies and exits non-zero" {
+@test "a failed prune notifies with restic's own error and exits non-zero" {
   fake_restic_failing_on "forget"
   run_backup
   [ "$status" -ne 0 ]
-  grep -q "prune failed" "$NOTIFY_LOG"
+  grep -q "prune failed.*fake restic error" "$NOTIFY_LOG"
 }
 
 # --- backup: the staleness alarm ---
@@ -237,11 +262,11 @@ run_backup() {
   grep -q -- "^check --read-data$" "$RESTIC_ARGV"
 }
 
-@test "a failed check notifies and exits non-zero" {
+@test "a failed check notifies with restic's own error and exits non-zero" {
   fake_restic 1
   run_mode check
   [ "$status" -ne 0 ]
-  grep -q "repository check failed" "$NOTIFY_LOG"
+  grep -q "repository check failed.*fake restic error" "$NOTIFY_LOG"
 }
 
 @test "check backs nothing up" {
@@ -275,11 +300,11 @@ run_backup() {
   grep -q "^init$" "$RESTIC_ARGV"
 }
 
-@test "a failed init notifies and exits non-zero" {
+@test "a failed init notifies with restic's own error and exits non-zero" {
   fake_restic 1
   run_mode init
   [ "$status" -ne 0 ]
-  grep -q "could not be created" "$NOTIFY_LOG"
+  grep -q "could not be created.*fake restic error" "$NOTIFY_LOG"
 }
 
 @test "init backs nothing up" {
@@ -293,4 +318,26 @@ run_backup() {
   run_mode bogus
   [ "$status" -ne 0 ]
   grep -q "unknown mode" "$NOTIFY_LOG"
+}
+
+# --- failures no step reports ---
+
+@test "a backup run missing its repository alerts that the run failed unexpectedly" {
+  printf '%s\t%s\n' "$SOURCE_DIR" "" > "$MANIFEST"
+  run_mode backup MK_OFFSITE_BACKUP_REPOSITORY=
+  [ "$status" -ne 0 ]
+  grep -q "offsite_backup: the backup run failed unexpectedly" "$NOTIFY_LOG"
+}
+
+@test "a check run missing its repository alerts that the check failed unexpectedly" {
+  run_mode check MK_OFFSITE_BACKUP_REPOSITORY=
+  [ "$status" -ne 0 ]
+  grep -q "offsite_backup: the repository check failed unexpectedly" "$NOTIFY_LOG"
+}
+
+@test "a failed backup path is alerted once, not again as an unexpected failure" {
+  fake_restic_failing_on "backup"
+  run_backup
+  [ "$status" -ne 0 ]
+  [ "$(wc -l < "$NOTIFY_LOG" | tr -d ' ')" = "1" ]
 }

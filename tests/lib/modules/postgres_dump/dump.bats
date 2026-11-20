@@ -8,6 +8,9 @@ load "${BATS_TEST_DIRNAME}/../../../test_helper"
 
 setup() {
   SCRIPT="$MACHINEKIT_DIR/lib/modules/postgres_dump/dump.sh"
+  # In this checkout the job library is not beside the script, as it is once
+  # installed, so point the script at it.
+  export MK_JOB_LIBRARY="$MACHINEKIT_DIR/lib/machinekit/service/job.sh"
   DIRECTORY="$BATS_TEST_TMPDIR/dumps"
   MANIFEST="$BATS_TEST_TMPDIR/manifest.tsv"
   NOTIFY_LOG="$BATS_TEST_TMPDIR/notify.log"
@@ -29,11 +32,14 @@ EOF
 # EXIT_STATUS. Writing the file even on the failure path is deliberate: it is what
 # a real pg_dump does when it dies partway, and it is what makes the partial-file
 # cleanup assertions meaningful.
+# STDERR_TEXT, when given, is printed to stderr first, as a real tool reports
+# why it failed.
 fake_pg_dump() {
-  local exit_status="$1"
+  local exit_status="$1" stderr_text="${2:-}"
   cat > "$PG_DUMP" <<EOF
 #!/usr/bin/env bash
 printf '%s\n' "\$*" >> "$PG_DUMP_ARGV"
+[ -z "$stderr_text" ] || printf '%b\n' "$stderr_text" >&2
 while [ \$# -gt 0 ]; do
   if [ "\$1" = "-f" ]; then printf 'dump-bytes\n' > "\$2"; fi
   shift
@@ -44,10 +50,11 @@ EOF
 }
 
 fake_pg_restore() {
-  local exit_status="$1"
+  local exit_status="$1" stderr_text="${2:-}"
   cat > "$PG_RESTORE" <<EOF
 #!/usr/bin/env bash
 printf '%s\n' "\$*" >> "$PG_RESTORE_ARGV"
+[ -z "$stderr_text" ] || printf '%b\n' "$stderr_text" >&2
 exit $exit_status
 EOF
   chmod +x "$PG_RESTORE"
@@ -89,6 +96,19 @@ generation_count() {
 }
 
 # --- the golden path ---
+
+@test "uses the job library installed beside it" {
+  local installed="$BATS_TEST_TMPDIR/installed"
+  mkdir -p "$installed"
+  cp "$SCRIPT" "$installed/dump.sh"
+  cp "$MK_JOB_LIBRARY" "$installed/job.sh"
+  printf '%s\t%s\t%s\n' "somedb" "$DIRECTORY" "3" > "$MANIFEST"
+  SCRIPT="$installed/dump.sh"
+  unset MK_JOB_LIBRARY
+  run_manifest
+  [ "$status" -eq 0 ]
+  [ "$(generation_count somedb)" -eq 1 ]
+}
 
 @test "dumps each database to a timestamped file in its directory" {
   run_dump
@@ -140,6 +160,23 @@ generation_count() {
   [ -z "$(find "$DIRECTORY" -maxdepth 1 -name '.*partial')" ]
 }
 
+@test "a failed dump's notification carries pg_dump's own error, and its full output reaches the job log" {
+  fake_pg_dump 1 "pg_dump: error: fake connection refused"
+  run_dump
+  [ "$status" -ne 0 ]
+  grep -q "dump failed.*fake connection refused" "$NOTIFY_LOG"
+  [[ "$output" == *"fake connection refused"* ]]
+}
+
+@test "a failed dump's notification carries only the last lines of a long error" {
+  fake_pg_dump 1 "fake-line-1\\nfake-line-2\\nfake-line-3\\nfake-line-4\\nfake-line-5"
+  run_dump
+  [[ "$output" == *"fake-line-1"* ]]
+  grep -q "fake-line-5" "$NOTIFY_LOG"
+  run grep -q "fake-line-1" "$NOTIFY_LOG"
+  [ "$status" -ne 0 ]
+}
+
 @test "a failed dump never reaches the verify step" {
   fake_pg_dump 1
   run_dump
@@ -154,6 +191,13 @@ generation_count() {
   [ "$status" -ne 0 ]
   grep -q "unreadable" "$NOTIFY_LOG"
   [ "$(generation_count somedb)" -eq 0 ]
+}
+
+@test "an unreadable dump's notification carries pg_restore's own error" {
+  fake_pg_restore 1 "pg_restore: error: fake not a valid archive"
+  run_dump
+  [ "$status" -ne 0 ]
+  grep -q "unreadable.*fake not a valid archive" "$NOTIFY_LOG"
 }
 
 @test "an unreadable dump does not prune the good generations it would have replaced" {
@@ -247,4 +291,37 @@ EOF
   grep -q "dump failed" "$NOTIFY_LOG"
   [ "$(generation_count somedb)" -eq 1 ]
   [ "$(generation_count faildb)" -eq 0 ]
+}
+
+# --- failures no step reports ---
+
+@test "a run whose manifest can't be read alerts that the run failed unexpectedly" {
+  MANIFEST="$BATS_TEST_TMPDIR/missing-manifest.tsv"
+  run_manifest
+  [ "$status" -ne 0 ]
+  grep -q "postgres_dump: the dump run failed unexpectedly" "$NOTIFY_LOG"
+}
+
+@test "a dump that can't be moved into place alerts for that database alone" {
+  # pg_dump succeeds, then the directory turns read-only, so publishing fails.
+  cat > "$PG_DUMP" <<EOF
+#!/usr/bin/env bash
+while [ \$# -gt 0 ]; do
+  if [ "\$1" = "-f" ]; then printf 'dump-bytes\n' > "\$2"; chmod 555 "\$(dirname "\$2")"; fi
+  shift
+done
+EOF
+  chmod +x "$PG_DUMP"
+  run_dump
+  chmod 755 "$DIRECTORY"
+  [ "$status" -ne 0 ]
+  [ "$(wc -l < "$NOTIFY_LOG" | tr -d ' ')" = "1" ]
+  grep -q "postgres_dump: dump of 'somedb' failed unexpectedly" "$NOTIFY_LOG"
+}
+
+@test "a failed dump is alerted once, not again as an unexpected failure" {
+  fake_pg_dump 1 "pg_dump: error: fake connection refused"
+  run_dump
+  [ "$status" -ne 0 ]
+  [ "$(wc -l < "$NOTIFY_LOG" | tr -d ' ')" = "1" ]
 }

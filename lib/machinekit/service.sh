@@ -18,13 +18,31 @@
 # without a GUI session); Linux via a user timer plus loginctl linger. That is a
 # fixed per-OS decision, not a caller-visible scope.
 #
+# Each job is a bash script that sources service/job.sh from beside itself, and
+# service::install_script lays both down. The unit runs the script with the bash
+# running apply, which meets machinekit's version floor, rather than through the
+# script's shebang: launchd's minimal PATH would find macOS's /bin/bash 3.2, so a
+# job would run under an older bash than the one its tests run under.
+#
+# A job's output is kept, so a failure can be diagnosed from the tool's own error.
+# systemd already sends a unit's output to the journal. launchd discards it unless
+# the plist names a file, so each LaunchDaemon writes to its own log under
+# ~/Library/Logs/machinekit/, which newsyslog rotates by size.
+#
 # RUNTIME-UNVERIFIED: the launchd/systemd load commands encode the unit-loading
 # path from docs, not a live run. The unit generators, schedule/env renderers, and
 # cron translation are tested; loading is the VM seam.
 
+_SERVICE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Rotate a job's log once it passes this many KB, keeping this many compressed
+# copies.
+_SERVICE_LOG_ROTATE_KB=1024
+_SERVICE_LOG_KEEP_COUNT=5
+
 # --- public: schedule a service ---
 
-# Fire EXEC every SECONDS. EXEC is a single executable (shebang + executable bit);
+# Fire EXEC every SECONDS. EXEC is a bash script installed with install_script;
 # trailing KEY=VAL pairs become the service's environment.
 service::install_interval() {
   local label="$1" exec="$2" seconds="$3"
@@ -39,6 +57,34 @@ service::install_calendar() {
   shift 3
   service::validate_cron "$when"
   service::_on_os install "$label" "$exec" calendar "$when" "$@"
+}
+
+# --- public: install a job script ---
+
+# Copy the script at SOURCE to DEST as an executable, with the job library it
+# sources beside it.
+service::install_script() {
+  local source="$1" dest="$2"
+  mkdir -p "$(dirname "$dest")"
+  cp "$source" "$dest"
+  chmod 755 "$dest"
+  cp "${ service::_job_library_source; }" "${ service::job_library_path "$dest"; }"
+}
+
+# Where install_script puts the job library for the script at SCRIPT_PATH, so a
+# module can declare it as installed.
+service::job_library_path() {
+  printf '%s/%s\n' "$(dirname "$1")" "${ service::job_library_name; }"
+}
+
+service::job_library_name() {
+  printf '%s\n' job.sh
+}
+
+# The bash every job runs under. Public so a module running its job script
+# outside the scheduler, at apply time, uses the same one.
+service::job_bash() {
+  printf '%s\n' "$BASH"
 }
 
 # --- public: find and remove services ---
@@ -74,16 +120,30 @@ service::_on_os() {
 service::_install_darwin() {
   local label="$1" exec="$2" kind="$3" value="$4"
   shift 4
-  local launchd_label plist stanza env_dict user
+  local launchd_label plist stanza env_dict user log_path interpreter
   launchd_label=$(service::_launchd_label "$label")
   plist="${ service::_launchd_daemons_dir; }/$launchd_label.plist"
   stanza=${ service::_launchd_schedule_stanza "$kind" "$value"; }
   env_dict=$(service::_launchd_env_dict "$@")
   user=$(service::_run_as_user)
-  service::_plist_content "$launchd_label" "$exec" "$user" "$stanza" "$env_dict" \
+  log_path=$(service::_launchd_log_path "$label")
+  interpreter=$(service::job_bash)
+  service::_install_launchd_log "$launchd_label" "$log_path" "$user"
+  service::_plist_content "$launchd_label" "$interpreter" "$exec" "$user" "$stanza" "$env_dict" "$log_path" \
     | sudo tee "$plist" >/dev/null
   sudo launchctl bootout system "$plist" 2>/dev/null || true
   sudo launchctl bootstrap system "$plist"
+}
+
+# Create the log file as the run-as user before launchd opens it, so the user owns
+# it, and install the newsyslog rule that rotates it. An existing log is kept.
+service::_install_launchd_log() {
+  local launchd_label="$1" log_path="$2" user="$3" group
+  group=$(service::_user_group "$user")
+  mkdir -p "$(dirname "$log_path")"
+  touch "$log_path"
+  service::_newsyslog_conf_content "$log_path" "$user" "$group" \
+    | sudo tee "${ service::_newsyslog_dir; }/$launchd_label.conf" >/dev/null
 }
 
 # Headless server → a user systemd timer plus linger (the service survives logout
@@ -91,14 +151,15 @@ service::_install_darwin() {
 service::_install_linux() {
   local label="$1" exec="$2" kind="$3" value="$4"
   shift 4
-  local unit_name unit_dir description env_lines schedule_lines
+  local unit_name unit_dir description env_lines schedule_lines interpreter
   unit_name=$(service::_systemd_unit_name "$label")
   unit_dir=${ service::_systemd_user_unit_dir; }
   description="machinekit $label"
   mkdir -p "$unit_dir"
   env_lines=$(service::_systemd_env_lines "$@")
   schedule_lines=${ service::_systemd_schedule_lines "$kind" "$value"; }
-  service::_systemd_service_content "$description" "$exec" "$env_lines" \
+  interpreter=$(service::job_bash)
+  service::_systemd_service_content "$description" "$interpreter" "$exec" "$env_lines" \
     > "$unit_dir/$unit_name.service"
   service::_systemd_timer_content "$description" "$schedule_lines" \
     > "$unit_dir/$unit_name.timer"
@@ -108,12 +169,13 @@ service::_install_linux() {
 }
 
 # A daemon that was never loaded makes bootout fail, which is no reason to keep
-# its plist.
+# its plist. The job's log stays: it is the record of what the job did.
 service::_uninstall_darwin() {
-  local plist
-  plist="${ service::_launchd_daemons_dir; }/$(service::_launchd_label "$1").plist"
+  local launchd_label plist
+  launchd_label=$(service::_launchd_label "$1")
+  plist="${ service::_launchd_daemons_dir; }/$launchd_label.plist"
   sudo launchctl bootout system "$plist" 2>/dev/null || true
-  sudo rm -f -- "$plist"
+  sudo rm -f -- "$plist" "${ service::_newsyslog_dir; }/$launchd_label.conf"
 }
 
 # Disabling the timer stops future runs; stopping the service ends one already in
@@ -154,7 +216,7 @@ service::_installed_labels_linux() {
 # --- unit content generators (pure) ---
 
 service::_plist_content() {
-  local launchd_label="$1" exec="$2" user="$3" schedule_stanza="$4" env_dict="$5"
+  local launchd_label="$1" interpreter="$2" exec="$3" user="$4" schedule_stanza="$5" env_dict="$6" log_path="$7"
   cat <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -163,7 +225,9 @@ service::_plist_content() {
   <key>Label</key><string>$launchd_label</string>
   <key>UserName</key><string>$user</string>
   <key>ProgramArguments</key>
-  <array><string>$exec</string></array>
+  <array><string>$interpreter</string><string>$exec</string></array>
+  <key>StandardOutPath</key><string>$log_path</string>
+  <key>StandardErrorPath</key><string>$log_path</string>
   <key>EnvironmentVariables</key>
   <dict>
 $env_dict
@@ -174,8 +238,17 @@ $schedule_stanza
 EOF
 }
 
+# One newsyslog.conf line: file, owner:group, mode, copies kept, size in KB, no
+# time-based rotation, then flags. N because there is no daemon to signal (the job
+# reopens the file on each run); Z to gzip the rotated copies.
+service::_newsyslog_conf_content() {
+  local log_path="$1" user="$2" group="$3"
+  printf '%s %s:%s 644 %s %s * NZ\n' \
+    "$log_path" "$user" "$group" "$_SERVICE_LOG_KEEP_COUNT" "$_SERVICE_LOG_ROTATE_KB"
+}
+
 service::_systemd_service_content() {
-  local description="$1" exec="$2" env_lines="$3"
+  local description="$1" interpreter="$2" exec="$3" env_lines="$4"
   cat <<EOF
 [Unit]
 Description=$description
@@ -183,7 +256,7 @@ Description=$description
 [Service]
 Type=oneshot
 $env_lines
-ExecStart=$exec
+ExecStart=$interpreter $exec
 EOF
 }
 
@@ -414,6 +487,22 @@ service::_launchd_daemons_dir() {
 
 service::_systemd_user_unit_dir() {
   printf '%s\n' "$HOME/.config/systemd/user"
+}
+
+service::_job_library_source() {
+  printf '%s\n' "$_SERVICE_DIR/service/job.sh"
+}
+
+service::_newsyslog_dir() {
+  printf '%s\n' /etc/newsyslog.d
+}
+
+service::_launchd_log_path() {
+  printf '%s/Library/Logs/machinekit/%s.log\n' "$HOME" "$1"
+}
+
+service::_user_group() {
+  id -gn "$1"
 }
 
 # The user the macOS LaunchDaemon runs as: loaded into the system domain (starts

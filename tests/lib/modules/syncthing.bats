@@ -159,22 +159,24 @@ setup() {
 
 # --- installed_file_patterns ---
 
-@test "installed_file_patterns names the conflict manifest and scan script" {
+@test "installed_file_patterns names the conflict manifest, scan script and its job library" {
+  STUB_OUTPUT="fake-library.sh" mktest::stub_function service::job_library_name
   run syncthing::installed_file_patterns
   [ "$status" -eq 0 ]
-  [ "$output" = $'data\tconflict_manifest.txt\ndata\tconflict_scan.sh' ]
+  [ "$output" = $'data\tconflict_manifest.txt\ndata\tconflict_scan.sh\ndata\tfake-library.sh' ]
 }
 
 # --- installed_artifacts ---
 
-@test "installed_artifacts declares the conflict service, its manifest and scan script, and each folder in the daemon" {
+@test "installed_artifacts declares the conflict service, its manifest, scan script and job library, and each folder in the daemon" {
   STUB_OUTPUT='[{"id":"folder-one","path":"/fake/one"},{"id":"folder-two","path":"/fake/two"}]' \
     mktest::stub_function syncthing::_folders
   STUB_OUTPUT="/fake/conflict_manifest.txt" mktest::stub_function syncthing::_conflict_manifest_path
   STUB_OUTPUT="/fake/conflict_scan.sh" mktest::stub_function syncthing::_conflict_scan_script_path
+  STUB_OUTPUT="/fake/job.sh" mktest::stub_function service::job_library_path "/fake/conflict_scan.sh"
   run syncthing::installed_artifacts
   [ "$status" -eq 0 ]
-  [ "$output" = $'service\tsyncthing-conflicts\nfile\t/fake/conflict_manifest.txt\nfile\t/fake/conflict_scan.sh\nfolder\tfolder-one\nfolder\tfolder-two' ]
+  [ "$output" = $'service\tsyncthing-conflicts\nfile\t/fake/conflict_manifest.txt\nfile\t/fake/conflict_scan.sh\nfile\t/fake/job.sh\nfolder\tfolder-one\nfolder\tfolder-two' ]
 }
 
 @test "installed_artifacts declares nothing when no folders are configured" {
@@ -709,12 +711,11 @@ setup() {
 
 # --- _install_conflict_scan_script ---
 
-@test "_install_conflict_scan_script installs the real script as executable" {
-  local dest="$BATS_TEST_TMPDIR/out/conflict_scan.sh"
-  STUB_OUTPUT="$dest" mktest::stub_function syncthing::_conflict_scan_script_path
+@test "_install_conflict_scan_script installs the module's script at its installed path" {
+  STUB_OUTPUT="/fake/script.sh" mktest::stub_function syncthing::_conflict_scan_script_path
+  mktest::stub_function service::install_script "$_SYNCTHING_DIR/syncthing/conflict_scan.sh" "/fake/script.sh"
   syncthing::_install_conflict_scan_script
-  [ -x "$dest" ]
-  grep -q "sync-conflict" "$dest"
+  mktest::assert_stub_called service::install_script "$_SYNCTHING_DIR/syncthing/conflict_scan.sh" "/fake/script.sh"
 }
 
 # --- _install_conflict_service ---

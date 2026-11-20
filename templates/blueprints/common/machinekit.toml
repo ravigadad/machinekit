@@ -351,6 +351,13 @@
 # # folder replicating it, offsite_backup uploading it — never of this module.
 # # Requires the postgres capability; it drives that instance's own pg_dump.
 # #
+# # The dump connects as its own read-only role, machinekit_dump, with a password
+# # generated on first apply into ~/.config/machinekit/postgres_dump/pgpass
+# # (delete the file and re-apply to change it). machinekit adds one rule at the
+# # top of the server's pg_hba.conf requiring that password. Postgres.app asks for
+# # permission in a dialog whenever a new program logs in without a password, so a
+# # password login is what lets the dump run unattended there.
+# #
 # # Each dump is written to a hidden partial file and only published once it is
 # # complete AND verified (its table of contents reads back). A dump that will not
 # # read is discarded and notified, and retention does NOT run — dropping a good

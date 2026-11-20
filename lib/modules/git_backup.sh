@@ -73,6 +73,7 @@ git_backup::installed_file_patterns() {
   printf '%s\n' \
     $'data\tmanifest.tsv' \
     $'data\tpush.sh' \
+    $'data\t'"${ service::job_library_name; }" \
     $'config\tssh_keys/*'
 }
 
@@ -83,7 +84,8 @@ git_backup::installed_artifacts() {
   folders=${ git_backup::_folders; }
   [ -n "$folders" ] || return 0
   printf 'service\t%s\n' "$_GIT_BACKUP_SERVICE_LABEL"
-  printf 'file\t%s\n' "$(git_backup::_manifest_path)" "$(git_backup::_push_script_path)"
+  printf 'file\t%s\n' "$(git_backup::_manifest_path)" "$(git_backup::_push_script_path)" \
+    "${ service::job_library_path "$(git_backup::_push_script_path)"; }"
   key_names=${ git_backup::_referenced_key_names; }
   while IFS= read -u 3 -r name; do
     [ -n "$name" ] || continue
@@ -303,18 +305,12 @@ git_backup::_default_ignores() {
 }
 
 git_backup::_install_push_script() {
-  local dest
-  dest=$(git_backup::_push_script_path)
-  mkdir -p "$(dirname "$dest")"
-  cp "$_GIT_BACKUP_DIR/git_backup/push.sh" "$dest"
-  chmod 755 "$dest"
+  service::install_script "$_GIT_BACKUP_DIR/git_backup/push.sh" "$(git_backup::_push_script_path)"
 }
 
 # Schedule the one service that runs the push script for every folder, pinning the
-# manifest, notify command, and absolute git path into its environment. The push
-# script is a self-contained executable, so service::install_interval runs it
-# directly (its shebang picks the interpreter); the launchd/systemd split is
-# service.sh's job.
+# manifest, notify command, and absolute git path into its environment. The
+# launchd/systemd split, and the bash the script runs under, are service.sh's job.
 git_backup::_install_service() {
   local interval notify
   interval=${ git_backup::_interval; }

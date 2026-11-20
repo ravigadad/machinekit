@@ -106,24 +106,26 @@ setup() {
 
 # --- installed_file_patterns ---
 
-@test "installed_file_patterns names the manifest, the push script and every ssh key file" {
+@test "installed_file_patterns names the manifest, the push script, its job library and every ssh key file" {
+  STUB_OUTPUT="fake-library.sh" mktest::stub_function service::job_library_name
   run git_backup::installed_file_patterns
   [ "$status" -eq 0 ]
-  [ "$output" = $'data\tmanifest.tsv\ndata\tpush.sh\nconfig\tssh_keys/*' ]
+  [ "$output" = $'data\tmanifest.tsv\ndata\tpush.sh\ndata\tfake-library.sh\nconfig\tssh_keys/*' ]
 }
 
 # --- installed_artifacts ---
 
-@test "installed_artifacts declares the service, its manifest and push script, and each referenced key file" {
+@test "installed_artifacts declares the service, its manifest, push script and job library, and each referenced key file" {
   STUB_OUTPUT='[{"path":"/fake/folder"}]' mktest::stub_function git_backup::_folders
   STUB_OUTPUT="/fake/manifest.tsv" mktest::stub_function git_backup::_manifest_path
   STUB_OUTPUT="/fake/push.sh" mktest::stub_function git_backup::_push_script_path
+  STUB_OUTPUT="/fake/job.sh" mktest::stub_function service::job_library_path "/fake/push.sh"
   STUB_OUTPUT=$'deploy\nmirror' mktest::stub_function git_backup::_referenced_key_names
   STUB_OUTPUT="/fake/keys/deploy" mktest::stub_function git_backup::_key_path deploy
   STUB_OUTPUT="/fake/keys/mirror" mktest::stub_function git_backup::_key_path mirror
   run git_backup::installed_artifacts
   [ "$status" -eq 0 ]
-  [ "$output" = $'service\tgit-backup\nfile\t/fake/manifest.tsv\nfile\t/fake/push.sh\nfile\t/fake/keys/deploy\nfile\t/fake/keys/mirror' ]
+  [ "$output" = $'service\tgit-backup\nfile\t/fake/manifest.tsv\nfile\t/fake/push.sh\nfile\t/fake/job.sh\nfile\t/fake/keys/deploy\nfile\t/fake/keys/mirror' ]
 }
 
 @test "installed_artifacts declares nothing when no folders are configured" {
@@ -541,12 +543,11 @@ setup() {
 
 # --- _install_push_script ---
 
-@test "_install_push_script installs the real script as executable" {
-  local dest="$BATS_TEST_TMPDIR/install/push.sh"
-  STUB_OUTPUT="$dest" mktest::stub_function git_backup::_push_script_path
+@test "_install_push_script installs the module's push script at its installed path" {
+  STUB_OUTPUT="/fake/push.sh" mktest::stub_function git_backup::_push_script_path
+  mktest::stub_function service::install_script "$_GIT_BACKUP_DIR/git_backup/push.sh" "/fake/push.sh"
   git_backup::_install_push_script
-  [ -x "$dest" ]
-  grep -q "push-only-with-abort" "$dest"
+  mktest::assert_stub_called service::install_script "$_GIT_BACKUP_DIR/git_backup/push.sh" "/fake/push.sh"
 }
 
 # --- _install_service ---

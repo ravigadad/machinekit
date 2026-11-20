@@ -87,7 +87,8 @@ syncthing::install() {
 syncthing::installed_file_patterns() {
   printf '%s\n' \
     $'data\tconflict_manifest.txt' \
-    $'data\tconflict_scan.sh'
+    $'data\tconflict_scan.sh' \
+    $'data\t'"${ service::job_library_name; }"
 }
 
 # What install puts on this machine for the current config, so an apply can remove
@@ -98,7 +99,8 @@ syncthing::installed_artifacts() {
   folders=${ syncthing::_folders; }
   [ -n "$folders" ] || return 0
   printf 'service\t%s\n' "$_SYNCTHING_CONFLICT_SERVICE_LABEL"
-  printf 'file\t%s\n' "$(syncthing::_conflict_manifest_path)" "$(syncthing::_conflict_scan_script_path)"
+  printf 'file\t%s\n' "$(syncthing::_conflict_manifest_path)" "$(syncthing::_conflict_scan_script_path)" \
+    "${ service::job_library_path "$(syncthing::_conflict_scan_script_path)"; }"
   printf '%s' "$folders" | jq -r '.[] | "folder\t\(.id)"'
 }
 
@@ -402,18 +404,12 @@ syncthing::_write_conflict_manifest() {
 }
 
 syncthing::_install_conflict_scan_script() {
-  local dest
-  dest=$(syncthing::_conflict_scan_script_path)
-  mkdir -p "$(dirname "$dest")"
-  cp "$_SYNCTHING_DIR/syncthing/conflict_scan.sh" "$dest"
-  chmod 755 "$dest"
+  service::install_script "$_SYNCTHING_DIR/syncthing/conflict_scan.sh" "$(syncthing::_conflict_scan_script_path)"
 }
 
 # Schedule the service that runs the scan script for every folder, pinning the
-# manifest and notify command into its environment. The scan script is a
-# self-contained executable, so service::install_interval runs it directly
-# (its shebang picks the interpreter); the launchd/systemd split is service.sh's
-# job.
+# manifest and notify command into its environment. The launchd/systemd split,
+# and the bash the script runs under, are service.sh's job.
 syncthing::_install_conflict_service() {
   service::install_interval \
     "$_SYNCTHING_CONFLICT_SERVICE_LABEL" \

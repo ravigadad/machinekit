@@ -7,6 +7,9 @@ load "${BATS_TEST_DIRNAME}/../../../test_helper"
 
 setup() {
   SCRIPT="$MACHINEKIT_DIR/lib/modules/syncthing/conflict_scan.sh"
+  # In this checkout the job library is not beside the script, as it is once
+  # installed, so point the script at it.
+  export MK_JOB_LIBRARY="$MACHINEKIT_DIR/lib/machinekit/service/job.sh"
   MANIFEST="$BATS_TEST_TMPDIR/manifest.txt"
   NOTIFY_LOG="$BATS_TEST_TMPDIR/notify.log"
   # One line per invocation, so a message with embedded newlines (the conflict
@@ -94,4 +97,27 @@ run_scan() {
   run_scan
   [ "$status" -eq 0 ]
   [ "$(wc -l < "$CALL_COUNT")" -eq 2 ]
+}
+
+# --- the job library and failures no step reports ---
+
+@test "uses the job library installed beside it" {
+  local installed="$BATS_TEST_TMPDIR/installed" folder="$BATS_TEST_TMPDIR/f1"
+  mkdir -p "$installed" "$folder"
+  cp "$SCRIPT" "$installed/conflict_scan.sh"
+  cp "$MK_JOB_LIBRARY" "$installed/job.sh"
+  : > "$folder/notes.sync-conflict-20260101-000000-ABCDEFG.txt"
+  printf '%s\n' "$folder" > "$MANIFEST"
+  SCRIPT="$installed/conflict_scan.sh"
+  unset MK_JOB_LIBRARY
+  run_scan
+  [ "$status" -eq 0 ]
+  grep -q "sync-conflict" "$NOTIFY_LOG"
+}
+
+@test "a scan whose manifest can't be read alerts that the scan failed unexpectedly" {
+  MANIFEST="$BATS_TEST_TMPDIR/missing-manifest.txt"
+  run_scan
+  [ "$status" -ne 0 ]
+  grep -q "syncthing: the conflict scan failed unexpectedly" "$NOTIFY_LOG"
 }
